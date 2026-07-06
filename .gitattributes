@@ -1,0 +1,6 @@
+# Windows 배치/스크립트는 항상 CRLF로 체크아웃 (autocrlf 무관, cmd.exe 파싱 보장)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 기본 텍스트는 git 자동 처리
+* text=auto
