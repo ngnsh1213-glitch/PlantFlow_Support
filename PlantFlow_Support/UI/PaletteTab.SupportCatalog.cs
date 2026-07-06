@@ -148,6 +148,15 @@ namespace PlantFlow_Support
                 lblCatStatus.Text = $"Loaded {variants.Count} variants for {template}";
                 lblCatStatus.ForeColor = Color.Black;
                 tbCatDescOverride.Text = "";
+
+                // 첫 variant 자동선택 → dgvCatVariants_SelectionChanged가 텍스트박스를 유효 파라미터로 프리필.
+                // (미선택 시 빈 파라미터가 Preview로 전달돼 서포트 생성이 기본 폴백 형상이 되는 문제 방지.)
+                if (dgvCatVariants.Rows.Count > 0)
+                {
+                    dgvCatVariants.ClearSelection();
+                    dgvCatVariants.Rows[0].Selected = true;
+                    dgvCatVariants_SelectionChanged(null, EventArgs.Empty);
+                }
             }
             catch (Exception ex)
             {

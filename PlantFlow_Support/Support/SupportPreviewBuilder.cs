@@ -161,7 +161,8 @@ namespace PlantFlow_Support
             {
                 foreach (KeyValuePair<string, string> pair in parameters)
                 {
-                    if (!string.IsNullOrWhiteSpace(pair.Key))
+                    // 빈/공백 값은 스킵 — 텍스트박스 미프리필 시 빈값이 유효 기본값을 덮어 서포트 생성이 폴백 형상이 되는 것 방지.
+                    if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
                     {
                         merged[pair.Key.Trim()] = pair.Value;
                     }
