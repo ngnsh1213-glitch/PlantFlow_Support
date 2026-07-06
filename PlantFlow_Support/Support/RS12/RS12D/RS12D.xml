@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="RS12D" LDesId="RS12D_L" SDesId="RS12D" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="RS12D.Dn" SDesId="RS12D.Dn" Type="LENGTH" Ask4Dist="false" Value="50" pg="MainDimensions" />
+			<Param Name="BI" LDesId="RS12D.BI" SDesId="RS12D.BI" Type="LENGTH" Ask4Dist="false" Value="110" pg="MainDimensions" />
+			<Param Name="F2" LDesId="RS12D.F2" SDesId="RS12D.F2" Type="LENGTH" Ask4Dist="false" Value="500.0" pg="MainDimensions" />
+			<Param Name="A" LDesId="RS12D.A" SDesId="RS12D.A" Type="LENGTH" Ask4Dist="false" Value="300.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="RS12D.P1" SDesId="RS12D.P1" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="RS12D.TY" SDesId="RS12D.TY" Type="LENGTH" Ask4Dist="false" Value="-4" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

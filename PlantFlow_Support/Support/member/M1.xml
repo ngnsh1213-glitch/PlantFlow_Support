@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="M1" LDesId="M1_L" SDesId="M1" ConnPortNum="1" LengthUnit="mm" >
+		<Params>
+			<Param Name="BI" LDesId="M1.BI" SDesId="M1.BI" Type="LENGTH" Ask4Dist="false" Value="310" pg="MainDimensions" />
+			<Param Name="LE" LDesId="M1.LE" SDesId="M1.LE" Type="LENGTH" Ask4Dist="true" Value="500.0" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="UB2" LDesId="UB2_L" SDesId="UB2" ConnPortNum="1" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="UB2.Dn" SDesId="UB2.Dn" Type="LENGTH" Ask4Dist="false" Value="50" pg="MainDimensions" />
+			<Param Name="C" LDesId="UB2.C" SDesId="UB2.C" Type="LENGTH" Ask4Dist="false" Value="76.0" pg="MainDimensions" />
+			<Param Name="L" LDesId="UB2.L" SDesId="UB2.L" Type="LENGTH" Ask4Dist="false" Value="70.0" pg="MainDimensions" />
+			<Param Name="S" LDesId="UB2.S" SDesId="UB2.S" Type="LENGTH" Ask4Dist="false" Value="65.0" pg="MainDimensions" />
+			<Param Name="R" LDesId="UB2.R" SDesId="UB2.R" Type="LENGTH" Ask4Dist="false" Value="31.7" pg="MainDimensions" />
+			<Param Name="B" LDesId="UB2.B" SDesId="UB2.B" Type="LENGTH" Ask4Dist="false" Value="120.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="UB2.TY" SDesId="UB2.TY" Type="LENGTH" Ask4Dist="false" Value="-2" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

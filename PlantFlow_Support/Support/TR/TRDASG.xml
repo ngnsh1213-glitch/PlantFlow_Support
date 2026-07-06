@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="TRDASG" LDesId="TRDASG_L" SDesId="TRDASG" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="TRDASG.Dn" SDesId="TRDASG.Dn" Type="LENGTH" Ask4Dist="false" Value="150" pg="MainDimensions" />
+			<Param Name="A" LDesId="TRDASG.A" SDesId="TRDASG.A" Type="LENGTH" Ask4Dist="false" Value="800.0" pg="MainDimensions" />
+			<Param Name="A1" LDesId="TRDASG.A1" SDesId="TRDASG.A1" Type="LENGTH" Ask4Dist="false" Value="300.0" pg="MainDimensions" />
+			<Param Name="A2" LDesId="TRDASG.A2" SDesId="TRDASG.A2" Type="LENGTH" Ask4Dist="false" Value="800.0" pg="MainDimensions" />
+			<Param Name="A3" LDesId="TRDASG.A3" SDesId="TRDASG.A3" Type="LENGTH" Ask4Dist="false" Value="300.0" pg="MainDimensions" />
+			<Param Name="G1" LDesId="TRDASG.G1" SDesId="TRDASG.G1" Type="LENGTH" Ask4Dist="false" Value="120.0" pg="MainDimensions" />
+			<Param Name="G2" LDesId="TRDASG.G2" SDesId="TRDASG.G2" Type="LENGTH" Ask4Dist="false" Value="150.0" pg="MainDimensions" />
+			<Param Name="S1" LDesId="TRDASG.S1" SDesId="TRDASG.S1" Type="LENGTH" Ask4Dist="false" Value="130.0" pg="MainDimensions" />
+			<Param Name="S2" LDesId="TRDASG.S2" SDesId="TRDASG.S2" Type="LENGTH" Ask4Dist="false" Value="170.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="TRDASG.P1" SDesId="TRDASG.P1" Type="LENGTH" Ask4Dist="false" Value="10.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="TRDASG.TY" SDesId="TRDASG.TY" Type="LENGTH" Ask4Dist="false" Value="-6" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

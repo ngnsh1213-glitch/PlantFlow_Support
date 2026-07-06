@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="MEMBER" LDesId="MEMBER_L" SDesId="MEMBER" ConnPortNum="1" LengthUnit="mm" >
+		<Params>
+			<Param Name="BI" LDesId="MEMBER.BI" SDesId="MEMBER.BI" Type="LENGTH" Ask4Dist="false" Value="315" pg="MainDimensions" />
+			<Param Name="LE" LDesId="MEMBER.LE" SDesId="MEMBER.LE" Type="LENGTH" Ask4Dist="true" Value="500.0" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

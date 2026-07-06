@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="TRPT" LDesId="TRPT_L" SDesId="TRPT" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="TRPT.Dn" SDesId="TRPT.Dn" Type="LENGTH" Ask4Dist="false" Value="150" pg="MainDimensions" />
+			<Param Name="A" LDesId="TRPT.A" SDesId="TRPT.A" Type="LENGTH" Ask4Dist="false" Value="800.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="TRPT.TY" SDesId="TRPT.TY" Type="LENGTH" Ask4Dist="false" Value="-1" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

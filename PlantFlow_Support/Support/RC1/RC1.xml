@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="RC1" LDesId="RC1_L" SDesId="RC1" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="RC1.Dn" SDesId="RC1.Dn" Type="LENGTH" Ask4Dist="false" Value="100" pg="MainDimensions" />
+			<Param Name="BI" LDesId="RC1.BI" SDesId="RC1.BI" Type="LENGTH" Ask4Dist="false" Value="15" pg="MainDimensions" />
+			<Param Name="A" LDesId="RC1.A" SDesId="RC1.A" Type="LENGTH" Ask4Dist="false" Value="350.0" pg="MainDimensions" />
+			<Param Name="A1" LDesId="RC1.A1" SDesId="RC1.A1" Type="LENGTH" Ask4Dist="false" Value="100.0" pg="MainDimensions" />
+			<Param Name="F2" LDesId="RC1.F2" SDesId="RC1.F2" Type="LENGTH" Ask4Dist="false" Value="500.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="RC1.P1" SDesId="RC1.P1" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+			<Param Name="B1" LDesId="RC1.B1" SDesId="RC1.B1" Type="LENGTH" Ask4Dist="false" Value="0" pg="MainDimensions" />
+			<Param Name="B2" LDesId="RC1.B2" SDesId="RC1.B2" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="RC1.TY" SDesId="RC1.TY" Type="LENGTH" Ask4Dist="false" Value="-1" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

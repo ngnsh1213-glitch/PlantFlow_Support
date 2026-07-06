@@ -1,0 +1,16 @@
+global using System;
+global using PlantFlow_Support;
+global using System.Collections;
+global using System.Collections.Generic;
+global using System.Linq;
+global using System.Text;
+global using Autodesk.AutoCAD.Runtime;
+global using Autodesk.AutoCAD.DatabaseServices;
+global using Autodesk.AutoCAD.Geometry;
+global using Autodesk.AutoCAD.EditorInput;
+global using Exception = System.Exception;
+global using Application = Autodesk.AutoCAD.ApplicationServices.Application;
+global using Viewport = Autodesk.AutoCAD.DatabaseServices.Viewport;
+global using System.Data;
+global using Image = System.Drawing.Image;
+global using Font = System.Drawing.Font;

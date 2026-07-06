@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="TRASG" LDesId="TRASG_L" SDesId="TRASG" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="TRASG.Dn" SDesId="TRASG.Dn" Type="LENGTH" Ask4Dist="false" Value="150" pg="MainDimensions" />
+			<Param Name="A" LDesId="TRASG.A" SDesId="TRASG.A" Type="LENGTH" Ask4Dist="false" Value="800.0" pg="MainDimensions" />
+			<Param Name="A1" LDesId="TRASG.A1" SDesId="TRASG.A1" Type="LENGTH" Ask4Dist="false" Value="300.0" pg="MainDimensions" />
+			<Param Name="G1" LDesId="TRASG.G1" SDesId="TRASG.G1" Type="LENGTH" Ask4Dist="false" Value="120.0" pg="MainDimensions" />
+			<Param Name="G2" LDesId="TRASG.G2" SDesId="TRASG.G2" Type="LENGTH" Ask4Dist="false" Value="150.0" pg="MainDimensions" />
+			<Param Name="S1" LDesId="TRASG.S1" SDesId="TRASG.S1" Type="LENGTH" Ask4Dist="false" Value="130.0" pg="MainDimensions" />
+			<Param Name="S2" LDesId="TRASG.S2" SDesId="TRASG.S2" Type="LENGTH" Ask4Dist="false" Value="170.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="TRASG.P1" SDesId="TRASG.P1" Type="LENGTH" Ask4Dist="false" Value="10.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="TRASG.TY" SDesId="TRASG.TY" Type="LENGTH" Ask4Dist="false" Value="-3" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

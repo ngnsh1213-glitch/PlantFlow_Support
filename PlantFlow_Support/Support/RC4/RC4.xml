@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="RC4" LDesId="RC4_L" SDesId="RC4" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="RC4.Dn" SDesId="RC4.Dn" Type="LENGTH" Ask4Dist="false" Value="100" pg="MainDimensions" />
+			<Param Name="BI" LDesId="RC4.BI" SDesId="RC4.BI" Type="LENGTH" Ask4Dist="false" Value="110" pg="MainDimensions" />
+			<Param Name="A" LDesId="RC4.A" SDesId="RC4.A" Type="LENGTH" Ask4Dist="false" Value="250.0" pg="MainDimensions" />
+			<Param Name="A1" LDesId="RC4.A1" SDesId="RC4.A1" Type="LENGTH" Ask4Dist="false" Value="250.0" pg="MainDimensions" />
+			<Param Name="F2" LDesId="RC4.F2" SDesId="RC4.F2" Type="LENGTH" Ask4Dist="false" Value="600.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="RC4.P1" SDesId="RC4.P1" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="RC4.TY" SDesId="RC4.TY" Type="LENGTH" Ask4Dist="false" Value="-1" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

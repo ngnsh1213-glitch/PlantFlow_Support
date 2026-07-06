@@ -1,0 +1,27 @@
+# === 빌드 산출물 ===
+bin/
+obj/
+.vs/
+*.user
+*.suo
+build_error.log
+dcf_analysis.txt
+
+# === 프론트엔드 ===
+node_modules/
+frontend_support/dist/
+
+# === 수동 백업 (PFO .bak 난립 교훈) ===
+*.bak
+*.bak_*
+*.bak.*
+*_Backup_*/
+PlantFlow_Support_Backup_Stable/
+
+# === 대용량 Autodesk Content 파생 (68MB, IP·비대화 회피) ===
+*.dcf
+
+# === 임시/진단 ===
+primitiv_probe.txt
+*.tmp
+*~

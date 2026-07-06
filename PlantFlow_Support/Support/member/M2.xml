@@ -1,0 +1,57 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="M2" LDesId="M2_L" SDesId="M2" ConnPortNum="1" LengthUnit="mm" >
+		<Params>
+			<Param Name="BI" LDesId="M2.BI" SDesId="M2.BI" Type="LENGTH" Ask4Dist="false" Value="310" pg="MainDimensions" />
+			<Param Name="LE" LDesId="M2.LE" SDesId="M2.LE" Type="LENGTH" Ask4Dist="true" Value="500.0" pg="MainDimensions" />
+			<Param Name="Fa1" LDesId="M2.Fa1" SDesId="M2.Fa1" Type="LENGTH" Ask4Dist="false" Value="100.0" pg="MainDimensions" />
+			<Param Name="Fa2" LDesId="M2.Fa2" SDesId="M2.Fa2" Type="LENGTH" Ask4Dist="false" Value="100.0" pg="MainDimensions" />
+			<Param Name="TL1" LDesId="M2.TL1" SDesId="M2.TL1" Type="LENGTH" Ask4Dist="false" Value="10.0" pg="MainDimensions" />
+			<Param Name="TL2" LDesId="M2.TL2" SDesId="M2.TL2" Type="LENGTH" Ask4Dist="false" Value="10.0" pg="MainDimensions" />
+			<Param Name="TC1" LDesId="M2.TC1" SDesId="M2.TC1" Type="LENGTH" Ask4Dist="false" Value="5.0" pg="MainDimensions" />
+			<Param Name="TC2" LDesId="M2.TC2" SDesId="M2.TC2" Type="LENGTH" Ask4Dist="false" Value="7.5" pg="MainDimensions" />
+			<Param Name="WH" LDesId="M2.WH" SDesId="M2.WH" Type="LENGTH" Ask4Dist="false" Value="6.0" pg="MainDimensions" />
+			<Param Name="TH" LDesId="M2.TH" SDesId="M2.TH" Type="LENGTH" Ask4Dist="false" Value="8.0" pg="MainDimensions" />
+			<Param Name="WF" LDesId="M2.WF" SDesId="M2.WF" Type="LENGTH" Ask4Dist="false" Value="100.0" pg="MainDimensions" />
+			<Param Name="TF" LDesId="M2.TF" SDesId="M2.TF" Type="LENGTH" Ask4Dist="false" Value="9.0" pg="MainDimensions" />
+		</Params>
+	</Script>
+	<Script Name="CUSTOM_LSHAPE" LDesId="CUSTOM_LSHAPE_L" SDesId="CUSTOM_LSHAPE" >
+		<Params>
+			<Param Name="LE" LDesId="CUSTOM_LSHAPE.LE" SDesId="CUSTOM_LSHAPE.LE" Type="LENGTH0" Ask4Dist="false" Value="500.0" />
+			<Param Name="Fa1" LDesId="CUSTOM_LSHAPE.Fa1" SDesId="CUSTOM_LSHAPE.Fa1" Type="LENGTH0" Ask4Dist="false" Value="100.0" />
+			<Param Name="Fa2" LDesId="CUSTOM_LSHAPE.Fa2" SDesId="CUSTOM_LSHAPE.Fa2" Type="LENGTH0" Ask4Dist="false" Value="100.0" />
+			<Param Name="TL1" LDesId="CUSTOM_LSHAPE.TL1" SDesId="CUSTOM_LSHAPE.TL1" Type="LENGTH0" Ask4Dist="false" Value="6.0" />
+			<Param Name="TL2" LDesId="CUSTOM_LSHAPE.TL2" SDesId="CUSTOM_LSHAPE.TL2" Type="LENGTH0" Ask4Dist="false" Value="6.0" />
+			<Param Name="ID" LDesId="CUSTOM_LSHAPE.ID" SDesId="CUSTOM_LSHAPE.ID" Type="STRING" Ask4Dist="false" Value="CUSTOM_LSHAPE" />
+		</Params>
+	</Script>
+	<Script Name="CUSTOM_CSHAPE" LDesId="CUSTOM_CSHAPE_L" SDesId="CUSTOM_CSHAPE" >
+		<Params>
+			<Param Name="LE" LDesId="CUSTOM_CSHAPE.LE" SDesId="CUSTOM_CSHAPE.LE" Type="LENGTH0" Ask4Dist="false" Value="500.0" />
+			<Param Name="Fa1" LDesId="CUSTOM_CSHAPE.Fa1" SDesId="CUSTOM_CSHAPE.Fa1" Type="LENGTH0" Ask4Dist="false" Value="100.0" />
+			<Param Name="Fa2" LDesId="CUSTOM_CSHAPE.Fa2" SDesId="CUSTOM_CSHAPE.Fa2" Type="LENGTH0" Ask4Dist="false" Value="100.0" />
+			<Param Name="TC1" LDesId="CUSTOM_CSHAPE.TC1" SDesId="CUSTOM_CSHAPE.TC1" Type="LENGTH0" Ask4Dist="false" Value="5.0" />
+			<Param Name="TC2" LDesId="CUSTOM_CSHAPE.TC2" SDesId="CUSTOM_CSHAPE.TC2" Type="LENGTH0" Ask4Dist="false" Value="7.5" />
+			<Param Name="ID" LDesId="CUSTOM_CSHAPE.ID" SDesId="CUSTOM_CSHAPE.ID" Type="STRING" Ask4Dist="false" Value="CUSTOM_CSHAPE" />
+		</Params>
+	</Script>
+	<Script Name="CUSTOM_HSHAPE" LDesId="CUSTOM_HSHAPE_L" SDesId="CUSTOM_HSHAPE" >
+		<Params>
+			<Param Name="LE" LDesId="CUSTOM_HSHAPE.LE" SDesId="CUSTOM_HSHAPE.LE" Type="LENGTH0" Ask4Dist="false" Value="500.0" />
+			<Param Name="Fa1" LDesId="CUSTOM_HSHAPE.Fa1" SDesId="CUSTOM_HSHAPE.Fa1" Type="LENGTH0" Ask4Dist="false" Value="100.0" />
+			<Param Name="Fa2" LDesId="CUSTOM_HSHAPE.Fa2" SDesId="CUSTOM_HSHAPE.Fa2" Type="LENGTH0" Ask4Dist="false" Value="100.0" />
+			<Param Name="WH" LDesId="CUSTOM_HSHAPE.WH" SDesId="CUSTOM_HSHAPE.WH" Type="LENGTH0" Ask4Dist="false" Value="6.0" />
+			<Param Name="TH" LDesId="CUSTOM_HSHAPE.TH" SDesId="CUSTOM_HSHAPE.TH" Type="LENGTH0" Ask4Dist="false" Value="8.0" />
+			<Param Name="ID" LDesId="CUSTOM_HSHAPE.ID" SDesId="CUSTOM_HSHAPE.ID" Type="STRING" Ask4Dist="false" Value="CUSTOM_HSHAPE" />
+		</Params>
+	</Script>
+	<Script Name="CUSTOM_FSHAPE" LDesId="CUSTOM_FSHAPE_L" SDesId="CUSTOM_FSHAPE" >
+		<Params>
+			<Param Name="LE" LDesId="CUSTOM_FSHAPE.LE" SDesId="CUSTOM_FSHAPE.LE" Type="LENGTH0" Ask4Dist="false" Value="500.0" />
+			<Param Name="WF" LDesId="CUSTOM_FSHAPE.WF" SDesId="CUSTOM_FSHAPE.WF" Type="LENGTH0" Ask4Dist="false" Value="100.0" />
+			<Param Name="TF" LDesId="CUSTOM_FSHAPE.TF" SDesId="CUSTOM_FSHAPE.TF" Type="LENGTH0" Ask4Dist="false" Value="9.0" />
+			<Param Name="ID" LDesId="CUSTOM_FSHAPE.ID" SDesId="CUSTOM_FSHAPE.ID" Type="STRING" Ask4Dist="false" Value="CUSTOM_FSHAPE" />
+		</Params>
+	</Script>
+</ArrayOfScript>

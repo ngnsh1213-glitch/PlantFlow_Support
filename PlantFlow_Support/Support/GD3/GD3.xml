@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="GD3" LDesId="GD3_L" SDesId="GD3" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="GD3.Dn" SDesId="GD3.Dn" Type="LENGTH" Ask4Dist="false" Value="150" pg="MainDimensions" />
+			<Param Name="BI" LDesId="GD3.BI" SDesId="GD3.BI" Type="LENGTH" Ask4Dist="false" Value="212" pg="MainDimensions" />
+			<Param Name="F1" LDesId="GD3.F1" SDesId="GD3.F1" Type="LENGTH" Ask4Dist="false" Value="500.0" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

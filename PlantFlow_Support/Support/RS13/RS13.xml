@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="RS13" LDesId="RS13_L" SDesId="RS13" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="RS13.Dn" SDesId="RS13.Dn" Type="LENGTH" Ask4Dist="false" Value="100" pg="MainDimensions" />
+			<Param Name="BI" LDesId="RS13.BI" SDesId="RS13.BI" Type="LENGTH" Ask4Dist="false" Value="110" pg="MainDimensions" />
+			<Param Name="A" LDesId="RS13.A" SDesId="RS13.A" Type="LENGTH" Ask4Dist="false" Value="250.0" pg="MainDimensions" />
+			<Param Name="A1" LDesId="RS13.A1" SDesId="RS13.A1" Type="LENGTH" Ask4Dist="false" Value="250.0" pg="MainDimensions" />
+			<Param Name="F2" LDesId="RS13.F2" SDesId="RS13.F2" Type="LENGTH" Ask4Dist="false" Value="500.0" pg="MainDimensions" />
+			<Param Name="F3" LDesId="RS13.F3" SDesId="RS13.F3" Type="LENGTH" Ask4Dist="false" Value="500.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="RS13.P1" SDesId="RS13.P1" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="GD2" LDesId="GD2_L" SDesId="GD2" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="GD2.Dn" SDesId="GD2.Dn" Type="LENGTH" Ask4Dist="false" Value="100" pg="MainDimensions" />
+			<Param Name="F1" LDesId="GD2.F1" SDesId="GD2.F1" Type="LENGTH" Ask4Dist="false" Value="800.0" pg="MainDimensions" />
+			<Param Name="B" LDesId="GD2.B" SDesId="GD2.B" Type="LENGTH" Ask4Dist="false" Value="300.0" pg="MainDimensions" />
+			<Param Name="D" LDesId="GD2.D" SDesId="GD2.D" Type="LENGTH" Ask4Dist="false" Value="300.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="GD2.P1" SDesId="GD2.P1" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="GD2.TY" SDesId="GD2.TY" Type="LENGTH" Ask4Dist="false" Value="-2" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

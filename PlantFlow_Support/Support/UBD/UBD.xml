@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="UBD" LDesId="UBD_L" SDesId="UBD" ConnPortNum="1" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="UBD.Dn" SDesId="UBD.Dn" Type="LENGTH" Ask4Dist="false" Value="50" pg="MainDimensions" />
+			<Param Name="C" LDesId="UBD.C" SDesId="UBD.C" Type="LENGTH" Ask4Dist="false" Value="650.0" pg="MainDimensions" />
+			<Param Name="L" LDesId="UBD.L" SDesId="UBD.L" Type="LENGTH" Ask4Dist="false" Value="500.0" pg="MainDimensions" />
+			<Param Name="S" LDesId="UBD.S" SDesId="UBD.S" Type="LENGTH" Ask4Dist="false" Value="190.0" pg="MainDimensions" />
+			<Param Name="R" LDesId="UBD.R" SDesId="UBD.R" Type="LENGTH" Ask4Dist="false" Value="308.8" pg="MainDimensions" />
+			<Param Name="B" LDesId="UBD.B" SDesId="UBD.B" Type="LENGTH" Ask4Dist="false" Value="120.0" pg="MainDimensions" />
+			<Param Name="SN" LDesId="UBD.SN" SDesId="UBD.SN" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="UBD.TY" SDesId="UBD.TY" Type="LENGTH" Ask4Dist="false" Value="0" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

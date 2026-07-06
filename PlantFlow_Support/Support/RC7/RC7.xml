@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="RC7" LDesId="RC7_L" SDesId="RC7" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="RC7.Dn" SDesId="RC7.Dn" Type="LENGTH" Ask4Dist="false" Value="25" pg="MainDimensions" />
+			<Param Name="BI" LDesId="RC7.BI" SDesId="RC7.BI" Type="LENGTH" Ask4Dist="false" Value="210" pg="MainDimensions" />
+			<Param Name="A" LDesId="RC7.A" SDesId="RC7.A" Type="LENGTH" Ask4Dist="false" Value="800.0" pg="MainDimensions" />
+			<Param Name="A1" LDesId="RC7.A1" SDesId="RC7.A1" Type="LENGTH" Ask4Dist="false" Value="150.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="RC7.P1" SDesId="RC7.P1" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

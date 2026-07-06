@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="RS2" LDesId="RS2_L" SDesId="RS2" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="RS2.Dn" SDesId="RS2.Dn" Type="LENGTH" Ask4Dist="false" Value="25" pg="MainDimensions" />
+			<Param Name="BI" LDesId="RS2.BI" SDesId="RS2.BI" Type="LENGTH" Ask4Dist="false" Value="210" pg="MainDimensions" />
+			<Param Name="A" LDesId="RS2.A" SDesId="RS2.A" Type="LENGTH" Ask4Dist="false" Value="800.0" pg="MainDimensions" />
+			<Param Name="F2" LDesId="RS2.F2" SDesId="RS2.F2" Type="LENGTH" Ask4Dist="false" Value="900.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="RS2.P1" SDesId="RS2.P1" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="RS2.TY" SDesId="RS2.TY" Type="LENGTH" Ask4Dist="false" Value="-2" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

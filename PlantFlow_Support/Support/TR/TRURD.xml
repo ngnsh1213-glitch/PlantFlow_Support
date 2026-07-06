@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="TRURD" LDesId="TRURD_L" SDesId="TRURD" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="TRURD.Dn" SDesId="TRURD.Dn" Type="LENGTH" Ask4Dist="false" Value="150" pg="MainDimensions" />
+			<Param Name="A" LDesId="TRURD.A" SDesId="TRURD.A" Type="LENGTH" Ask4Dist="false" Value="800.0" pg="MainDimensions" />
+			<Param Name="A1" LDesId="TRURD.A1" SDesId="TRURD.A1" Type="LENGTH" Ask4Dist="false" Value="300.0" pg="MainDimensions" />
+			<Param Name="A2" LDesId="TRURD.A2" SDesId="TRURD.A2" Type="LENGTH" Ask4Dist="false" Value="800.0" pg="MainDimensions" />
+			<Param Name="A3" LDesId="TRURD.A3" SDesId="TRURD.A3" Type="LENGTH" Ask4Dist="false" Value="300.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="TRURD.P1" SDesId="TRURD.P1" Type="LENGTH" Ask4Dist="false" Value="10.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="TRURD.TY" SDesId="TRURD.TY" Type="LENGTH" Ask4Dist="false" Value="-9" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

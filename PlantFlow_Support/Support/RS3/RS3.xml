@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="RS3" LDesId="RS3_L" SDesId="RS3" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="RS3.Dn" SDesId="RS3.Dn" Type="LENGTH" Ask4Dist="false" Value="100" pg="MainDimensions" />
+			<Param Name="BI" LDesId="RS3.BI" SDesId="RS3.BI" Type="LENGTH" Ask4Dist="false" Value="210" pg="MainDimensions" />
+			<Param Name="A" LDesId="RS3.A" SDesId="RS3.A" Type="LENGTH" Ask4Dist="false" Value="600.0" pg="MainDimensions" />
+			<Param Name="A1" LDesId="RS3.A1" SDesId="RS3.A1" Type="LENGTH" Ask4Dist="false" Value="200.0" pg="MainDimensions" />
+			<Param Name="F2" LDesId="RS3.F2" SDesId="RS3.F2" Type="LENGTH" Ask4Dist="false" Value="500.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="RS3.P1" SDesId="RS3.P1" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="RS3.TY" SDesId="RS3.TY" Type="LENGTH" Ask4Dist="false" Value="-2" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

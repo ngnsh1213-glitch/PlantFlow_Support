@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="UB1" LDesId="UB1_L" SDesId="UB1" ConnPortNum="1" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="UB1.Dn" SDesId="UB1.Dn" Type="LENGTH" Ask4Dist="false" Value="50" pg="MainDimensions" />
+			<Param Name="C" LDesId="UB1.C" SDesId="UB1.C" Type="LENGTH" Ask4Dist="false" Value="76.0" pg="MainDimensions" />
+			<Param Name="L" LDesId="UB1.L" SDesId="UB1.L" Type="LENGTH" Ask4Dist="false" Value="70.0" pg="MainDimensions" />
+			<Param Name="S" LDesId="UB1.S" SDesId="UB1.S" Type="LENGTH" Ask4Dist="false" Value="65.0" pg="MainDimensions" />
+			<Param Name="R" LDesId="UB1.R" SDesId="UB1.R" Type="LENGTH" Ask4Dist="false" Value="31.7" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

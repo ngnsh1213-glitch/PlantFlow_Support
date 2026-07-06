@@ -1,0 +1,134 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <OutputType>Library</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+    
+    <!-- Assembly Information -->
+    <Description>PlantFlow Support Plugin for AutoCAD Plant 3D</Description>
+    <Product>PlantFlow Support</Product>
+    <Copyright>Copyright © 2026 PlantFlow</Copyright>
+    <Company>PlantFlow</Company>
+    <Authors>PlantFlow</Authors>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="TestProject\**" />
+    <Compile Remove="Microsoft\**" />
+    <Compile Remove="PlantFlow_Support\obj\**" />
+    <Compile Remove="PlantFlow_Support\bin\**" />
+    <Compile Remove="PlantFlow_Support_Backup_Stable\**" />
+    <EmbeddedResource Remove="PlantFlow_Support_Backup_Stable\**" />
+    <None Remove="PlantFlow_Support_Backup_Stable\**" />
+    <!-- Explicitly Include Resources with LogicalName to avoid MSB3577 -->
+    <EmbeddedResource Include="PlantFlow_Support\UI\formDBSetting.resx">
+      <LogicalName>PlantFlow_Support.formDBSetting.resources</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="PlantFlow_Support\UI\formExistedStdType.resx">
+      <LogicalName>PlantFlow_Support.formExistedStdType.resources</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="PlantFlow_Support\UI\PaletteTab.resx">
+      <LogicalName>PlantFlow_Support.PaletteTab.resources</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="PlantFlow_Support\Properties\Resources.resx">
+      <LogicalName>PlantFlow_Support.Properties.Resources.resources</LogicalName>
+    </EmbeddedResource>
+    <!-- AutoCAD 2026 References -->
+    <Reference Include="AcMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\acmgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="AcDbMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\acdbmgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="AcCoreMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\accoremgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="AdWindows"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\AdWindows.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="AcWindows"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\AcWindows.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="AdUiPalettes"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\AdUiPalettes.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dObjectsMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dObjectsMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dProjectPartsMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dProjectPartsMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPProjectManagerMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPProjectManagerMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPDataLinks"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PnPDataLinks.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dDataLinkManager"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PnP3dDataLinkManager.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dOrthoUtilMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dOrthoUtilMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnIDMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnIDMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dMain"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dMain.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dContentMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dContentMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dDataManager"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dDataManager.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Microsoft.Office.Interop.Excel">
+      <HintPath>Microsoft.Office.Interop.Excel.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="PnPDataObjects"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PnPDataObjects.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dCommonUIMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dCommonUIMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dOrthoDrawingsUI"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dOrthoDrawingsUI.dll</HintPath><Private>False</Private></Reference>
+
+    <Reference Include="PnPCommonUIMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPCommonUIMgd.dll</HintPath><Private>False</Private></Reference>
+
+    <Reference Include="PnIDGuiUtilMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnIDGuiUtilMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dACPUtils"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dACPUtils.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dPipeUI"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dPipeUI.dll</HintPath><Private>False</Private></Reference>
+
+    <Reference Include="Autodesk.AutoCAD.Interop.Common"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\Autodesk.AutoCAD.Interop.Common.dll</HintPath><EmbedInteropTypes>False</EmbedInteropTypes></Reference>
+    <Reference Include="Autodesk.AutoCAD.Interop"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\Autodesk.AutoCAD.Interop.dll</HintPath><EmbedInteropTypes>False</EmbedInteropTypes></Reference>
+    <Reference Include="PnPDwg2dDef"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPDwg2dDef.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPDwg2dUtil"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPDwg2dUtil.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPDwg2dAnno"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPDwg2dAnno.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPDwg2dDbx"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPDwg2dDbx.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPDwg2dGen"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPDwg2dGen.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dUIUtilsMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dUIUtilsMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dOrthoProjectPart"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dOrthoProjectPart.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPCommonArxUtilMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPCommonArxUtilMgd.dll</HintPath><Private>False</Private></Reference>
+
+    <Reference Include="PnPCommonMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PnPCommonMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPCommonDbxMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PnPCommonDbxMgd.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPcommonUIMgdCs"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPcommonUIMgdCs.dll</HintPath><Private>False</Private></Reference>
+
+    <Reference Include="PnIDUIMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnIDUIMgd.dll</HintPath><Private>False</Private></Reference>
+
+    <Reference Include="PnPSharedUtilsArxMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPSharedUtilsArxMgd.dll</HintPath><Private>False</Private></Reference>
+
+
+
+
+
+
+
+
+    <Reference Include="PnP3dCustomControlLibrary"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dCustomControlLibrary.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPIsoFilters"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPIsoFilters.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPIsoFrustum"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPIsoFrustum.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPIsoNativeDBX"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPIsoNativeDBX.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPUtilMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPUtilMgd.dll</HintPath><Private>False</Private></Reference>
+
+    <Reference Include="PnP3dEquipmentUI"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dEquipmentUI.dll</HintPath><Private>False</Private></Reference>
+
+    <Reference Include="PnP3dPipeRoutingUI"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dPipeRoutingUI.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dPipeSupportsUI"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dPipeSupportsUI.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dProjectManagerUI"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dProjectManagerUI.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dSpecUI"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dSpecUI.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnP3dWorkspace"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dWorkspace.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PnPProjectManagerUI"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnPProjectManagerUI.dll</HintPath><Private>False</Private></Reference>
+
+    <Reference Include="Newtonsoft.Json"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\Newtonsoft.Json.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="System.Data.SQLite"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\System.Data.SQLite.dll</HintPath><Private>False</Private></Reference>
+  </ItemGroup>
+
+  <!-- [프리뷰 B] WebView2 (PFO와 동일 버전). 서포트 형상 three.js 라이브 렌더 호스트. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2849.39" />
+  </ItemGroup>
+
+
+
+    <!-- Default globs include **/*.cs -->
+
+</Project>

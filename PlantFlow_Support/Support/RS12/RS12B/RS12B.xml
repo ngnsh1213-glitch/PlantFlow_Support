@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="RS12B" LDesId="RS12B_L" SDesId="RS12B" ConnPortNum="2" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="RS12B.Dn" SDesId="RS12B.Dn" Type="LENGTH" Ask4Dist="false" Value="100" pg="MainDimensions" />
+			<Param Name="BI" LDesId="RS12B.BI" SDesId="RS12B.BI" Type="LENGTH" Ask4Dist="false" Value="110" pg="MainDimensions" />
+			<Param Name="A" LDesId="RS12B.A" SDesId="RS12B.A" Type="LENGTH" Ask4Dist="false" Value="250.0" pg="MainDimensions" />
+			<Param Name="A1" LDesId="RS12B.A1" SDesId="RS12B.A1" Type="LENGTH" Ask4Dist="false" Value="250.0" pg="MainDimensions" />
+			<Param Name="A2" LDesId="RS12B.A2" SDesId="RS12B.A2" Type="LENGTH" Ask4Dist="false" Value="150.0" pg="MainDimensions" />
+			<Param Name="F2" LDesId="RS12B.F2" SDesId="RS12B.F2" Type="LENGTH" Ask4Dist="false" Value="500.0" pg="MainDimensions" />
+			<Param Name="P1" LDesId="RS12B.P1" SDesId="RS12B.P1" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+			<Param Name="TY" LDesId="RS12B.TY" SDesId="RS12B.TY" Type="LENGTH" Ask4Dist="false" Value="-1" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

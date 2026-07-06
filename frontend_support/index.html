@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlantFlow Support Preview</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #f0f0f0; }
+      #app { width: 100vw; height: 100vh; }
+      #hud {
+        position: fixed; top: 8px; left: 10px; font: 12px Segoe UI, sans-serif;
+        color: #334155; background: rgba(255,255,255,.8); padding: 4px 8px; border-radius: 4px;
+        pointer-events: none; white-space: pre-line;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">Loading…</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

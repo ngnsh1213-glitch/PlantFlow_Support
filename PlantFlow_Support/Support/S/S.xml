@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="S" LDesId="S_L" SDesId="S" ConnPortNum="1" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="S.Dn" SDesId="S.Dn" Type="LENGTH" Ask4Dist="false" Value="150" pg="MainDimensions" />
+			<Param Name="H" LDesId="S.H" SDesId="S.H" Type="LENGTH" Ask4Dist="false" Value="100.0" pg="MainDimensions" />
+			<Param Name="B" LDesId="S.B" SDesId="S.B" Type="LENGTH" Ask4Dist="false" Value="150.0" pg="MainDimensions" />
+			<Param Name="B1" LDesId="S.B1" SDesId="S.B1" Type="LENGTH" Ask4Dist="false" Value="50.0" pg="MainDimensions" />
+			<Param Name="L1" LDesId="S.L1" SDesId="S.L1" Type="LENGTH" Ask4Dist="false" Value="300.0" pg="MainDimensions" />
+			<Param Name="T1" LDesId="S.T1" SDesId="S.T1" Type="LENGTH" Ask4Dist="false" Value="9.0" pg="MainDimensions" />
+			<Param Name="SN" LDesId="S.SN" SDesId="S.SN" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>

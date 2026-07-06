@@ -1,0 +1,66 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="L_SHAPE" LDesId="L_SHAPE_L" SDesId="L_SHAPE" >
+		<Params>
+			<Param Name="BF" LDesId="L_SHAPE.BF" SDesId="L_SHAPE.BF" Type="INT" Ask4Dist="false" Value="5" />
+			<Param Name="LE" LDesId="L_SHAPE.LE" SDesId="L_SHAPE.LE" Type="LENGTH0" Ask4Dist="false" Value="500.0" />
+			<Param Name="ID" LDesId="L_SHAPE.ID" SDesId="L_SHAPE.ID" Type="STRING" Ask4Dist="false" Value="L_SHAPE" />
+		</Params>
+	</Script>
+	<Script Name="C_SHAPE" LDesId="C_SHAPE_L" SDesId="C_SHAPE" >
+		<Params>
+			<Param Name="BF" LDesId="C_SHAPE.BF" SDesId="C_SHAPE.BF" Type="INT" Ask4Dist="false" Value="10" />
+			<Param Name="LE" LDesId="C_SHAPE.LE" SDesId="C_SHAPE.LE" Type="LENGTH0" Ask4Dist="false" Value="500.0" />
+			<Param Name="ID" LDesId="C_SHAPE.ID" SDesId="C_SHAPE.ID" Type="STRING" Ask4Dist="false" Value="C_SHAPE" />
+		</Params>
+	</Script>
+	<Script Name="H_SHAPE" LDesId="H_SHAPE_L" SDesId="H_SHAPE" >
+		<Params>
+			<Param Name="BF" LDesId="H_SHAPE.BF" SDesId="H_SHAPE.BF" Type="INT" Ask4Dist="false" Value="10" />
+			<Param Name="LE" LDesId="H_SHAPE.LE" SDesId="H_SHAPE.LE" Type="LENGTH0" Ask4Dist="false" Value="500.0" />
+			<Param Name="ID" LDesId="H_SHAPE.ID" SDesId="H_SHAPE.ID" Type="STRING" Ask4Dist="false" Value="H_SHAPE" />
+		</Params>
+	</Script>
+	<Script Name="FLAT_SHAPE" LDesId="FLAT_SHAPE_L" SDesId="FLAT_SHAPE" >
+		<Params>
+			<Param Name="BF" LDesId="FLAT_SHAPE.BF" SDesId="FLAT_SHAPE.BF" Type="INT" Ask4Dist="false" Value="25" />
+			<Param Name="LE" LDesId="FLAT_SHAPE.LE" SDesId="FLAT_SHAPE.LE" Type="LENGTH0" Ask4Dist="false" Value="500.0" />
+			<Param Name="ID" LDesId="FLAT_SHAPE.ID" SDesId="FLAT_SHAPE.ID" Type="STRING" Ask4Dist="false" Value="FLAT_SHAPE" />
+		</Params>
+	</Script>
+	<Script Name="HEXAGON" LDesId="HEXAGON_L" SDesId="HEXAGON" >
+		<Params>
+			<Param Name="R" LDesId="HEXAGON.R" SDesId="HEXAGON.R" Type="INT" Ask4Dist="false" Value="100" />
+			<Param Name="H" LDesId="HEXAGON.H" SDesId="HEXAGON.H" Type="INT" Ask4Dist="false" Value="50" />
+			<Param Name="ID" LDesId="HEXAGON.ID" SDesId="HEXAGON.ID" Type="STRING" Ask4Dist="false" Value="HEXAGON" />
+		</Params>
+	</Script>
+	<Script Name="TRANS_BOX" LDesId="TRANS_BOX_L" SDesId="TRANS_BOX" >
+		<Params>
+			<Param Name="L" LDesId="TRANS_BOX.L" SDesId="TRANS_BOX.L" Type="LENGTH0" Ask4Dist="false" Value="100.0" />
+			<Param Name="W" LDesId="TRANS_BOX.W" SDesId="TRANS_BOX.W" Type="LENGTH0" Ask4Dist="false" Value="100.0" />
+			<Param Name="H" LDesId="TRANS_BOX.H" SDesId="TRANS_BOX.H" Type="LENGTH0" Ask4Dist="false" Value="100.0" />
+			<Param Name="BASE" LDesId="TRANS_BOX.BASE" SDesId="TRANS_BOX.BASE" Type="STRING" Ask4Dist="false" Value="BOTTOM_05" />
+			<Param Name="ID" LDesId="TRANS_BOX.ID" SDesId="TRANS_BOX.ID" Type="STRING" Ask4Dist="false" Value="TRANS_BOX" />
+		</Params>
+	</Script>
+	<Script Name="TRUNNION_SHAPE" LDesId="TRUNNION_SHAPE_L" SDesId="TRUNNION_SHAPE" >
+		<Params>
+			<Param Name="Dn" LDesId="TRUNNION_SHAPE.Dn" SDesId="TRUNNION_SHAPE.Dn" Type="INT" Ask4Dist="false" Value="150" />
+			<Param Name="Qn" LDesId="TRUNNION_SHAPE.Qn" SDesId="TRUNNION_SHAPE.Qn" Type="INT" Ask4Dist="false" Value="100" />
+			<Param Name="Qz" LDesId="TRUNNION_SHAPE.Qz" SDesId="TRUNNION_SHAPE.Qz" Type="LENGTH0" Ask4Dist="false" Value="114.4" />
+			<Param Name="A" LDesId="TRUNNION_SHAPE.A" SDesId="TRUNNION_SHAPE.A" Type="LENGTH0" Ask4Dist="false" Value="800.0" />
+			<Param Name="Dz" LDesId="TRUNNION_SHAPE.Dz" SDesId="TRUNNION_SHAPE.Dz" Type="LENGTH0" Ask4Dist="false" Value="114.3" />
+			<Param Name="PW" LDesId="TRUNNION_SHAPE.PW" SDesId="TRUNNION_SHAPE.PW" Type="LENGTH0" Ask4Dist="false" Value="10.0" />
+			<Param Name="ID" LDesId="TRUNNION_SHAPE.ID" SDesId="TRUNNION_SHAPE.ID" Type="STRING" Ask4Dist="false" Value="TRUNNION_SHAPE" />
+		</Params>
+	</Script>
+	<Script Name="UBOLT_SHAPE" LDesId="UBOLT_SHAPE_L" SDesId="UBOLT_SHAPE" >
+		<Params>
+			<Param Name="Qn" LDesId="UBOLT_SHAPE.Qn" SDesId="UBOLT_SHAPE.Qn" Type="INT" Ask4Dist="false" Value="100" />
+			<Param Name="Qz" LDesId="UBOLT_SHAPE.Qz" SDesId="UBOLT_SHAPE.Qz" Type="LENGTH0" Ask4Dist="false" Value="114.3" />
+			<Param Name="P1" LDesId="UBOLT_SHAPE.P1" SDesId="UBOLT_SHAPE.P1" Type="LENGTH0" Ask4Dist="false" Value="10.0" />
+			<Param Name="ID" LDesId="UBOLT_SHAPE.ID" SDesId="UBOLT_SHAPE.ID" Type="STRING" Ask4Dist="false" Value="UBOLT_SHAPE" />
+		</Params>
+	</Script>
+</ArrayOfScript>

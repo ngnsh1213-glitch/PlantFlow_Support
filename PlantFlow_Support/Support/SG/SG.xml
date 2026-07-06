@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfScript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<Script Name="SG" LDesId="SG_L" SDesId="SG" ConnPortNum="1" LengthUnit="mm" >
+		<Params>
+			<Param Name="Dn" LDesId="SG.Dn" SDesId="SG.Dn" Type="LENGTH" Ask4Dist="false" Value="150" pg="MainDimensions" />
+			<Param Name="H" LDesId="SG.H" SDesId="SG.H" Type="LENGTH" Ask4Dist="false" Value="100.0" pg="MainDimensions" />
+			<Param Name="B" LDesId="SG.B" SDesId="SG.B" Type="LENGTH" Ask4Dist="false" Value="150.0" pg="MainDimensions" />
+			<Param Name="B1" LDesId="SG.B1" SDesId="SG.B1" Type="LENGTH" Ask4Dist="false" Value="50.0" pg="MainDimensions" />
+			<Param Name="L1" LDesId="SG.L1" SDesId="SG.L1" Type="LENGTH" Ask4Dist="false" Value="300.0" pg="MainDimensions" />
+			<Param Name="L2" LDesId="SG.L2" SDesId="SG.L2" Type="LENGTH" Ask4Dist="false" Value="60.0" pg="MainDimensions" />
+			<Param Name="T1" LDesId="SG.T1" SDesId="SG.T1" Type="LENGTH" Ask4Dist="false" Value="9.0" pg="MainDimensions" />
+			<Param Name="CL" LDesId="SG.CL" SDesId="SG.CL" Type="LENGTH" Ask4Dist="false" Value="3.0" pg="MainDimensions" />
+			<Param Name="SN" LDesId="SG.SN" SDesId="SG.SN" Type="LENGTH" Ask4Dist="false" Value="0.0" pg="MainDimensions" />
+		</Params>
+	</Script>
+</ArrayOfScript>
