@@ -34,6 +34,14 @@ scene.add(new THREE.AxesHelper(300));
 
 let current: THREE.Object3D | null = null;
 
+type MeshPayload = {
+  kind?: string;
+  units?: string;
+  upAxis?: string;
+  vertices?: unknown;
+  triangles?: unknown;
+};
+
 function clearCurrent() {
   if (current) {
     scene.remove(current);
@@ -90,22 +98,104 @@ function showPlaceholder(type: string) {
   post(JSON.stringify({ kind: "unsupported", type }));
 }
 
+function showMeshError(message: string, err?: unknown) {
+  console.error("[mesh] " + message, err);
+  showPlaceholder("mesh");
+  hud.textContent = `mesh 로드 실패: ${message}\n명시적 placeholder 표시`;
+}
+
 // C# 호스트로 메시지(진단/상태).
 function post(s: string) {
   try {
     (window as any).chrome?.webview?.postMessage(s);
-  } catch {
-    /* 호스트 외부(브라우저 dev) — 무시 */
+  } catch (err) {
+    console.debug("[host] postMessage unavailable", err);
   }
 }
 
-// C#->JS: {type, params, sizeFields}
+function parseJsonText(raw: string): any {
+  return JSON.parse(raw.replace(/^\uFEFF/, ""));
+}
+
+function asNumberTriple(value: unknown, label: string, index: number): [number, number, number] {
+  if (!Array.isArray(value) || value.length !== 3) {
+    throw new Error(`${label}[${index}] must be [x,y,z]`);
+  }
+  const out = value.map((v) => Number(v));
+  if (out.some((v) => !Number.isFinite(v))) {
+    throw new Error(`${label}[${index}] contains non-finite number`);
+  }
+  return [out[0], out[1], out[2]];
+}
+
+function extractTriIndices(tri: unknown, index: number): unknown {
+  if (Array.isArray(tri)) return tri;
+  if (tri && typeof tri === "object" && Array.isArray((tri as { i?: unknown }).i)) {
+    return (tri as { i: unknown[] }).i;
+  }
+  throw new Error(`triangles[${index}] unsupported shape`);
+}
+
+function buildMeshGeometry(data: MeshPayload): THREE.BufferGeometry {
+  if (!Array.isArray(data.vertices) || !Array.isArray(data.triangles)) {
+    throw new Error("vertices/triangles arrays are required");
+  }
+  const vertices = data.vertices;
+  const triangles = data.triangles;
+  if (vertices.length === 0 || triangles.length === 0) {
+    throw new Error("vertices/triangles arrays must not be empty");
+  }
+
+  const flatVerts: number[] = [];
+  vertices.forEach((v, i) => flatVerts.push(...asNumberTriple(v, "vertices", i)));
+
+  const flatTriangles: number[] = [];
+  triangles.forEach((tri, i) => {
+    const t = asNumberTriple(extractTriIndices(tri, i), "triangles", i);
+    for (const rawIndex of t) {
+      if (!Number.isInteger(rawIndex)) {
+        throw new Error(`triangles[${i}] contains non-integer index`);
+      }
+      if (rawIndex < 0 || rawIndex >= vertices.length) {
+        throw new Error(`triangles[${i}] index ${rawIndex} out of range`);
+      }
+      flatTriangles.push(rawIndex);
+    }
+  });
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(flatVerts, 3));
+  geometry.setIndex(flatTriangles);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function renderMesh(data: MeshPayload, source: string) {
+  try {
+    const geometry = buildMeshGeometry(data);
+    const vertexCount = Array.isArray(data.vertices) ? data.vertices.length : 0;
+    const triangleCount = Array.isArray(data.triangles) ? data.triangles.length : 0;
+    showPrim(
+      new Prim(geometry),
+      `mesh ${source}  vertices=${vertexCount} triangles=${triangleCount} units=${data.units ?? "?"} upAxis=${data.upAxis ?? "?"}`
+    );
+  } catch (err) {
+    showMeshError(source, err);
+  }
+}
+
+// C#->JS: {type, params, sizeFields} or {kind:"mesh", vertices, triangles}
 function handlePayload(raw: string) {
   let data: any;
   try {
-    data = JSON.parse(raw);
-  } catch {
+    data = parseJsonText(raw);
+  } catch (err) {
+    console.debug("[host] ignored non-json message", err);
     return; // 비-JSON 메시지(예: 에코) 무시
+  }
+  if (data?.kind === "mesh") {
+    renderMesh(data, "host");
+    return;
   }
   if (!data || typeof data.type !== "string") return;
   const type: string = data.type;
@@ -124,6 +214,22 @@ function handlePayload(raw: string) {
   const d = e?.data;
   if (typeof d === "string") handlePayload(d);
 });
+
+async function loadMeshFromQuery() {
+  const meshUrl = new URLSearchParams(window.location.search).get("mesh");
+  if (!meshUrl) return false;
+
+  try {
+    const response = await fetch(meshUrl);
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    const data = parseJsonText(await response.text());
+    renderMesh({ ...data, kind: "mesh" }, `dev ${meshUrl}`);
+    return true;
+  } catch (err) {
+    showMeshError(`dev ${meshUrl}`, err);
+    return true;
+  }
+}
 
 // 리사이즈
 function resize() {
@@ -150,7 +256,11 @@ const fails = golden.filter((l) => l.startsWith("FAIL"));
 console.log("[primitiv golden]\n" + golden.join("\n"));
 if (fails.length) console.error("golden FAIL:", fails);
 
-// 초기 데모(메시지 오기 전): 단위 박스.
-showPrim(makeBasePrimitive("BOX", { L: 300, W: 300, H: 300 })!, "demo BOX(300,300,300) — 호스트 메시지 대기");
-hud.textContent += fails.length ? `\n⚠ golden ${fails.length} FAIL(콘솔)` : "";
-post(JSON.stringify({ kind: "ready", golden: fails.length ? "fail" : "pass" }));
+// 초기 데모(메시지 오기 전): 단위 박스. ?mesh=<url>이면 export JSON을 직접 로드한다.
+loadMeshFromQuery().then((loaded) => {
+  if (!loaded) {
+    showPrim(makeBasePrimitive("BOX", { L: 300, W: 300, H: 300 })!, "demo BOX(300,300,300) — 호스트 메시지 대기");
+    hud.textContent += fails.length ? `\n⚠ golden ${fails.length} FAIL(콘솔)` : "";
+  }
+  post(JSON.stringify({ kind: "ready", golden: fails.length ? "fail" : "pass" }));
+});

@@ -28,9 +28,24 @@ export interface PreviewShapeMessageV1 {
   params: Record<string, string | number>;
   sizeFields?: Record<string, string | number>;
 }
+
+export interface PreviewMeshMessageV1 {
+  kind: "mesh";
+  units?: "mm" | string;
+  upAxis?: "Z" | string;
+  vertices: [number, number, number][];
+  triangles: ([number, number, number] | {
+    i: [number, number, number];
+    source?: string;
+    diagnostic?: boolean;
+  })[];
+}
 ```
 
 frontend는 `window.chrome.webview.addEventListener("message", ...)`에서 문자열 메시지를 받고, `JSON.parse` 후 `type`과 `params`를 해석한다. `params` 값은 숫자로 파싱 가능한 값만 렌더 입력으로 사용한다.
+mesh 메시지는 C# export JSON의 UTF-8 BOM 가능성을 고려해 선행 `\uFEFF`를 제거한 뒤 파싱한다.
+`{ kind: "mesh", vertices, triangles }`는 `THREE.BufferGeometry(position + index)`로 변환하고 `computeVertexNormals()` 후 기존 렌더 경로로 표시한다.
+`triangles`는 production 평배열 `[a,b,c]`와 스파이크 export 객체형 `{ i:[a,b,c], source?, diagnostic? }`를 모두 수용한다. `source`와 `diagnostic`은 뷰어가 무시하는 진단 메타다.
 
 ### frontend -> C#
 
