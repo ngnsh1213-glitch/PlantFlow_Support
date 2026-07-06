@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.WinForms;
 using Microsoft.Web.WebView2.Core;
@@ -24,11 +26,13 @@ namespace PlantFlow_Support
 
         // 초기화/런타임 실패 시 발생. 구독측은 WebView 숨기고 PNG 폴백.
         public event EventHandler<string> InitFailed;
+        public event EventHandler<string> MeshFailed;
         // 페이지(React/three.js) 로드 완료.
         public event EventHandler Ready;
 
         private bool _coreReady;
         private string _pendingPayload; // CoreWebView2 준비 전 LoadShape 호출 시 보류.
+        private readonly SemaphoreSlim _meshGate = new SemaphoreSlim(1, 1);
         private readonly Label _status;
 
         public WebViewControl()
@@ -43,6 +47,15 @@ namespace PlantFlow_Support
                 ForeColor = Color.DimGray
             };
             this.Controls.Add(_status);
+            // InitAsync는 OnHandleCreated에서 착수(생성자 시점엔 부모 폼 미소속 → 재부모화 시 핸들 파괴로 코어 dispose).
+        }
+
+        private bool _initStarted;
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            if (_initStarted) return; // 재부모화로 핸들 재생성돼도 1회만 착수.
+            _initStarted = true;
             InitAsync();
         }
 
@@ -163,6 +176,77 @@ namespace PlantFlow_Support
             }
         }
 
+        public async void LoadSupportMesh(string type, IDictionary<string, string> paramKv)
+        {
+            await LoadSupportMeshAsync(type, paramKv);
+        }
+
+        private async Task LoadSupportMeshAsync(string type, IDictionary<string, string> paramKv)
+        {
+            if (!_coreReady || Browser?.CoreWebView2 == null)
+            {
+                Log("LoadSupportMesh skipped: WebView not ready");
+                return;
+            }
+
+            if (!await _meshGate.WaitAsync(0))
+            {
+                Log("LoadSupportMesh skipped: request already running");
+                return;
+            }
+
+            try
+            {
+                var docs = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager;
+                var doc = docs.MdiActiveDocument;
+                if (doc == null)
+                {
+                    NotifyMeshFailed("활성 도면 없음");
+                    return;
+                }
+
+                MeshData mesh = null;
+                string diag = null;
+                bool ok = false;
+                var requestParams = paramKv == null
+                    ? new Dictionary<string, string>()
+                    : new Dictionary<string, string>(paramKv, StringComparer.OrdinalIgnoreCase);
+
+                await docs.ExecuteInCommandContextAsync(
+                    async _ =>
+                    {
+                        ok = SupportPreviewBuilder.TryBuildMesh(doc, type, requestParams, out mesh, out diag);
+                        await Task.CompletedTask;
+                    },
+                    null);
+
+                if (!ok || mesh == null || mesh.Triangles.Count == 0)
+                {
+                    NotifyMeshFailed("mesh build failed: " + (diag ?? "no_diag"));
+                    return;
+                }
+
+                var payload = JsonConvert.SerializeObject(new
+                {
+                    kind = "mesh",
+                    units = mesh.Units,
+                    upAxis = mesh.UpAxis,
+                    vertices = mesh.Vertices,
+                    triangles = mesh.Triangles
+                });
+                PostPayload(payload);
+                Log("LoadSupportMesh OK triangles=" + mesh.Triangles.Count);
+            }
+            catch (Exception ex)
+            {
+                NotifyMeshFailed("LoadSupportMesh 예외: " + ex.Message);
+            }
+            finally
+            {
+                _meshGate.Release();
+            }
+        }
+
         private void PostPayload(string json)
         {
             try { Browser.CoreWebView2.PostWebMessageAsString(json); }
@@ -207,6 +291,12 @@ namespace PlantFlow_Support
             InitFailed?.Invoke(this, reason);
         }
 
+        private void NotifyMeshFailed(string reason)
+        {
+            Log(reason);
+            MeshFailed?.Invoke(this, reason);
+        }
+
         private void Log(string message)
         {
             try
@@ -214,7 +304,10 @@ namespace PlantFlow_Support
                 var doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
                 doc?.Editor.WriteMessage("\n[PFS-WebView] " + message);
             }
-            catch { /* 로깅 실패는 무시(진단 전용) */ }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("[PFS-WebView] Log failed: " + ex.Message);
+            }
         }
 
         // DPI/도킹 변경 시 재배치(PFO 패턴 축약).
@@ -225,7 +318,7 @@ namespace PlantFlow_Support
             if ((m.Msg == WM_SIZE || m.Msg == WM_DPICHANGED) && IsHandleCreated && Browser != null)
             {
                 try { BeginInvoke((Action)(() => { if (Browser != null) Browser.Bounds = this.ClientRectangle; })); }
-                catch { }
+                catch (Exception ex) { Log("WndProc resize 실패: " + ex.Message); }
             }
         }
     }

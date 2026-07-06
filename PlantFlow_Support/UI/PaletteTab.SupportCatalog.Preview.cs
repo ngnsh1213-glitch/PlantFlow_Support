@@ -29,6 +29,7 @@ namespace PlantFlow_Support
             };
             _btCatPreview.Click += btCatPreview_Click;
             tabSupportCatalog.Controls.Add(_btCatPreview);
+            _btCatPreview.BringToFront(); // 런타임 Add는 z-order 뒤쪽 -> 덮는 컨테이너 뒤에 숨는 문제 해소
         }
 
         private void btCatPreview_Click(object sender, EventArgs e)

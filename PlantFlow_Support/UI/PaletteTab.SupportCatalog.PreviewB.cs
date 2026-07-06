@@ -10,6 +10,8 @@ namespace PlantFlow_Support
     // B 사용 가능 → WebView2 창, 초기화 실패 → A(PNG) 자동 폴백.
     public partial class PaletteTab
     {
+        private Form _previewBForm;
+
         // 현재 파라미터 텍스트박스 값을 수집.
         private Dictionary<string, string> CollectCatParams()
         {
@@ -29,6 +31,12 @@ namespace PlantFlow_Support
             Form form = null;
             try
             {
+                if (_previewBForm != null && !_previewBForm.IsDisposed)
+                {
+                    _previewBForm.Activate();
+                    return;
+                }
+
                 wv = new WebViewControl { Dock = DockStyle.Fill };
                 form = new Form
                 {
@@ -39,10 +47,17 @@ namespace PlantFlow_Support
                     MaximizeBox = true
                 };
                 var localForm = form;
+                _previewBForm = form;
+                bool fallbackStarted = false;
 
                 wv.Ready += (s, e) =>
                 {
-                    try { wv.LoadShape(template, CollectCatParams()); }
+                    try
+                    {
+                        Dictionary<string, string> parameters = CollectCatParams();
+                        wv.LoadShape(template, parameters);
+                        wv.LoadSupportMesh(template, parameters);
+                    }
                     catch (Exception ex) { Log("ShowPreviewB LoadShape 실패: " + ex.Message); }
                 };
 
@@ -51,6 +66,8 @@ namespace PlantFlow_Support
                 {
                     try
                     {
+                        if (fallbackStarted) return;
+                        fallbackStarted = true;
                         if (localForm != null && !localForm.IsDisposed)
                         {
                             localForm.BeginInvoke((Action)(() =>
@@ -63,13 +80,44 @@ namespace PlantFlow_Support
                     catch (Exception ex) { Log("InitFailed 폴백 실패: " + ex.Message); }
                 };
 
+                // 서버측 메시 생성 실패 → 기존 PNG 폴백.
+                wv.MeshFailed += (s, reason) =>
+                {
+                    try
+                    {
+                        if (fallbackStarted) return;
+                        fallbackStarted = true;
+                        if (localForm != null && !localForm.IsDisposed)
+                        {
+                            localForm.BeginInvoke((Action)(() =>
+                            {
+                                localForm.Close();
+                                FallbackToPng(template, reason);
+                            }));
+                        }
+                    }
+                    catch (Exception ex) { Log("MeshFailed 폴백 실패: " + ex.Message); }
+                };
+
+                form.FormClosed += (s, e) =>
+                {
+                    try
+                    {
+                        if (ReferenceEquals(_previewBForm, localForm)) _previewBForm = null;
+                        localForm.Dispose();
+                    }
+                    catch (Exception ex) { Log("preview form dispose 실패: " + ex.Message); }
+                };
+
                 form.Controls.Add(wv);
-                form.ShowDialog();
+                Autodesk.AutoCAD.ApplicationServices.Application.ShowModelessDialog(form);
             }
             catch (Exception ex)
             {
                 Log("ShowPreviewB 예외 → PNG 폴백: " + ex.Message);
-                try { form?.Dispose(); } catch { }
+                if (ReferenceEquals(_previewBForm, form)) _previewBForm = null;
+                try { form?.Dispose(); }
+                catch (Exception disposeEx) { Log("ShowPreviewB form dispose 실패: " + disposeEx.Message); }
                 FallbackToPng(template, ex.Message);
             }
         }

@@ -68,6 +68,39 @@ echo Build artifact:
 if exist "bin\Release\PlantFlow_Support.dll" echo   [OK]    bin\Release\PlantFlow_Support.dll present.
 if not exist "bin\Release\PlantFlow_Support.dll" echo   [STALE] bin\Release\PlantFlow_Support.dll NOT FOUND - check log.
 echo ==========================================
+
+echo.
+echo ==========================================
+echo Deploying to C:\Lisp\PlantFlow_Support ...
+echo ==========================================
+rem [2026-07-06] 빌드 산출물을 기존 로드 경로(C:\Lisp\PlantFlow_Support)에도 복사.
+rem DLL 미갱신 방지 위해 빌드 성공 시에만 수행. xcopy /Y /E로 runtimes 하위폴더 포함.
+if not exist "bin\Release\PlantFlow_Support.dll" (
+  echo   [SKIP] 산출물 없음 - 배포 건너뜀.
+  goto :end
+)
+set "DEPLOY_DIR=C:\Lisp\PlantFlow_Support"
+if not exist "%DEPLOY_DIR%" mkdir "%DEPLOY_DIR%"
+xcopy "bin\Release\*" "%DEPLOY_DIR%\" /Y /E >nul
+if errorlevel 1 (
+  echo   [WARN] C:\Lisp\PlantFlow_Support 복사 실패 - 대상 사용 중/권한 확인.
+) else (
+  echo   [OK] C:\Lisp\PlantFlow_Support 배포 완료.
+)
+
+rem [프리뷰 B] frontend_support\dist도 배포. FindDistFolder가 어셈블리 상위에서
+rem frontend_support\dist\index.html 탐색 -> 반드시 동일 서브폴더 구조로 복사.
+if exist "frontend_support\dist\index.html" (
+  xcopy "frontend_support\dist\*" "%DEPLOY_DIR%\frontend_support\dist\" /Y /E >nul
+  if errorlevel 1 (
+    echo   [WARN] frontend_support\dist 복사 실패 - 대상 사용 중/권한 확인.
+  ) else (
+    echo   [OK] frontend_support\dist 배포 완료.
+  )
+) else (
+  echo   [SKIP] frontend_support\dist 없음 - 프리뷰 B dist 미배포^(기존 폴백^).
+)
+echo ==========================================
 goto :end
 
 rem ---------------- failure paths ----------------

@@ -85,23 +85,15 @@ function showPrim(prim: Prim, label: string) {
 }
 
 function showPlaceholder(type: string) {
-  // Phase 2 미포팅 타입: 회색 박스 + 안내(근사 아님, 명시적 미지원).
   clearCurrent();
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(300, 300, 300),
-    new THREE.MeshStandardMaterial({ color: 0x999999, transparent: true, opacity: 0.5 })
-  );
-  scene.add(mesh);
-  current = mesh;
-  frame(mesh);
-  hud.textContent = `'${type}' 형상은 아직 미포팅(Phase 2)\n기본 프리미티브(BOX/CYLINDER/TORUS/SPHERE)만 렌더`;
+  hud.textContent = "서버 형상 로딩 중...";
   post(JSON.stringify({ kind: "unsupported", type }));
 }
 
 function showMeshError(message: string, err?: unknown) {
   console.error("[mesh] " + message, err);
-  showPlaceholder("mesh");
-  hud.textContent = `mesh 로드 실패: ${message}\n명시적 placeholder 표시`;
+  clearCurrent();
+  hud.textContent = `mesh 로드 실패: ${message}`;
 }
 
 // C# 호스트로 메시지(진단/상태).
