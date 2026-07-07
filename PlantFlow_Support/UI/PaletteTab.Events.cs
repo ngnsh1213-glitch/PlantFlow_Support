@@ -58,14 +58,37 @@ namespace PlantFlow_Support
 
     private void btAdd_Click(object sender, EventArgs e)
     {
+      string code;
+      string msg;
+      object added;
+      bool cancelled;
+      AddSupportCore(this.cbbViewDirection.Text, out code, out msg, out added, out cancelled);
+      if (cancelled)
+        return;
+      if (code != null)
+      {
+        int num = (int)MessageBox.Show("Code (" + code + "): " + msg, "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+      }
+    }
+
+    private void AddSupportCore(string viewDir, out string code, out string msg, out object added, out bool cancelled)
+    {
+      code = null;
+      msg = null;
+      added = null;
+      cancelled = false;
       var PSUtil = new PSUtil();
       if (string.IsNullOrEmpty(this.tbTemplate.Text))
       {
-        int num1 = (int) MessageBox.Show("Code (ER1010): Invalid input. Please check your template directory!", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+        code = "ER1010";
+        msg = "Invalid input. Please check your template directory!";
+        return;
       }
       else if (!File.Exists(this.tbTemplate.Text))
       {
-        int num2 = (int) MessageBox.Show("Code (ER1016): No template found. Please check your template directory!", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+        code = "ER1016";
+        msg = "No template found. Please check your template directory!";
+        return;
       }
       else
       {
@@ -73,15 +96,18 @@ namespace PlantFlow_Support
         Document document = PSUtil.GetDocument();
         if (((DisposableWrapper) document) == ((DisposableWrapper) null))
         {
-          int num3 = (int) MessageBox.Show("Code (ER1000): No drawings are open, open project drawing and try again!", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+          code = "ER1000";
+          msg = "No drawings are open, open project drawing and try again!";
+          return;
         }
         else
         {
           Database database = document.Database;
           PromptSelectionResult selection = PSUtil.ed.GetSelection();
-          if ((int)selection.Status != 5100)
+          if (selection.Status != PromptStatus.OK)
           {
-            int num4 = (int) MessageBox.Show("Code (ER1001): Nothing was selected! Please try again.", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+            cancelled = true;
+            return;
           }
           else
           {
@@ -140,20 +166,26 @@ namespace PlantFlow_Support
             }
             SupportInfo info;
             string[] new_sp;
-            if (!this.EntityIsSupport(database, id, out info, out new_sp))
+            if (!this.EntityIsSupport(database, id, viewDir, out info, out new_sp))
             {
               if (string.IsNullOrEmpty(new_sp[0]))
               {
-                int num5 = (int) MessageBox.Show("Code (ER1007): This support is unnamed. Please check the SupportName property.", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+                code = "ER1007";
+                msg = "This support is unnamed. Please check the SupportName property.";
+                return;
               }
               else
               {
-                int num6 = (int) MessageBox.Show("Code (ER1002): Selected object are not Plant Support type. Please reselect!", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+                code = "ER1002";
+                msg = "Selected object are not Plant Support type. Please reselect!";
+                return;
               }
             }
             else if (this.SupportSelection.ContainsKey(info.Name))
             {
-              int num7 = (int) MessageBox.Show("Code (ER1003): Already existed in current selection list. Please reselect!", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+              code = "ER1003";
+              msg = "Already existed in current selection list. Please reselect!";
+              return;
             }
             else
             {
@@ -176,11 +208,13 @@ namespace PlantFlow_Support
               {
                 if (listViewItem2.SubItems[0].Text == new_sp[0])
                 {
-                  int num9 = (int) MessageBox.Show("Code (ER1003): This support already add to the current selection list.", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+                  code = "ER1003";
+                  msg = "This support already add to the current selection list.";
                   return;
                 }
               }
               this.lvSupportName.Items.Add(listViewItem1);
+              added = new { name = info.Name, view = viewDir };
               PSUtil.ed.Regen();
             }
           }
@@ -188,86 +222,87 @@ namespace PlantFlow_Support
       }
     }
 
+    private void Export2DCore(out string code)
+    {
+      code = null;
+      if (this.lvSupportName.Items.Count == 0)
+      {
+        code = "ER1004";
+        return;
+      }
+      if (!File.Exists("C:\\TEMP\\CADLIB\\GridSystem.json"))
+      {
+        code = "ER1005";
+        return;
+      }
+
+      Dictionary<string, SupportInfo> finalSelection = this.SupportSelection;
+      if (this.lvSupportName.SelectedItems.Count > 0)
+      {
+        finalSelection = new Dictionary<string, SupportInfo>();
+        foreach (ListViewItem item in this.lvSupportName.SelectedItems)
+        {
+          string name = item.SubItems[0].Text;
+          if (this.SupportSelection.ContainsKey(name))
+          {
+            finalSelection[name] = this.SupportSelection[name];
+          }
+        }
+
+        if (finalSelection.Count == 0)
+        {
+          code = "ER1006";
+          return;
+        }
+      }
+
+      this.LimitViewCore(out code);
+      if (code != null) return;
+
+      var PSUtil = new PSUtil();
+      Document document = PSUtil.GetDocument();
+      if (document == null)
+      {
+        code = "ER1000";
+        return;
+      }
+
+      Database database = document.Database;
+      using (document.LockDocument())
+      {
+        using (database.TransactionManager.StartTransaction())
+        {
+          database.ResolveXrefs(true, false);
+        }
+      }
+
+      if (finalSelection == null)
+      {
+        code = "ER1004";
+        return;
+      }
+
+      Commands.PSUtil = PSUtil;
+      PSUtil.lvSupportName = this.lvSupportName;
+      PSUtil.SupportSelection = finalSelection;
+      Commands.DocumentName = document.Name;
+      Commands.Export2DSession();
+    }
+
     private void btExport_Click(object sender, EventArgs e)
     {
       try
       {
-          /*
-          if (this.SupportSelection == null) 
-          {
-             MessageBox.Show("Debug: SupportSelection is NULL"); 
-             return;
-          }
-          */
-
-          if (this.lvSupportName.Items.Count == 0)
-          {
-            int num1 = (int) MessageBox.Show("Code (ER1004): No supports are selected. Please select your support to export", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
-          }
-          else if (!File.Exists("C:\\TEMP\\CADLIB\\GridSystem.json"))
-          {
-            int num2 = (int) MessageBox.Show("Code (ER1005): Please set Grid System before export to 2D!", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
-          }
-          else
-          {
-            // Determine Selection Scope
-            Dictionary<string, SupportInfo> finalSelection = this.SupportSelection;
-            
-            // If items are selected in the ListView, filter the dictionary
-            if (this.lvSupportName.SelectedItems.Count > 0)
-            {
-                 finalSelection = new Dictionary<string, SupportInfo>();
-                 foreach (ListViewItem item in this.lvSupportName.SelectedItems)
-                 {
-                      string name = item.SubItems[0].Text; // Assuming 1st column is Name
-                      if (this.SupportSelection.ContainsKey(name))
-                      {
-                           finalSelection[name] = this.SupportSelection[name];
-                      }
-                 }
-                 
-                 if(finalSelection.Count == 0)
-                 {
-                      MessageBox.Show("Selected items not found in cache. Please clear and re-add.", "PlantFlow_Support");
-                      return;
-                 }
-            }
-          
-            // Verify LimitView logic (Calculates Extents)
-            this.LimitView();
-            
-            var PSUtil = new PSUtil();
-            Document document = PSUtil.GetDocument();
-            if (document == null) throw new Exception("Document is null");
-            
-            Database database = document.Database;
-            using (document.LockDocument())
-            {
-              using (database.TransactionManager.StartTransaction())
-              {
-                database.ResolveXrefs(true, false);
-                // Check XREF count if needed, logic from reference
-                if (((Graph) database.GetHostDwgXrefGraph(true)).RootNode.NumOut > 0)
-                {
-                   // Warning from reference, but maybe optional? 
-                   // Keeping it simpler for now or follow user preference. 
-                   // User previously asked to remove XREF check, so I will skip the return.
-                }
-              }
-            }
-            
-            if (finalSelection == null) throw new Exception("SupportSelection dictionary is null");
-
-            // Assign to Global/Static contexts expected by PSUtil.run
-            Commands.PSUtil = PSUtil;
-            PSUtil.lvSupportName = this.lvSupportName;
-            PSUtil.SupportSelection = finalSelection; 
-            Commands.DocumentName = document.Name;
-            
-            // Execute Directly (Like Reference)
-            // Execute Unified Logic (Same as PFSEXPORT2D command)
-            Commands.Export2DSession();
-          }
+          string code;
+          Export2DCore(out code);
+          if (code == "ER1004")
+            MessageBox.Show("Code (ER1004): No supports are selected. Please select your support to export", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+          else if (code == "ER1005")
+            MessageBox.Show("Code (ER1005): Please set Grid System before export to 2D!", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+          else if (code == "ER1006")
+            MessageBox.Show("Selected items not found in cache. Please clear and re-add.", "PlantFlow_Support");
+          else if (code == "ER1000")
+            MessageBox.Show("Code (ER1000): No drawings are open, open project drawing and try again!", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
       }
       catch (Exception ex)
       {

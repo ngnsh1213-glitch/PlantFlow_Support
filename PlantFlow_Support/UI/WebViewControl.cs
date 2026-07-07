@@ -29,6 +29,10 @@ namespace PlantFlow_Support
         public event EventHandler<string> MeshFailed;
         // 페이지(React/three.js) 로드 완료.
         public event EventHandler Ready;
+        // Phase 1a: owner가 미처리 채널을 직접 처리하는 훅(true=처리됨). event 아님 - 단일 owner 대입.
+        public Func<string, bool> ExternalMessageHandler { get; set; }
+        // Phase 1a: owner가 응답을 전송(PostPayload 공개 래퍼).
+        public void PostMessage(string json) => PostPayload(json);
         // 포커스 신호(주채널=JS ui 메시지, 보조=WinForms GotFocus/LostFocus). PaletteSet KeepFocus 토글용 (P4-1b).
         public event EventHandler WebFocusGained;
         public event EventHandler WebFocusLost;
@@ -159,6 +163,10 @@ namespace PlantFlow_Support
                     try { msg = e.TryGetWebMessageAsString(); }
                     catch (Exception ex) { Log("WebMessage parse 실패: " + ex.Message); return; }
                     if (TryHandleUiMessage(msg))
+                    {
+                        return;
+                    }
+                    if (ExternalMessageHandler != null && ExternalMessageHandler(msg))
                     {
                         return;
                     }

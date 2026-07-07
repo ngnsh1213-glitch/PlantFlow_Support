@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { FileOutput, Tags, Rows3, Package } from "lucide-react";
 import SupportCatalogView from "../catalog/views/SupportCatalogView";
+import DrawingView from "./views/DrawingView";
 
 type TabId = "Drawing" | "Tagging" | "Span" | "Catalog";
 const TABS: { id: TabId; label: string; icon: ReactNode }[] = [
@@ -43,7 +44,9 @@ export default function AppShell() {
         ))}
       </nav>
       <main className="relative min-h-0 flex-1 overflow-hidden">
-        {active === "Catalog" ? <SupportCatalogView /> : <Placeholder label={TABS.find((t) => t.id === active)!.label} />}
+        {active === "Catalog" ? <SupportCatalogView />
+          : active === "Drawing" ? <DrawingView />
+          : <Placeholder label={TABS.find((t) => t.id === active)!.label} />}
       </main>
     </div>
   );

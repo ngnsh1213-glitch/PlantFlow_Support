@@ -236,11 +236,34 @@ namespace PlantFlow_Support
 
     public void LimitView()
     {
+      string code;
+      LimitViewCore(out code);
+      if (code == "ER1000")
+      {
+        int num = (int) MessageBox.Show("Code (ER1000): No drawings are open, open project drawing and try again!", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+      }
+    }
+
+    // 진단 전용 로거(커맨드라인 + Debug). 로직 무변경.
+    private void DiagLog(string m)
+    {
+        try
+        {
+            var doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
+            doc?.Editor.WriteMessage("\n[PFS-DIAG] " + m);
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] log fail: " + ex.Message); }
+    }
+
+    private void LimitViewCore(out string code)
+    {
+      code = null;
       var PSUtil = new PSUtil();
       Document document = PSUtil.GetDocument();
       if (((DisposableWrapper) document) == ((DisposableWrapper) null))
       {
-        int num = (int) MessageBox.Show("Code (ER1000): No drawings are open, open project drawing and try again!", "PlantFlow_Support", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+        code = "ER1000";
+        return;
       }
       else
       {
@@ -282,11 +305,14 @@ namespace PlantFlow_Support
                   }
               }
               
+              DiagLog("LimitViewCore support='" + keyValuePair.Key + "' group_ids=" + group_ids.Count + " pipes=" + pipeList.Count);
               if (group_ids.Count > 0)
               {
                   Extents3d extents3d = this.GeometryLimit(database, group_ids, pipeList, position);
                   this.SupportSelection[keyValuePair.Key].Extents = extents3d;
+                  DiagLog("LimitViewCore support='" + keyValuePair.Key + "' 최종 Extents min=" + extents3d.MinPoint + " max=" + extents3d.MaxPoint);
               }
+              else DiagLog("LimitViewCore support='" + keyValuePair.Key + "' group_ids=0 -> Extents 미설정(퇴화)");
             }
             transaction.Commit();
           }
@@ -321,8 +347,10 @@ namespace PlantFlow_Support
                     Extents3d geometricExtents = ent.GeometricExtents;
                     source1.Add(geometricExtents.MaxPoint);
                     source2.Add(geometricExtents.MinPoint);
+                    DiagLog("GeometryLimit(4) id=" + groupId.ToString() + " type=" + ent.GetType().Name + " min=" + geometricExtents.MinPoint + " max=" + geometricExtents.MaxPoint);
                 }
-            } catch {}
+                else DiagLog("GeometryLimit(4) id=" + groupId.ToString() + " NOT Entity(" + (obj?.GetType().Name ?? "null") + ")");
+            } catch (Exception ex) { DiagLog("GeometryLimit(4) id=" + groupId.ToString() + " GeometricExtents 예외: " + ex.Message); }
           }
           if (pipe_ids != null)
           {
@@ -343,14 +371,18 @@ namespace PlantFlow_Support
                         source1.Add(point3d1);
                         source2.Add(point3d1);
                     }
-                } catch {}
+                } catch (Exception ex) { DiagLog("GeometryLimit(4) pipe 예외: " + ex.Message); }
               }
           }
           transaction.Commit();
         }
       }
       
-      if (source1.Count == 0 || source2.Count == 0) return new Extents3d();
+      if (source1.Count == 0 || source2.Count == 0)
+      {
+        DiagLog("GeometryLimit(4): 수집점 0 -> 퇴화 Extents 반환. group_ids=" + (group_ids?.Count ?? 0) + " pipe_ids=" + (pipe_ids?.Count ?? 0));
+        return new Extents3d();
+      }
 
       double num1 = source1.Max<Point3d>((System.Func<Point3d, double>) (pos => pos.X));
       double num2 = source1.Max<Point3d>((System.Func<Point3d, double>) (pos => pos.Y));
@@ -362,6 +394,7 @@ namespace PlantFlow_Support
       Point3d point3d4 = new Point3d(num4, num5, num6);
       Extents3d extents3d = new Extents3d();
       extents3d.Set(point3d4, point3d3);
+      DiagLog("GeometryLimit(4) 반환 Extents min=" + point3d4 + " max=" + point3d3);
       return extents3d;
     }
 
@@ -413,6 +446,7 @@ namespace PlantFlow_Support
     private bool EntityIsSupport(
       Database database,
       ObjectId id,
+      string viewDir,
       out SupportInfo info,
       out string[] new_sp)
     {
@@ -463,7 +497,7 @@ namespace PlantFlow_Support
       new_sp[0] = "";
       if(properties.Count > 0) new_sp[0] = properties[0];
       
-      new_sp[1] = this.cbbViewDirection.Text;
+      new_sp[1] = viewDir;
       if (string.IsNullOrEmpty(new_sp[0]))
         return false;
       

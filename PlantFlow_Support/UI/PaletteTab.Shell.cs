@@ -23,6 +23,7 @@ namespace PlantFlow_Support
                 _shellWeb.InitFailed += (s, reason) => RestoreLegacyShell("InitFailed: " + reason);
                 _shellWeb.MeshFailed += (s, reason) => Log("shell meshError: " + reason);
                 HookCatalogWebFocus(_shellWeb); // P4-3 KeepFocus 토글 재사용
+                HookDrawingBridge(_shellWeb);   // Phase 1a: drawing 채널 배선
                 tabMainUI.Visible = false;
                 this.Controls.Add(_shellWeb);
                 _shellWeb.BringToFront();
