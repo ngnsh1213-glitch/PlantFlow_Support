@@ -186,6 +186,7 @@ namespace PlantFlow_Support
         {
             if (_drawingBusy) return DrawingBridge.Fail(env.Id, "ER_BUSY", "다른 작업이 진행 중입니다.");
             _drawingBusy = true;
+            PlantOrthoView.FileDiag("Export2DAsync: busy=true 설정");
             try
             {
                 if (lvSupportName.Items.Count == 0) return DrawingBridge.Fail(env.Id, "ER1004", "선택된 서포트가 없습니다.");
@@ -200,23 +201,48 @@ namespace PlantFlow_Support
                     return DrawingBridge.Fail(env.Id, "ER_DOCMISMATCH", "서포트를 캡처한 도면과 현재 도면이 다릅니다. 목록을 지우고 다시 선택하세요.");
 
                 string code = null;
-                await docs.ExecuteInCommandContextAsync(async _ =>
+                PlantOrthoView.FileDiag("Export2DAsync: ExecuteInCommandContextAsync 진입 직전");
+                // phase2는 fire-and-forget Session 명령 체인이다. ExecuteInCommandContextAsync의
+                // Task는 그 체인 전체가 끝나야 완료되는데, PFSORTHOCONTINUE가 실행 중 오쏘 문서를
+                // CloseAndSave로 닫아 완료 신호가 유실 → await 영구 미완 → busy/스피너 stuck.
+                // 해법: Export2DCore(스케줄링) 반환 시점에만 신호받고, 컨텍스트 Task는 백그라운드로 둔다.
+                // ExecuteInCommandContextAsync는 ExecutionResult(awaitable)를 반환하므로 await하지 않고
+                // fire-and-forget으로 두되, 콜백 내부에서 예외를 직접 잡아 로그(미관측 예외 방지, 삼킴 금지).
+                var _schedDone = new TaskCompletionSource<bool>();
+                docs.ExecuteInCommandContextAsync(async _ =>
                 {
-                    Export2DCore(out code);
+                    try
+                    {
+                        PlantOrthoView.FileDiag("Export2DAsync: Export2DCore 호출 직전");
+                        Export2DCore(out code);
+                        PlantOrthoView.FileDiag("Export2DAsync: Export2DCore 반환");
+                    }
+                    catch (Exception _cx)
+                    {
+                        PlantOrthoView.FileDiag("Export2DAsync: Export2DCore 예외(백그라운드): " + _cx.Message);
+                    }
+                    finally
+                    {
+                        _schedDone.TrySetResult(true);
+                    }
                     await Task.CompletedTask;
                 }, null);
+                await _schedDone.Task;
+                PlantOrthoView.FileDiag("Export2DAsync: 스케줄링 완료 신호 수신 (code=" + (code ?? "null") + ")");
 
                 if (code != null) return DrawingBridge.Fail(env.Id, code, "Export 2D 실패");
                 return DrawingBridge.Ok(env.Id, new { ok = true });
             }
             catch (Exception ex)
             {
+                PlantOrthoView.FileDiag("Export2DAsync 예외: " + ex.Message);
                 Log("Export2D 실패: " + ex.Message);
                 return DrawingBridge.Fail(env.Id, "ERX", ex.Message);
             }
             finally
             {
                 _drawingBusy = false;
+                PlantOrthoView.FileDiag("Export2DAsync: busy=false (finally)");
             }
         }
     }

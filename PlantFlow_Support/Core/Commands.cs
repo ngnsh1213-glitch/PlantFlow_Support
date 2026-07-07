@@ -20,12 +20,13 @@ namespace PlantFlow_Support
     public static PSUtil PSUtil;
     public static string DocumentName;
 
-    [CommandMethod("AUTO2DUPDATESTANDARDSCALE")]
+    [CommandMethod("PFSORTHOUPDATESCALE")]
     public void UpdateStandardScale()
     {
       Document mdiActiveDocument = Application.DocumentManager.MdiActiveDocument;
       Editor editor = mdiActiveDocument.Editor;
       Database database = mdiActiveDocument.Database;
+      PlantOrthoView.FileDiag("PFSORTHOUPDATESCALE 진입 doc='" + mdiActiveDocument.Name + "'");
 
       if (Commands.ViewportId == ObjectId.Null)
       {
@@ -124,15 +125,17 @@ namespace PlantFlow_Support
       mdiActiveDocument.SendStringToExecute("._PSPACE\n", true, false, false);
       // Removed unknown command
       // mdiActiveDocument.SendStringToExecute("._AUTO2DEXPORTLAYOUTTOACAD2D\n", true, false, false);
-      mdiActiveDocument.SendStringToExecute("._AUTO2DCONTINUETOEXECUTE\n", true, false, false);
+      PlantOrthoView.FileDiag("PFSORTHOUPDATESCALE 종료: PFSORTHOCONTINUE 큐잉");
+      mdiActiveDocument.SendStringToExecute("._PFSORTHOCONTINUE\n", true, false, false);
     }
 
-    [CommandMethod("AUTO2DCONTINUETOEXECUTE", CommandFlags.Session)]
+    [CommandMethod("PFSORTHOCONTINUE", CommandFlags.Session)]
     public void SaveAndExitCurrentDrawingAndContinueToExecute()
     {
       Document mdiActiveDocument = Application.DocumentManager.MdiActiveDocument;
       Database database = mdiActiveDocument.Database;
       string filename = database.Filename;
+      PlantOrthoView.FileDiag("PFSORTHOCONTINUE 진입 doc='" + mdiActiveDocument.Name + "' IsMoreThanOne=" + Commands.IsMoreThanOne + " ItemNo=" + Commands.ItemNo);
       using (mdiActiveDocument.LockDocument())
       {
         using (Transaction transaction = database.TransactionManager.StartTransaction())
@@ -146,18 +149,57 @@ namespace PlantFlow_Support
           transaction.Commit();
         }
       }
+      PlantOrthoView.FileDiag("PFSORTHOCONTINUE: CloseAndSave 호출 직전 filename='" + filename + "'");
       DocumentExtension.CloseAndSave(mdiActiveDocument, filename);
+      PlantOrthoView.FileDiag("PFSORTHOCONTINUE: CloseAndSave 반환, PIPE 재활성 직전");
       foreach (Document document in Application.DocumentManager)
       {
         if (string.Compare(document.Name, Commands.DocumentName, true) == 0)
           Application.DocumentManager.MdiActiveDocument = document;
       }
       if (!Commands.IsMoreThanOne)
+      {
+        PlantOrthoView.FileDiag("PFSORTHOCONTINUE 종료: 단일 서포트(IsMoreThanOne=false) return");
         return;
+      }
       int itemNo = Commands.ItemNo;
       if (itemNo >= Commands.PSUtil.lvSupportName.Items.Count - 1)
+      {
+        PlantOrthoView.FileDiag("PFSORTHOCONTINUE 종료: 마지막 item(itemNo=" + itemNo + ") return");
         return;
+      }
+      PlantOrthoView.FileDiag("PFSORTHOCONTINUE: 다음 item PSUtil.run(" + itemNo + ") 호출");
       Commands.PSUtil.run(itemNo);
+    }
+
+    [CommandMethod("PFSORTHOPHASE2", CommandFlags.Session)]
+    public void ContinueOrthoCreateInOrthoDocument()
+    {
+      Document mdiActiveDocument = Application.DocumentManager.MdiActiveDocument;
+      Editor editor = mdiActiveDocument == null ? null : mdiActiveDocument.Editor;
+      PlantOrthoView.FileDiag("PFSORTHOPHASE2 진입 doc='" + (mdiActiveDocument == null ? "<null>" : mdiActiveDocument.Name) + "'");
+      editor?.WriteMessage("\n[PFS-DIAG] PFSORTHOPHASE2 진입 doc='" + (mdiActiveDocument == null ? "<null>" : mdiActiveDocument.Name) + "'");
+
+      object rawOrthoView = Commands.OrthoView;
+      PlantOrthoView orthoView = rawOrthoView as PlantOrthoView;
+      if (orthoView == null)
+      {
+        PlantOrthoView.FileDiag("PFSORTHOPHASE2 실패: OrthoView 인스턴스 없음");
+        editor?.WriteMessage("\n[PFS-DIAG] PFSORTHOPHASE2 실패: OrthoView 인스턴스 없음");
+        return;
+      }
+
+      try
+      {
+        orthoView.CreateOrthoFromCube();
+        PlantOrthoView.FileDiag("PFSORTHOPHASE2: CreateOrthoFromCube 반환(정상)");
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSORTHOPHASE2 예외: " + ex.GetType().Name + ": " + ex.Message);
+        editor?.WriteMessage("\n[PFS-DIAG] PFSORTHOPHASE2 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      PlantOrthoView.FileDiag("PFSORTHOPHASE2 종료");
     }
 
     public static void Export2DSession()

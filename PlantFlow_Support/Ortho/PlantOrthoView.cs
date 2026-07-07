@@ -136,8 +136,13 @@ namespace PlantFlow_Support
         this.pipingProjectPart = this.plantProject.ProjectParts["Piping"];
         this.orthoProjectpart = this.plantProject.ProjectParts["Ortho"];
         this.strCurrent3DDwgName = mdiActiveDocument.Name;
-        this.SelectOrthoDwg(ref mdiActiveDocument);
-        this.m_orthoDocEditor = Application.DocumentManager.MdiActiveDocument.Editor;
+        if (!this.SelectOrthoDwg(ref mdiActiveDocument))
+        {
+          this.m_bSuccess = false;
+          this.PoDiag("InitializeProjectData: Ortho DWG 생성/선택 실패 model3d='" + this.strCurrent3DDwgName + "'");
+          return;
+        }
+        this.m_orthoDocEditor = mdiActiveDocument.Editor;
         this.dwgSheetDefs = UIUtils.OrthoDwgSheetDefs;
         if (this.dwgSheetDefs != null)
           this.projectDatabase = this.dwgSheetDefs.ProjectDatabase;
@@ -149,6 +154,21 @@ namespace PlantFlow_Support
       }
     }
 
+    // 진단 전용 로거(로그만, 로직 무변경). 파일로도 tee.
+    private void PoDiag(string m)
+    {
+        FileDiag(m);
+        try { Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?.Editor.WriteMessage("\n[PFS-DIAG] " + m); }
+        catch (Exception _dx) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] " + _dx.Message); }
+    }
+
+    // 파일 진단 sink(문서 닫힘/컨텍스트 전환 무관 캡처). 실패는 Debug로만.
+    internal static void FileDiag(string m)
+    {
+        try { System.IO.File.AppendAllText(@"C:\Temp\pfs_diag.log", System.DateTime.Now.ToString("HH:mm:ss.fff") + " [PFS-DIAG] " + m + System.Environment.NewLine); }
+        catch (Exception _fx) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] FileDiag 실패: " + _fx.Message); }
+    }
+
     public void run()
     {
       if (!this.m_bSuccess)
@@ -158,10 +178,26 @@ namespace PlantFlow_Support
       {
         CommonUIUtils.acedPspace();
         UIUtils.GetCurrentLayoutSize(out this.m_paperWidth, out this.m_paperHeight);
+        try
+        {
+            var _e = PlantOrthoView.SPInfo.Extents;
+            Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+                .Editor.WriteMessage("\n[PFS-DIAG] engine SPInfo.Extents min=" + _e.MinPoint + " max=" + _e.MaxPoint
+                + " viewType=" + PlantOrthoView.SPInfo.ViewType + " viewDir=" + PlantOrthoView.SPInfo.ViewDirection
+                + " name=" + PlantOrthoView.SPInfo.Name);
+        }
+        catch (Exception _ex)
+        {
+            Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+                .Editor.WriteMessage("\n[PFS-DIAG] engine SPInfo.Extents 접근 예외(미설정?): " + _ex.Message);
+        }
         this.CreateView(PlantOrthoView.SPInfo.Extents);
       }
-      catch
+      catch (Exception _ex)
       {
+        Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+            .Editor.WriteMessage("\n[PFS-DIAG] engine run/CreateView 예외(원래 전파 보존): " + _ex.Message);
+        throw; // 원본은 try/finally(전파). 진단 로그만 남기고 전파 유지 — 로직 무변경.
       }
       finally
       {
@@ -177,25 +213,83 @@ namespace PlantFlow_Support
       this.m_strViewType = this.m_strViewName;
       this.m_viewDir = PlantOrthoView.SPInfo.ViewDirection;
       this.m_upVector = PlantOrthoView.SPInfo.UpVector;
-      this.CreateOrthoFromCube();
+      this.ScheduleCreateOrthoFromCubePhase2();
     }
 
     private bool SelectOrthoDwg(ref Document currentDoc)
     {
-      if (PlantOrthoView.cchNewProjectDwgRun("Ortho", false) && this.orthoProjectpart is OrthoProject orthoProjectpart)
+      string createdOrthoPath;
+      if (!PlantOrthoView.cchNewProjectDwgRun("Ortho", false, out createdOrthoPath))
+      {
+        this.PoDiag("SelectOrthoDwg: cchNewProjectDwgRun 실패");
+        return false;
+      }
+      Document orthoDoc = this.FindOpenDocument(createdOrthoPath);
+      if (orthoDoc == null)
+      {
+        this.PoDiag("SelectOrthoDwg: 생성된 Ortho 문서를 열림 목록에서 찾지 못함 path='" + createdOrthoPath + "'");
+        return false;
+      }
+      Application.DocumentManager.MdiActiveDocument = orthoDoc;
+      currentDoc = orthoDoc;
+      this.strCurrentDwgName = createdOrthoPath;
+      this.m_2DWorkflow = false;
+      if (this.orthoProjectpart is OrthoProject orthoProjectpart)
       {
         IDwgSheetDef dwgSheetDef = (IDwgSheetDef) null;
-        if (UIUtils.GetDwgSheetFromOrthoDwg(Application.DocumentManager.MdiActiveDocument.Database, out dwgSheetDef))
+        if (UIUtils.GetDwgSheetFromOrthoDwg(orthoDoc.Database, out dwgSheetDef))
           orthoProjectpart.SetOrthoDwgVersion(dwgSheetDef, 1);
       }
-      currentDoc = Application.DocumentManager.MdiActiveDocument;
-      this.strCurrentDwgName = Application.DocumentManager.MdiActiveDocument.Name;
-      this.m_2DWorkflow = false;
+      this.PoDiag("SelectOrthoDwg: PIPE 시작 공식 경로 Ortho 활성화 model3d='" + this.strCurrent3DDwgName + "' ortho='" + this.strCurrentDwgName + "'");
       return true;
+    }
+
+    private Document FindOpenDocument(string path)
+    {
+      string targetFullPath = Path.GetFullPath(path);
+      string targetFileName = Path.GetFileName(path);
+      foreach (Document document in Application.DocumentManager)
+      {
+        try
+        {
+          string docName = document.Name;
+          if (string.Compare(docName, path, true) == 0)
+            return document;
+          if (string.Compare(Path.GetFullPath(docName), targetFullPath, true) == 0)
+            return document;
+          if (string.Compare(Path.GetFileName(docName), targetFileName, true) == 0)
+            return document;
+        }
+        catch (Exception _dx)
+        {
+          System.Diagnostics.Debug.WriteLine("[PFS-DIAG] FindOpenDocument 비교 예외: " + _dx.Message);
+        }
+      }
+      return null;
+    }
+
+    private bool EnsureCurrentOrthoDocument(string reason)
+    {
+      Document activeDoc = Application.DocumentManager.MdiActiveDocument;
+      if (activeDoc != null && string.Compare(Path.GetFullPath(activeDoc.Name), Path.GetFullPath(this.CurrentOrthoDwgName), true) == 0)
+      {
+        this.m_orthoDocEditor = activeDoc.Editor;
+        this.m_dwgDatabase = activeDoc.Database;
+        return true;
+      }
+      this.PoDiag("EnsureCurrentOrthoDocument 검증 실패 reason='" + reason + "' active='" + (activeDoc == null ? "<null>" : activeDoc.Name) + "' ortho='" + this.CurrentOrthoDwgName + "'");
+      return false;
     }
 
     public static bool cchNewProjectDwgRun(string prjType, bool mustClose = true)
     {
+      string createdPath;
+      return PlantOrthoView.cchNewProjectDwgRun(prjType, mustClose, out createdPath);
+    }
+
+    public static bool cchNewProjectDwgRun(string prjType, bool mustClose, out string createdPath)
+    {
+      createdPath = string.Empty;
       Editor editor = Application.DocumentManager.MdiActiveDocument.Editor;
       Project project = PlantApplication.ProjectPart(prjType);
       if (project == null)
@@ -227,6 +321,7 @@ namespace PlantFlow_Support
       if (mustClose)
         ((IAcadDocument) acadDocument).Close(Type.Missing, Type.Missing);
       project.Save();
+      createdPath = path;
       Application.DocumentManager.MdiActiveDocument.SendStringToExecute("_.REFRESHPMESW\n", true, false, false);
       Application.DocumentManager.MdiActiveDocument.Editor.WriteMessage("\n" + str + "가 출력되었습니다. 저장 위치: " + path + "\n");
       return true;
@@ -234,10 +329,20 @@ namespace PlantFlow_Support
 
     public void CreateView(Extents3d Exts)
     {
+      try { PoDiag("CreateView 진입 Exts min=" + Exts.MinPoint + " max=" + Exts.MaxPoint + " currentOrtho='" + this.CurrentOrthoDwgName + "'"); }
+      catch (Exception _cvEntry) { PoDiag("CreateView Exts 접근 예외: " + _cvEntry.Message); }
       Document mdiActiveDocument = Application.DocumentManager.MdiActiveDocument;
       IDwgSheetDef dwgSheetDef = (IDwgSheetDef) null;
-      if (!UIUtils.GetDwgSheetFromOrthoView(this, out dwgSheetDef) || !UIUtils.ValidateOrthoDwgSheetVersion(this.orthoProjectpart, dwgSheetDef))
+      bool _sheetOk = UIUtils.GetDwgSheetFromOrthoView(this, out dwgSheetDef);
+      bool _sheetVersionOk = false;
+      if (_sheetOk)
+        _sheetVersionOk = UIUtils.ValidateOrthoDwgSheetVersion(this.orthoProjectpart, dwgSheetDef);
+      PoDiag("CreateView sheet gate sheetOk=" + _sheetOk + " versionOk=" + _sheetVersionOk + " sheetDefNull=" + (dwgSheetDef == null));
+      if (!_sheetOk || !_sheetVersionOk)
+      {
+        PoDiag("CreateView early return: sheet gate failed");
         return;
+      }
       mdiActiveDocument.Editor.SetImpliedSelection((ObjectId[]) null);
       if (this.m_selectedModels == null)
       {
@@ -268,8 +373,9 @@ namespace PlantFlow_Support
           PlantOrthoView.settings.OrthoView = UIUtils.s_TopView;
         this.m_plantOrthoCube.SetOrthoViewFaceColor((Autodesk.ProcessPower.PnP3dOrthoDrawingsUI.Commands.ViewType)(int)UIUtils.GetViewTypeFromName(PlantOrthoView.settings.OrthoView));
       }
-      catch
+      catch (Exception _cvx)
       {
+        PoDiag("CreateView 예외(삼킴 유지): " + _cvx.Message);
       }
     }
 
@@ -352,6 +458,20 @@ namespace PlantFlow_Support
       }
     }
 
+    private void ScheduleCreateOrthoFromCubePhase2()
+    {
+      Commands.OrthoView = this;
+      Document orthoDoc = this.FindOpenDocument(this.CurrentOrthoDwgName);
+      if (orthoDoc == null)
+      {
+        this.PoDiag("Schedule phase2 실패: Ortho 문서를 찾지 못함 ortho='" + this.CurrentOrthoDwgName + "'");
+        this.m_bSuccess = false;
+        return;
+      }
+      this.PoDiag("Schedule phase2: orthoDoc.SendStringToExecute target='" + orthoDoc.Name + "'");
+      orthoDoc.SendStringToExecute("._PFSORTHOPHASE2\n", true, false, false);
+    }
+
     public void CreateOrthoFromCube()
     {
       this.OrthoCube.OnCloseDoc();
@@ -372,6 +492,12 @@ namespace PlantFlow_Support
       this.m_upperRightCubePt = extents.MaxPoint;
       this.m_dViewportDepth = this.m_upperRightCubePt.Z - this.m_lowerLeftCubePt.Z;
       this.CloseOrthoViewDoc();
+      if (!this.EnsureCurrentOrthoDocument("CreateOrthoFromCube before CreateOrthos"))
+      {
+        if (cubeSolid != null)
+          cubeSolid.Dispose();
+        return;
+      }
       this.CreateOrthos(this.SelectedModels, this.m_strViewName, this.m_dScale, this.m_dViewportWidth, this.m_dViewportHeight, this.m_dViewportDepth, this.m_viewType, this.m_strViewType, this.m_viewDir, this.m_upVector, this.m_lowerLeftCubePt, this.m_upperRightCubePt, cubeSolid);
       if (cubeSolid == null)
         return;
@@ -393,6 +519,11 @@ namespace PlantFlow_Support
       Point3d upperRightPt,
       Solid3d cubeSolid)
     {
+      PoDiag("CreateOrthos 진입 selectedModels.Count=" + (selectedModels == null ? 0 : selectedModels.Count)
+        + " viewName='" + strViewName + "' viewType='" + strViewType + "' lowerLeft=" + lowerLeftPt + " upperRight=" + upperRightPt
+        + " cubeSolidNull=" + (cubeSolid == null));
+      if (!this.EnsureCurrentOrthoDocument("CreateOrthos entry"))
+        return;
       using (Application.DocumentManager.MdiActiveDocument.LockDocument())
       {
         try
@@ -403,8 +534,13 @@ namespace PlantFlow_Support
           double newVPWidth = 0.0;
           double newVPHeight = 0.0;
           bool bLocked = false;
-          if (!UIUtils.UnlockViewportScale(true, out bLocked))
+          bool _unlockOk = UIUtils.UnlockViewportScale(true, out bLocked);
+          PoDiag("CreateOrthos UnlockViewportScale result=" + _unlockOk + " bLocked=" + bLocked);
+          if (!_unlockOk)
+          {
+            PoDiag("CreateOrthos early return: UnlockViewportScale failed");
             return;
+          }
           double rotationAngle = 0.0;
           if (this.IsEditingView)
           {
@@ -413,8 +549,15 @@ namespace PlantFlow_Support
           else
           {
             double newVPScale = 0.0;
-            if (!this.ProcessViewportPlacement(viewportWidth, viewportHeight, scale, out newScale, out viewportId, out ptIns, out newVPWidth, out newVPHeight, out newVPScale, out rotationAngle))
+            bool _placementOk = this.ProcessViewportPlacement(viewportWidth, viewportHeight, scale, out newScale, out viewportId, out ptIns, out newVPWidth, out newVPHeight, out newVPScale, out rotationAngle);
+            PoDiag("CreateOrthos ProcessViewportPlacement result=" + _placementOk + " viewportId=" + viewportId
+              + " ptIns=" + ptIns + " newVPWidth=" + newVPWidth + " newVPHeight=" + newVPHeight
+              + " newVPScale=" + newVPScale + " rotationAngle=" + rotationAngle);
+            if (!_placementOk)
+            {
+              PoDiag("CreateOrthos early return: ProcessViewportPlacement failed");
               return;
+            }
             double num = PnPDwg2dUtil.ViewportPadding();
             if (!viewportId.IsNull && newVPWidth > 0.0 && newVPHeight > 0.0)
             {
@@ -442,11 +585,14 @@ namespace PlantFlow_Support
               PlantOrthoView.settings.OrthoScale = annoScale != null ? ((ObjectContext) annoScale).Name : scale.ToString();
             }
           }
+          PoDiag("CreateOrthos GenerateOrthos 호출 직전 viewportId=" + viewportId + " viewportWidth=" + viewportWidth + " viewportHeight=" + viewportHeight + " scale=" + scale);
           this.GenerateOrthos(selectedModels, strViewName, strViewType, lowerLeftPt, upperRightPt, viewType, ptIns, viewDir, upVector, viewportId, viewportWidth, viewportHeight, viewportDepth, scale, rotationAngle, cubeSolid);
+          PoDiag("CreateOrthos GenerateOrthos 호출 완료");
           CommonUIUtils.acedPostCommandPrompt();
         }
-        catch
+        catch (Exception _cox)
         {
+          PoDiag("CreateOrthos 예외(삼킴 유지): " + _cox.Message);
         }
       }
     }
@@ -524,12 +670,16 @@ namespace PlantFlow_Support
               object oldCmdEcho = Application.GetSystemVariable("CMDECHO");
               Application.SetSystemVariable("CMDECHO", 0);
               
+              PoDiag("AttachLoop dwg3dFiles count=" + (dwg3dFiles == null ? 0 : dwg3dFiles.Count));
               foreach (string dwg3dFile in dwg3dFiles)
               {
-                if (File.Exists(dwg3dFile))
+                bool _exists = File.Exists(dwg3dFile);
+                PoDiag("attach file='" + dwg3dFile + "' exists=" + _exists);
+                if (_exists)
                 {
                   string fileName = Path.GetFileName(dwg3dFile);
                   ObjectId objectId = database.AttachXref(dwg3dFile, fileName);
+                  PoDiag("attached '" + fileName + "' xrefId=" + objectId.ToString());
                   try
                   {
                     BlockTableRecord blockTableRecord = (BlockTableRecord) t.GetObject(objectId, (OpenMode) 1);
@@ -559,6 +709,7 @@ namespace PlantFlow_Support
               {
                 foreach (string frozenDwgLayer in this.m_FrozenDwgLayers)
                 {
+                  PoDiag("FrozenLayer=" + frozenDwgLayer);
                   if (((SymbolTable) layerTable).Has(frozenDwgLayer))
                   {
                     try
@@ -575,6 +726,7 @@ namespace PlantFlow_Support
               {
                 foreach (string offDwgLayer in this.m_OffDwgLayers)
                 {
+                  PoDiag("OffLayer=" + offDwgLayer);
                   if (((SymbolTable) layerTable).Has(offDwgLayer))
                   {
                     try
@@ -587,12 +739,29 @@ namespace PlantFlow_Support
                   }
                 }
               }
+              // [PFS-DIAG 2-3] attach 후 오쏘 DB xref 상태 열람(읽기 전용, t 아직 활성).
+              try
+              {
+                Autodesk.AutoCAD.DatabaseServices.XrefGraph _g = database.GetHostDwgXrefGraph(true);
+                int _n = ((Autodesk.AutoCAD.DatabaseServices.Graph) _g).NumNodes;
+                PoDiag("orthoXref nodes=" + _n);
+                for (int _i = 0; _i < _n; _i++)
+                {
+                  Autodesk.AutoCAD.DatabaseServices.XrefGraphNode _node = _g.GetXrefNode(_i);
+                  if (_node == null || _node.BlockTableRecordId.IsNull) continue;
+                  BlockTableRecord _btr = t.GetObject(_node.BlockTableRecordId, (OpenMode) 0) as BlockTableRecord;
+                  if (_btr != null)
+                    PoDiag("orthoXref path='" + _btr.PathName + "' status=" + _btr.XrefStatus + " unloaded=" + _btr.IsUnloaded);
+                }
+              }
+              catch (Exception _gx) { PoDiag("orthoXref 열람 예외: " + _gx.Message); }
               t.Commit();
             }
           }
         }
-        catch
+        catch (Exception _ex)
         {
+          PoDiag("attach 블록 예외(삼킴 유지): " + _ex.Message);
           tempDrawing = false;
         }
       }
@@ -601,6 +770,8 @@ namespace PlantFlow_Support
 
     private void SetView(Extents3d ext, Vector3d viewDir, Vector3d upVector)
     {
+      try { PoDiag("SetView 진입 ext min=" + ext.MinPoint + " max=" + ext.MaxPoint + " viewDir=" + viewDir + " up=" + upVector); }
+      catch (Exception _sx) { PoDiag("SetView ext 접근 예외: " + _sx.Message); }
       Point3d point3d1 = ext.MaxPoint;
       double x1 = point3d1.X;
       point3d1 = ext.MinPoint;
@@ -741,9 +912,33 @@ namespace PlantFlow_Support
           this.m_orthoDocEditor.WriteMessage("Error on creating query box");
           throw new Exception();
         }
+        try
+        {
+            var _in = new System.Collections.Generic.List<string>();
+            if (dwg3dFiles != null) foreach (string _f in dwg3dFiles) _in.Add(_f);
+            Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+                .Editor.WriteMessage("\n[PFS-DIAG] Stage-P input dwg3dFiles.Count=" + (dwg3dFiles == null ? 0 : dwg3dFiles.Count)
+                + " qbox lowerLeft=" + lowerLeftPt + " upperRight=" + upperRightPt
+                + " files=[" + string.Join(" | ", _in) + "]");
+        }
+        catch (Exception _px) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] Stage-P input 로그 예외: " + _px.Message); }
         ArrayList modelFiles = new ArrayList();
         Extents3d exts;
         UIUtils.UpdateFileCollectionWithXrefs(dwg3dFiles, ref modelFiles, out exts);
+        try
+        {
+            var _names = new System.Collections.Generic.List<string>();
+            foreach (var _mf in modelFiles)
+            {
+                var _pn = _mf as ModelFile;
+                _names.Add(_pn != null ? _pn.ModelFileName : _mf.ToString());
+            }
+            Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+                .Editor.WriteMessage("\n[PFS-DIAG] Stage-P modelFiles.Count=" + modelFiles.Count
+                + " exts min=" + exts.MinPoint + " max=" + exts.MaxPoint
+                + " files=[" + string.Join(" | ", _names) + "]");
+        }
+        catch (Exception _px) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] Stage-P modelFiles 로그 예외: " + _px.Message); }
         ((IDwgQuery) dwgQueryByBox).ModelFiles = (ModelFile[]) modelFiles.ToArray(typeof (ModelFile));
         IDwgSetClipper clipper = cubeSolid == null ? Dwg2dGen.NewDwgSetClipper(dwgViewDef, UIUtils.GetClipInlateBy()) : Dwg2dGen.NewDwgSetClipper(cubeSolid, UIUtils.GetClipInlateBy());
         bool skipClipping = false;
@@ -756,8 +951,17 @@ namespace PlantFlow_Support
         }
         this.dwgSheetDefs.Add(dwgSheetDef);
         dwgSheetDef.DwgViewDefs.Add(dwgViewDef);
+        FileDiag("GenerateOrthos: FlattenDiagSnapshot 호출 직전");
+        var _flattenBaseline = this.FlattenDiagSnapshot();
+        FileDiag("GenerateOrthos: CreateOrUpdateOrthoView 호출 직전 (baseline=" + _flattenBaseline.Count + ")");
         UIUtils.CreateOrUpdateOrthoView(dwgSheetDef, strViewName, this.orthoProjectpart, skipClipping, false, clipper, viewportRotation, this.m_FrozenDwgLayers, this.m_OffDwgLayers, this.Offset, this.Rotation);
+        FileDiag("GenerateOrthos: CreateOrUpdateOrthoView 반환, FlattenDiagStage1 호출 직전");
+        this.FlattenDiagStage1(viewportId, _flattenBaseline);
+        FileDiag("GenerateOrthos: FlattenDiagStage1 반환, FlattenDiagStage2 호출 직전");
+        this.FlattenDiagStage2(_flattenBaseline);
+        FileDiag("GenerateOrthos: FlattenDiagStage2 반환, AnnotateViewport 호출 직전");
         this.m_viewportManager.AnnotateViewport(viewportId);
+        FileDiag("GenerateOrthos: AnnotateViewport 반환");
       }
       catch (OutOfMemoryException ex)
       {
@@ -774,6 +978,282 @@ namespace PlantFlow_Support
 
 
 
+    // Stage1: generator 전 baseline 스냅샷(paper+model space ObjectId 집합).
+    private System.Collections.Generic.HashSet<ObjectId> FlattenDiagSnapshot()
+    {
+      var set = new System.Collections.Generic.HashSet<ObjectId>();
+      try
+      {
+        Document doc = Application.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+          System.Diagnostics.Debug.WriteLine("[PFS-DIAG] FlattenDiagSnapshot: doc null");
+          return set;
+        }
+        Database db = doc.Database;
+        FileDiag("FlattenDiagSnapshot enter (상위 락 사용, 자체 LockDocument 없음)");
+        // 상위 CreateOrthos가 이미 문서 잠금 보유 → 자체 LockDocument 제거(Session 컨텍스트 중첩 데드락 방지).
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = (BlockTable) tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+          foreach (string sp in new string[] { BlockTableRecord.PaperSpace, BlockTableRecord.ModelSpace })
+          {
+            BlockTableRecord btr = (BlockTableRecord) tr.GetObject(bt[sp], OpenMode.ForRead);
+            foreach (ObjectId id in btr)
+              set.Add(id);
+          }
+          tr.Commit();
+        }
+        FileDiag("FlattenDiagSnapshot exit count=" + set.Count);
+      }
+      catch (Exception ex)
+      {
+        FileDiag("FlattenDiagSnapshot 예외: " + ex.Message);
+        System.Diagnostics.Debug.WriteLine("[PFS-DIAG] FlattenDiagSnapshot 예외: " + ex.Message);
+      }
+      return set;
+    }
+
+    // Stage1: generator 후 재열거 -> baseline에 없는 신규 엔티티(=엔진 산출물)만 보고(로그 전용).
+    private void FlattenDiagStage1(ObjectId viewportId, System.Collections.Generic.HashSet<ObjectId> baseline)
+    {
+      try
+      {
+        Document doc = Application.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+          System.Diagnostics.Debug.WriteLine("[PFS-DIAG] FlattenDiagStage1: doc null");
+          return;
+        }
+        Editor ed = doc.Editor;
+        Database db = doc.Database;
+        if (baseline == null)
+          baseline = new System.Collections.Generic.HashSet<ObjectId>();
+        FileDiag("FlattenDiagStage1 enter (상위 락 사용, 자체 LockDocument 없음)");
+        // 상위 CreateOrthos가 이미 문서 잠금 보유 → 자체 LockDocument 제거(데드락 방지).
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = (BlockTable) tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+          foreach (string sp in new string[] { BlockTableRecord.PaperSpace, BlockTableRecord.ModelSpace })
+          {
+            var typeCount = new System.Collections.Generic.Dictionary<string, int>();
+            var layerCount = new System.Collections.Generic.Dictionary<string, int>();
+            var blockNames = new System.Collections.Generic.List<string>();
+            var samples = new System.Collections.Generic.List<string>();
+            int newCount = 0;
+            BlockTableRecord btr = (BlockTableRecord) tr.GetObject(bt[sp], OpenMode.ForRead);
+            foreach (ObjectId id in btr)
+            {
+              if (baseline.Contains(id))
+                continue;
+              Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+              if (ent == null)
+                continue;
+              newCount++;
+              string tn = ent.GetType().Name;
+              typeCount[tn] = (typeCount.ContainsKey(tn) ? typeCount[tn] : 0) + 1;
+              string ln = ent.Layer;
+              layerCount[ln] = (layerCount.ContainsKey(ln) ? layerCount[ln] : 0) + 1;
+              BlockReference br = ent as BlockReference;
+              if (br != null)
+              {
+                try
+                {
+                  BlockTableRecord def = tr.GetObject(br.BlockTableRecord, OpenMode.ForRead) as BlockTableRecord;
+                  blockNames.Add((def != null ? def.Name : "?") + "[" + br.GetType().FullName + "]");
+                }
+                catch (Exception _bx)
+                {
+                  blockNames.Add("?(blockNameEx=" + _bx.Message + ")[" + br.GetType().FullName + "]");
+                }
+              }
+              if (samples.Count < 8)
+                samples.Add(tn + ":" + ent.Handle.ToString() + ":" + ln);
+            }
+            var tp = new System.Collections.Generic.List<string>();
+            foreach (var kv in typeCount)
+              tp.Add(kv.Key + "=" + kv.Value);
+            var lp = new System.Collections.Generic.List<string>();
+            foreach (var kv in layerCount)
+              lp.Add(kv.Key + "=" + kv.Value);
+            string _line = "FlattenDiag NEW " + sp + " count=" + newCount
+              + " types={" + string.Join(", ", tp) + "}"
+              + " layers={" + string.Join(", ", lp) + "}"
+              + " blockRefs=[" + string.Join(" | ", blockNames) + "]"
+              + " samples=[" + string.Join(" | ", samples) + "]";
+            FileDiag(_line);
+            ed?.WriteMessage("\n[PFS-DIAG] " + _line);
+          }
+          FileDiag("FlattenDiagStage1 space 열거 완료, viewport 조회 직전");
+          try
+          {
+            if (!viewportId.IsNull)
+            {
+              Viewport vp = tr.GetObject(viewportId, OpenMode.ForRead) as Viewport;
+              if (vp != null)
+              {
+                FileDiag("FlattenDiag viewport On=" + vp.On + " CustomScale=" + vp.CustomScale);
+                ed?.WriteMessage("\n[PFS-DIAG] FlattenDiag viewport On=" + vp.On
+                  + " CustomScale=" + vp.CustomScale);
+              }
+            }
+          }
+          catch (Exception _vx)
+          {
+            FileDiag("FlattenDiag viewport 접근 예외: " + _vx.Message);
+            ed?.WriteMessage("\n[PFS-DIAG] FlattenDiag viewport 접근 예외: " + _vx.Message);
+          }
+          tr.Commit();
+        }
+        FileDiag("FlattenDiagStage1 exit(정상)");
+      }
+      catch (Exception ex)
+      {
+        FileDiag("FlattenDiag 예외: " + ex.GetType().Name + ": " + ex.Message);
+        try { Application.DocumentManager.MdiActiveDocument?.Editor.WriteMessage("\n[PFS-DIAG] FlattenDiag 예외: " + ex.GetType().Name + ": " + ex.Message); }
+        catch (Exception _dx) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] " + _dx.Message); }
+      }
+    }
+
+    // Stage2: 오쏘 엔진 산출 익명 블록(*U##)을 비파괴 explode -> 2D 엔티티를 PFS_ORTHO_FLATTEN 레이어에 복사(실증).
+    private void FlattenDiagStage2(System.Collections.Generic.HashSet<ObjectId> baseline)
+    {
+      try
+      {
+        Document doc = Application.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+          FileDiag("FlattenDiagStage2: doc null");
+          return;
+        }
+        Database db = doc.Database;
+        if (baseline == null)
+          baseline = new System.Collections.Generic.HashSet<ObjectId>();
+        FileDiag("FlattenDiagStage2 enter (상위 락 사용, 자체 LockDocument 없음)");
+        // 상위 CreateOrthos가 문서 잠금 보유 -> 자체 LockDocument 금지(hang 방지).
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          ObjectId flatLayerId = ObjectId.Null;
+          LayerTable lt = (LayerTable) tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+          const string flatLayer = "PFS_ORTHO_FLATTEN";
+          if (lt.Has(flatLayer))
+          {
+            flatLayerId = lt[flatLayer];
+          }
+          else
+          {
+            lt.UpgradeOpen();
+            LayerTableRecord ltr = new LayerTableRecord();
+            ltr.Name = flatLayer;
+            ltr.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex(Autodesk.AutoCAD.Colors.ColorMethod.ByAci, 1);
+            flatLayerId = lt.Add(ltr);
+            tr.AddNewlyCreatedDBObject(ltr, true);
+          }
+
+          BlockTable bt = (BlockTable) tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+          BlockTableRecord ms = (BlockTableRecord) tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+
+          var targets = new System.Collections.Generic.List<ObjectId>();
+          foreach (ObjectId id in ms)
+          {
+            if (baseline.Contains(id))
+              continue;
+            BlockReference br = tr.GetObject(id, OpenMode.ForRead) as BlockReference;
+            if (br == null)
+              continue;
+            BlockTableRecord def = tr.GetObject(br.BlockTableRecord, OpenMode.ForRead) as BlockTableRecord;
+            string nm = def != null ? def.Name : "";
+            if (nm.StartsWith("*"))
+              targets.Add(id);
+          }
+          FileDiag("FlattenDiagStage2 대상 익명블록 수=" + targets.Count);
+
+          var typeCount = new System.Collections.Generic.Dictionary<string, int>();
+          int appended = 0;
+          int nested = 0;
+          int failed = 0;
+          foreach (ObjectId id in targets)
+          {
+            BlockReference br = tr.GetObject(id, OpenMode.ForRead) as BlockReference;
+            if (br == null)
+              continue;
+            ExplodeRecursive(br, ms, tr, flatLayerId, 0, typeCount, ref appended, ref nested, ref failed);
+          }
+
+          var tp = new System.Collections.Generic.List<string>();
+          foreach (var kv in typeCount)
+            tp.Add(kv.Key + "=" + kv.Value);
+          FileDiag("FlattenDiagStage2 결과 append(leaf 2D)=" + appended + " nested블록=" + nested
+            + " explode실패=" + failed + " leaf타입={" + string.Join(", ", tp) + "}");
+          tr.Commit();
+        }
+        FileDiag("FlattenDiagStage2 exit(정상)");
+      }
+      catch (Exception ex)
+      {
+        FileDiag("FlattenDiagStage2 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    // 재귀 explode: leaf 2D 엔티티는 PFS_ORTHO_FLATTEN에 append, 중첩 블록은 재귀. 비-append 객체는 Dispose.
+    private void ExplodeRecursive(Entity ent, BlockTableRecord ms, Transaction tr, ObjectId layerId,
+      int depth, System.Collections.Generic.Dictionary<string, int> typeCount,
+      ref int appended, ref int nested, ref int failed)
+    {
+      if (depth > 12)
+      {
+        FileDiag("ExplodeRecursive 깊이 초과(12)");
+        return;
+      }
+      DBObjectCollection col = new DBObjectCollection();
+      try
+      {
+        ent.Explode(col);
+      }
+      catch (Exception ex)
+      {
+        failed++;
+        FileDiag("Explode 실패(depth=" + depth + "): " + ex.Message);
+        return;
+      }
+      foreach (DBObject o in col)
+      {
+        Entity e = o as Entity;
+        if (e == null)
+        {
+          o.Dispose();
+          continue;
+        }
+        if (e is BlockReference nb)
+        {
+          nested++;
+          ExplodeRecursive(nb, ms, tr, layerId, depth + 1, typeCount, ref appended, ref nested, ref failed);
+          nb.Dispose();
+        }
+        else if (e is AttributeDefinition)
+        {
+          e.Dispose();
+        }
+        else
+        {
+          string tn = e.GetType().Name;
+          typeCount[tn] = typeCount.ContainsKey(tn) ? typeCount[tn] + 1 : 1;
+          try
+          {
+            e.LayerId = layerId;
+            ms.AppendEntity(e);
+            tr.AddNewlyCreatedDBObject(e, true);
+            appended++;
+          }
+          catch (Exception ax)
+          {
+            failed++;
+            FileDiag("append 실패 " + tn + ": " + ax.Message);
+            e.Dispose();
+          }
+        }
+      }
+    }
     private void BlockRequired(Document doc)
     {
     }

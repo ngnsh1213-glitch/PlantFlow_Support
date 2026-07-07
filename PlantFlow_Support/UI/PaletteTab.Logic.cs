@@ -46,26 +46,26 @@ namespace PlantFlow_Support
         // Top
         this.ViewTypes["Top"] = PlantFlow_Support.Commands.ViewType.Top;
         this.UCSs["Top"] = Matrix3d.Identity;
-        this.UpVectors["Top"] = Vector3d.YAxis;
-        this.ViewDirectionVectors["Top"] = Vector3d.ZAxis.Negate();
+        this.UpVectors["Top"] = Vector3d.YAxis.Negate();
+        this.ViewDirectionVectors["Top"] = Vector3d.ZAxis;
 
         // Bottom
         this.ViewTypes["Bottom"] = PlantFlow_Support.Commands.ViewType.Bottom;
         this.UCSs["Bottom"] = Matrix3d.Rotation(Math.PI, Vector3d.XAxis, Point3d.Origin);
         this.UpVectors["Bottom"] = Vector3d.YAxis.Negate();
-        this.ViewDirectionVectors["Bottom"] = Vector3d.ZAxis;
+        this.ViewDirectionVectors["Bottom"] = Vector3d.ZAxis.Negate();
 
         // Front
         this.ViewTypes["Front"] = PlantFlow_Support.Commands.ViewType.Front;
         this.UCSs["Front"] = Matrix3d.Rotation(Math.PI / 2.0, Vector3d.XAxis, Point3d.Origin);
         this.UpVectors["Front"] = Vector3d.ZAxis;
-        this.ViewDirectionVectors["Front"] = Vector3d.YAxis; 
+        this.ViewDirectionVectors["Front"] = Vector3d.YAxis.Negate();
 
         // Back
         this.ViewTypes["Back"] = PlantFlow_Support.Commands.ViewType.Back;
         this.UCSs["Back"] = Matrix3d.Rotation(Math.PI / 2.0, Vector3d.XAxis, Point3d.Origin) * Matrix3d.Rotation(Math.PI, Vector3d.ZAxis, Point3d.Origin);
         this.UpVectors["Back"] = Vector3d.ZAxis;
-        this.ViewDirectionVectors["Back"] = Vector3d.YAxis.Negate();
+        this.ViewDirectionVectors["Back"] = Vector3d.YAxis;
 
         // Left
         this.ViewTypes["Left"] = PlantFlow_Support.Commands.ViewType.Left;

@@ -136,7 +136,7 @@ namespace PlantFlow_Support
             mdiActiveDocument.SendStringToExecute("._AUTO2DPROCESSZOOM\n", true, false, false);
             mdiActiveDocument.SendStringToExecute("._PSPACE\n", true, false, false);
             Commands.ViewportId = viewport_id;
-            mdiActiveDocument.SendStringToExecute("AUTO2DUPDATESTANDARDSCALE\n", false, false, true);
+            mdiActiveDocument.SendStringToExecute("PFSORTHOUPDATESCALE\n", false, false, true);
         }
 
         private void EnsureLayers(Transaction trans, Database db)

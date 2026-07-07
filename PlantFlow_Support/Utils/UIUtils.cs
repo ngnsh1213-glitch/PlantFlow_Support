@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
@@ -733,8 +734,9 @@ label_15:
                 }
               }
             }
-            catch
+            catch (Exception _ex)
             {
+              System.Diagnostics.Debug.WriteLine("[PFS-DIAG] GetUnLoadedDwgFiles xref 검사 예외(삼킴 유지): " + _ex.Message);
             }
             finally
             {
@@ -743,6 +745,13 @@ label_15:
           }
         }
       }
+      try
+      {
+          Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+              .Editor.WriteMessage("\n[PFS-DIAG] UnLoadedDwgFiles count=" + unLoadedDwgFiles.Count
+              + " : " + string.Join(", ", unLoadedDwgFiles.Cast<string>()));
+      }
+      catch (Exception _ex) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] " + _ex.Message); }
       return unLoadedDwgFiles;
     }
 
@@ -845,6 +854,13 @@ label_15:
       if (((DisposableWrapper) dwgDatabase) == ((DisposableWrapper) null))
         return;
       modelFiles.Add((object) modelFile);
+      try
+      {
+          Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+              .Editor.WriteMessage("\n[PFS-DIAG] UFC enter file='" + strFileName + "' isRef=" + bIsRefencedDwg
+              + " modelFiles.Count(after root add)=" + modelFiles.Count);
+      }
+      catch (Exception _px) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] UFC enter 로그 예외: " + _px.Message); }
       if (unLoadedFiles == null)
         unLoadedFiles = UIUtils.GetUnLoadedDwgFiles(dwgDatabase);
       try
@@ -870,6 +886,14 @@ label_15:
               {
                 if (blockTableRecord.IsFromExternalReference)
                 {
+                  try
+                  {
+                      Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+                          .Editor.WriteMessage("\n[PFS-DIAG] flag2-scan xrefBTR path='" + blockTableRecord.PathName
+                          + "' overlay=" + blockTableRecord.IsFromOverlayReference
+                          + " unloaded=" + blockTableRecord.IsUnloaded);
+                  }
+                  catch (Exception _px) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] flag2-scan 로그 예외: " + _px.Message); }
                   if (!blockTableRecord.IsFromOverlayReference)
                   {
                     if (!blockTableRecord.IsUnloaded)
@@ -881,6 +905,12 @@ label_15:
             else
               break;
           }
+          try
+          {
+              Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+                  .Editor.WriteMessage("\n[PFS-DIAG] UFC file='" + strFileName + "' flag2(ModelSpace 순회 진입)=" + flag2);
+          }
+          catch (Exception _px) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] flag2 결과 로그 예외: " + _px.Message); }
           if (flag2)
           {
             BlockTableRecord blockTableRecord1 = (BlockTableRecord) transaction.GetObject(((SymbolTable) blockTable)[BlockTableRecord.ModelSpace], (OpenMode) 0);
@@ -901,6 +931,16 @@ label_15:
                 }
                 if (blockTableRecord2 != null)
                 {
+                  try
+                  {
+                      Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+                          .Editor.WriteMessage("\n[PFS-DIAG] msref BTR path='" + blockTableRecord2.PathName
+                          + "' isExtRef=" + blockTableRecord2.IsFromExternalReference
+                          + " overlay=" + blockTableRecord2.IsFromOverlayReference
+                          + " unloaded=" + blockTableRecord2.IsUnloaded
+                          + " visible=" + (entity != null && entity.Visible));
+                  }
+                  catch (Exception _px) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] msref 로그 예외: " + _px.Message); }
                   if (blockTableRecord2.IsFromExternalReference && !blockTableRecord2.IsFromOverlayReference && !blockTableRecord2.IsUnloaded)
                   {
                     string pathName = blockTableRecord2.PathName;
@@ -910,7 +950,15 @@ label_15:
                       {
                         string lower = pathName.Trim().ToLower();
                         if (unLoadedFiles.Contains(lower))
+                        {
+                          try
+                          {
+                              Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument?
+                                  .Editor.WriteMessage("\n[PFS-DIAG] SKIP(unLoadedFiles) path='" + lower + "'");
+                          }
+                          catch (Exception _px) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] SKIP 로그 예외: " + _px.Message); }
                           continue;
+                        }
                       }
                       string empty = string.Empty;
                       string fullPath = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(strFileName), pathName));
@@ -1534,22 +1582,34 @@ label_15:
       Transaction transaction = (Transaction) null;
       try
       {
-        transaction = ((Autodesk.AutoCAD.DatabaseServices.TransactionManager) Application.DocumentManager.MdiActiveDocument.TransactionManager).StartTransaction();
-        Editor editor = Application.DocumentManager.MdiActiveDocument.Editor;
-        Viewport viewport = (Viewport) transaction.GetObject(editor.ActiveViewportId, (OpenMode) 1);
+        Document _doc = Application.DocumentManager.MdiActiveDocument;
+        Editor _diagEditor = _doc != null ? _doc.Editor : null;
+        _diagEditor?.WriteMessage("\n[PFS-DIAG] UnlockViewportScale 진입 bToUnlock=" + bToUnlock + " doc='" + (_doc == null ? "<null>" : _doc.Name) + "'");
+        transaction = ((Autodesk.AutoCAD.DatabaseServices.TransactionManager) _doc.TransactionManager).StartTransaction();
+        Editor editor = _doc.Editor;
+        ObjectId _activeVpId = editor.ActiveViewportId;
+        _diagEditor?.WriteMessage("\n[PFS-DIAG] UnlockViewportScale activeViewportId=" + _activeVpId + " isNull=" + _activeVpId.IsNull);
+        Viewport viewport = (Viewport) transaction.GetObject(_activeVpId, (OpenMode) 1);
         if (((DisposableWrapper) null) != ((DisposableWrapper) viewport))
         {
           bLocked = viewport.Locked;
+          _diagEditor?.WriteMessage("\n[PFS-DIAG] UnlockViewportScale viewport number=" + viewport.Number + " locked=" + bLocked + " on=" + viewport.On + " center=" + viewport.CenterPoint + " size=(" + viewport.Width + "," + viewport.Height + ")");
           if (bToUnlock & bLocked)
             viewport.Locked = false;
           else if (!bLocked && !bToUnlock)
             viewport.Locked = true;
         }
+        else
+        {
+          _diagEditor?.WriteMessage("\n[PFS-DIAG] UnlockViewportScale viewport=null");
+        }
         transaction.Commit();
       }
-      catch
+      catch (Exception _ux)
       {
-        transaction.Abort();
+        try { transaction?.Abort(); } catch (Exception _abortEx) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] UnlockViewportScale Abort 예외: " + _abortEx.Message); }
+        try { Application.DocumentManager.MdiActiveDocument?.Editor.WriteMessage("\n[PFS-DIAG] UnlockViewportScale 예외: " + _ux.GetType().Name + ": " + _ux.Message); }
+        catch (Exception _logEx) { System.Diagnostics.Debug.WriteLine("[PFS-DIAG] UnlockViewportScale 로그 예외: " + _logEx.Message); }
         return false;
       }
       return true;
