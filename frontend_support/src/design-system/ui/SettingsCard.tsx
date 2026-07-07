@@ -21,10 +21,10 @@ type SettingsCardProps = Omit<React.ComponentProps<typeof Card>, 'title'> & {
 export function SettingsCard({ title, variant = 'default', className, children, ...props }: SettingsCardProps) {
     return (
         <Card
-            className={`!rounded-[14px] ${cardVariantClass[variant]} !bg-white/70 !shadow-sm overflow-hidden ${className || ''}`}
+            className={`!rounded-[14px] ${cardVariantClass[variant]} !bg-white/70 !shadow-sm overflow-hidden flex flex-col ${className || ''}`}
             {...props}
         >
-            <CardHeader className={`${headerVariantClass[variant]} border-b px-5 pt-3 pb-5`}>
+            <CardHeader className={`shrink-0 ${headerVariantClass[variant]} border-b px-5 pt-3 pb-5`}>
                 <CardTitle className="text-[17px] font-bold text-blue-600">{title}</CardTitle>
             </CardHeader>
             {children}

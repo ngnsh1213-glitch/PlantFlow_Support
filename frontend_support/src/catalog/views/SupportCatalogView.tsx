@@ -6,8 +6,9 @@ import { Card, CardContent } from "../../design-system/ui/Card";
 import { Input } from "../../design-system/ui/Input";
 import { SettingsCard } from "../../design-system/ui/SettingsCard";
 import { SettingsField, SettingsSelect } from "../../design-system/ui/SettingsControls";
+import { realCatalogApi, isWebViewCatalogAvailable } from "../api/realCatalogApi";
 import { mockCatalogApi } from "../api/mockCatalogApi";
-import type { ParameterDef, VariantInput, VariantRow } from "../api/catalogApi";
+import type { CatalogApi, CatalogType, ParameterDef, VariantInput, VariantRow } from "../api/catalogApi";
 
 type LoadState = "idle" | "loading" | "error";
 
@@ -21,15 +22,17 @@ function inputFromRow(row: VariantRow | null, params: ParameterDef[]): VariantIn
 }
 
 export default function SupportCatalogView() {
-  const [types, setTypes] = useState([] as Awaited<ReturnType<typeof mockCatalogApi.listTypes>>);
+  const catalogApi = useMemo<CatalogApi>(() => (isWebViewCatalogAvailable() ? realCatalogApi : mockCatalogApi), []);
+  const [types, setTypes] = useState<CatalogType[]>([]);
   const [activeType, setActiveType] = useState("");
   const [variants, setVariants] = useState<VariantRow[]>([]);
   const [params, setParams] = useState<ParameterDef[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [form, setForm] = useState<VariantInput>({ dn: "", shortDescription: "", params: {} });
-  const [status, setStatus] = useState("Mock catalog API ready.");
+  const [status, setStatus] = useState(`${catalogApi === realCatalogApi ? "Host" : "Mock"} catalog API ready.`);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [sortAsc, setSortAsc] = useState(true);
+  const isBusy = loadState === "loading";
 
   const selectedRow = variants.find((row) => row.pnpId === selectedId) ?? null;
   const activeMeta = types.find((type) => type.id === activeType);
@@ -42,7 +45,7 @@ export default function SupportCatalogView() {
   useEffect(() => {
     let cancelled = false;
     setLoadState("loading");
-    mockCatalogApi.listTypes()
+    catalogApi.listTypes()
       .then((next) => {
         if (cancelled) return;
         setTypes(next);
@@ -57,13 +60,13 @@ export default function SupportCatalogView() {
         }
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [catalogApi]);
 
   useEffect(() => {
     if (!activeType) return;
     let cancelled = false;
     setLoadState("loading");
-    Promise.all([mockCatalogApi.listVariants(activeType), mockCatalogApi.getParamKeys(activeType)])
+    Promise.all([catalogApi.listVariants(activeType), catalogApi.getParamKeys(activeType)])
       .then(([nextRows, nextParams]) => {
         if (cancelled) return;
         setVariants(nextRows);
@@ -71,7 +74,7 @@ export default function SupportCatalogView() {
         const first = nextRows[0] ?? null;
         setSelectedId(first?.pnpId ?? null);
         setForm(inputFromRow(first, nextParams));
-        setStatus(`${activeType} mock data loaded.`);
+        setStatus(`${activeType} catalog data loaded.`);
         setLoadState("idle");
       })
       .catch((err: unknown) => {
@@ -82,7 +85,7 @@ export default function SupportCatalogView() {
         }
       });
     return () => { cancelled = true; };
-  }, [activeType]);
+  }, [activeType, catalogApi]);
 
   useEffect(() => {
     setForm(inputFromRow(selectedRow, params));
@@ -94,21 +97,21 @@ export default function SupportCatalogView() {
 
   const refresh = async () => {
     if (!activeType) return;
-    const [nextRows, nextParams] = await Promise.all([mockCatalogApi.listVariants(activeType), mockCatalogApi.getParamKeys(activeType)]);
+    const [nextRows, nextParams] = await Promise.all([catalogApi.listVariants(activeType), catalogApi.getParamKeys(activeType)]);
     setVariants(nextRows);
     setParams(nextParams);
-    setStatus(`${activeType} refreshed from mock adapter.`);
+    setStatus(`${activeType} refreshed.`);
   };
 
   const runAction = async (action: "add" | "update" | "delete" | "load" | "preview") => {
     try {
       setLoadState("loading");
       let result;
-      if (action === "add") result = await mockCatalogApi.addVariant(activeType, form);
-      if (action === "update" && selectedId != null) result = await mockCatalogApi.updateVariant(selectedId, activeType, form);
-      if (action === "delete" && selectedId != null) result = await mockCatalogApi.deleteVariant(selectedId);
-      if (action === "load") result = await mockCatalogApi.loadAcat();
-      if (action === "preview") result = await mockCatalogApi.preview({ type: activeType, params: form.params });
+      if (action === "add") result = await catalogApi.addVariant(activeType, form);
+      if (action === "update" && selectedId != null) result = await catalogApi.updateVariant(selectedId, activeType, form);
+      if (action === "delete" && selectedId != null) result = await catalogApi.deleteVariant(selectedId);
+      if (action === "load") result = await catalogApi.loadAcat();
+      if (action === "preview") result = await catalogApi.preview({ type: activeType, params: form.params });
       setStatus(result?.message ?? "Action skipped.");
       await refresh();
     } catch (err) {
@@ -130,14 +133,14 @@ export default function SupportCatalogView() {
             <h1 className="text-[22px] font-bold leading-tight">Support Catalog</h1>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button variant="outline" onClick={() => runAction("load")}><FileUp size={15} className="mr-2" />Load .acat</Button>
-            <Button variant="outline" onClick={() => refresh()}><RefreshCcw size={15} className="mr-2" />Refresh</Button>
-            <Button onClick={() => runAction("preview")}><Eye size={15} className="mr-2" />Preview</Button>
+            <Button variant="outline" disabled={isBusy} onClick={() => runAction("load")}><FileUp size={15} className="mr-2" />Load .acat</Button>
+            <Button variant="outline" disabled={isBusy} onClick={() => refresh()}><RefreshCcw size={15} className="mr-2" />Refresh</Button>
+            <Button disabled={isBusy || !activeType} onClick={() => runAction("preview")}><Eye size={15} className="mr-2" />Preview</Button>
           </div>
         </header>
         <section className="grid min-h-0 flex-1 grid-cols-[250px_minmax(360px,1fr)_360px] gap-4">
           <SettingsCard title="Support Types" className="min-h-0">
-            <CardContent className="flex h-full min-h-0 flex-col gap-3 p-4">
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-4">
               <SettingsSelect value={activeType} options={types.map((type) => type.id)} onChange={setActiveType} />
               <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
                 {types.map((type) => (
@@ -150,7 +153,7 @@ export default function SupportCatalogView() {
             </CardContent>
           </SettingsCard>
           <SettingsCard title="Variants" className="min-h-0">
-            <CardContent className="flex h-full min-h-0 flex-col gap-3 p-4">
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-4">
               <div className="flex items-center justify-between gap-3 text-sm text-slate-600">
                 <span>{activeMeta?.description ?? "Select a support type."}</span>
                 <Button variant="ghost" onClick={() => setSortAsc((value) => !value)}>DN {sortAsc ? "up" : "down"}</Button>
@@ -172,7 +175,7 @@ export default function SupportCatalogView() {
           </SettingsCard>
           <div className="flex min-h-0 flex-col gap-4">
             <SettingsCard title="Variant Editor" className="min-h-0 flex-[1.1]">
-              <CardContent className="flex h-full min-h-0 flex-col gap-3 p-4">
+              <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-4">
                 <SettingsField label="DN"><Input value={form.dn} onChange={(event) => setForm((current) => ({ ...current, dn: event.target.value }))} /></SettingsField>
                 <SettingsField label="Override Desc"><Input value={form.shortDescription} onChange={(event) => setForm((current) => ({ ...current, shortDescription: event.target.value }))} /></SettingsField>
                 <div className="min-h-0 flex-1 space-y-2 overflow-auto border-t border-slate-200 pt-3">
@@ -182,22 +185,22 @@ export default function SupportCatalogView() {
                     </SettingsField>
                   ))}
                 </div>
-                <div className="grid grid-cols-3 gap-2 border-t border-slate-200 pt-3">
-                  <Button onClick={() => runAction("add")}><Plus size={14} className="mr-1" />Add</Button>
-                  <Button variant="outline" disabled={selectedId == null} onClick={() => runAction("update")}><Save size={14} className="mr-1" />Update</Button>
-                  <Button variant="destructive" disabled={selectedId == null} onClick={() => runAction("delete")}><Trash2 size={14} className="mr-1" />Delete</Button>
+                <div className="grid shrink-0 grid-cols-3 gap-2 border-t border-slate-200 pt-3">
+                  <Button disabled={isBusy || !activeType} onClick={() => runAction("add")}><Plus size={14} className="mr-1" />Add</Button>
+                  <Button variant="outline" disabled={isBusy || selectedId == null} onClick={() => runAction("update")}><Save size={14} className="mr-1" />Update</Button>
+                  <Button variant="destructive" disabled={isBusy || selectedId == null} onClick={() => runAction("delete")}><Trash2 size={14} className="mr-1" />Delete</Button>
                 </div>
               </CardContent>
             </SettingsCard>
             <Card className="min-h-[178px] flex-[0.9] overflow-hidden !rounded-[14px] !border-slate-200/70 !bg-white/70">
               <CardContent className="flex h-full flex-col p-4">
                 <div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 font-bold text-slate-800"><Box size={17} className="text-blue-600" />3D Preview Panel</div><span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">P3 stub</span></div>
-                <motion.div initial={{ opacity: 0.72 }} animate={{ opacity: 1 }} className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50/70 text-center text-sm text-slate-500"><div><Database className="mx-auto mb-2 text-slate-400" size={24} /><div>Mock DTO v1: {mockCatalogApi.dtoVersion}</div><div className="mt-1 text-[12px]">Canvas integration is deferred to P3.</div></div></motion.div>
+                <motion.div initial={{ opacity: 0.72 }} animate={{ opacity: 1 }} className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50/70 text-center text-sm text-slate-500"><div><Database className="mx-auto mb-2 text-slate-400" size={24} /><div>DTO v1: {catalogApi.dtoVersion}</div><div className="mt-1 text-[12px]">Canvas integration is deferred to P3.</div></div></motion.div>
               </CardContent>
             </Card>
           </div>
         </section>
-        <footer className="flex min-h-[34px] items-center justify-between rounded-[10px] border border-white/60 bg-white/65 px-4 text-sm text-slate-600 shadow-sm backdrop-blur-xl"><span>{loadState === "loading" ? "Loading..." : status}</span><span>C# untouched / mock adapter / catalog.html entry</span></footer>
+        <footer className="flex min-h-[34px] items-center justify-between rounded-[10px] border border-white/60 bg-white/65 px-4 text-sm text-slate-600 shadow-sm backdrop-blur-xl"><span>{loadState === "loading" ? "Loading..." : status}</span><span>{catalogApi === realCatalogApi ? "C# bridge / catalog.html entry" : "mock adapter / catalog.html entry"}</span></footer>
       </div>
     </main>
   );

@@ -34,9 +34,15 @@ namespace PlantFlow_Support
         private string _pendingPayload; // CoreWebView2 준비 전 LoadShape 호출 시 보류.
         private readonly SemaphoreSlim _meshGate = new SemaphoreSlim(1, 1);
         private readonly Label _status;
+        private readonly string _entryHtml;
 
-        public WebViewControl()
+        public WebViewControl() : this("index.html")
         {
+        }
+
+        public WebViewControl(string entryHtml)
+        {
+            _entryHtml = NormalizeEntryHtml(entryHtml);
             this.BackColor = SystemColors.Control;
             _status = new Label
             {
@@ -115,6 +121,10 @@ namespace PlantFlow_Support
                     string msg;
                     try { msg = e.TryGetWebMessageAsString(); }
                     catch (Exception ex) { Log("WebMessage parse 실패: " + ex.Message); return; }
+                    if (CatalogBridge.TryDispatch(this, msg, PostPayload, Log))
+                    {
+                        return;
+                    }
                     Log("JS->C#: " + msg);
                 };
 
@@ -141,7 +151,7 @@ namespace PlantFlow_Support
                 {
                     core.SetVirtualHostNameToFolderMapping(
                         VirtualHost, dist, CoreWebView2HostResourceAccessKind.Allow);
-                    core.Navigate(AppOrigin + "index.html");
+                    core.Navigate(AppOrigin + _entryHtml);
                 }
                 else
                 {
@@ -277,6 +287,13 @@ namespace PlantFlow_Support
                 Log("FindDistFolder 예외: " + ex.Message);
             }
             return null;
+        }
+
+        private static string NormalizeEntryHtml(string entryHtml)
+        {
+            if (string.Equals(entryHtml, "catalog.html", StringComparison.OrdinalIgnoreCase))
+                return "catalog.html";
+            return "index.html";
         }
 
         private void Fail(string reason)
