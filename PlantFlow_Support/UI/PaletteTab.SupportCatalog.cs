@@ -47,6 +47,8 @@ namespace PlantFlow_Support
                 if (lblCatPath != null) lblCatPath.Text = acatPath;
                 lblCatStatus.Text = $"Loaded catalog: {acatPath} ({types.Count} types)";
                 lblCatStatus.ForeColor = Color.Black;
+                // P4: 카탈로그 로드 성공 시에만 WebView로 스왑. 조기 return(.acat 미발견) 경로에서는 미실행.
+                TrySwapCatalogTabToWeb();
             }
             catch (Exception ex)
             {

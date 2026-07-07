@@ -29,8 +29,14 @@ namespace PlantFlow_Support
         public event EventHandler<string> MeshFailed;
         // 페이지(React/three.js) 로드 완료.
         public event EventHandler Ready;
+        // 포커스 신호(주채널=JS ui 메시지, 보조=WinForms GotFocus/LostFocus). PaletteSet KeepFocus 토글용 (P4-1b).
+        public event EventHandler WebFocusGained;
+        public event EventHandler WebFocusLost;
 
         private bool _coreReady;
+        private bool _failed;            // Fail() 1회 래치 — 폴백 이벤트 중복 발화 방지 (P4-1a)
+        private bool _hasNavigatedOk;    // 최초 로드 성공 여부 — 이전 실패는 InitFailed로 승격 (P4-1c)
+        private int _rendererFailCount;  // 렌더러 크래시 자동 Reload 횟수 (P4-1a)
         private string _pendingPayload; // CoreWebView2 준비 전 LoadShape 호출 시 보류.
         private readonly SemaphoreSlim _meshGate = new SemaphoreSlim(1, 1);
         private readonly Label _status;
@@ -71,6 +77,9 @@ namespace PlantFlow_Support
             {
                 Browser = new WebView2 { Dock = DockStyle.Fill };
                 Browser.DefaultBackgroundColor = SystemColors.Control;
+                // 보조 포커스 신호(주채널=JS ui 메시지). 멱등 토글이라 중복 발화 무해 (P4-1b).
+                Browser.GotFocus += (s, e) => WebFocusGained?.Invoke(this, EventArgs.Empty);
+                Browser.LostFocus += (s, e) => WebFocusLost?.Invoke(this, EventArgs.Empty);
                 this.Controls.Add(Browser);
                 this.Controls.SetChildIndex(Browser, 0);
 
@@ -115,12 +124,44 @@ namespace PlantFlow_Support
                 };
                 core.NewWindowRequested += (s, e) => { e.Handled = true; };
 
+                // 프로세스 크래시 복구: 렌더러 계열=1회 Reload, 그 외(브라우저 프로세스 등)=즉시 폴백 (P4-1a).
+                // 브라우저 스레드에서 발생 가능 → UI 마샬링 필수. 크래시 즉시 브리지 차단(_coreReady=false).
+                core.ProcessFailed += (s, e) =>
+                {
+                    _coreReady = false;
+                    bool rendererClass =
+                        e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited ||
+                        e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessUnresponsive;
+                    try
+                    {
+                        BeginInvoke((Action)(() =>
+                        {
+                            if (IsDisposed || !IsHandleCreated) return;
+                            if (rendererClass && ++_rendererFailCount <= 1)
+                            {
+                                Log("ProcessFailed(" + e.ProcessFailedKind + ") → Reload 1회 시도");
+                                try { Browser.Reload(); } // _coreReady 복구는 NavigationCompleted 성공 시에만.
+                                catch (Exception rx) { Fail("Reload 실패: " + rx.Message); }
+                            }
+                            else
+                            {
+                                Fail("WebView2 프로세스 실패(" + e.ProcessFailedKind + ")");
+                            }
+                        }));
+                    }
+                    catch (Exception bx) { Log("ProcessFailed 마샬링 실패: " + bx.Message); }
+                };
+
                 // JS→C# 비동기 메시지(진단/ready/error).
                 core.WebMessageReceived += (s, e) =>
                 {
                     string msg;
                     try { msg = e.TryGetWebMessageAsString(); }
                     catch (Exception ex) { Log("WebMessage parse 실패: " + ex.Message); return; }
+                    if (TryHandleUiMessage(msg))
+                    {
+                        return;
+                    }
                     if (CatalogBridge.TryDispatch(this, msg, PostPayload, Log))
                     {
                         return;
@@ -132,9 +173,12 @@ namespace PlantFlow_Support
                 {
                     if (!e.IsSuccess)
                     {
+                        // 최초 로드 성공 전 실패 = 엔트리/서빙 문제 → InitFailed 승격(레거시 폴백) (P4-1c)
+                        if (!_hasNavigatedOk) { Fail("Navigation 실패: " + e.WebErrorStatus); return; }
                         Log("Navigation 실패: " + e.WebErrorStatus);
                         return;
                     }
+                    _hasNavigatedOk = true;
                     _coreReady = true;
                     if (_status != null) _status.Visible = false;
                     Ready?.Invoke(this, EventArgs.Empty);
@@ -272,7 +316,7 @@ namespace PlantFlow_Support
                     System.Reflection.Assembly.GetExecutingAssembly().Location);
                 for (int i = 0; i < 8 && !string.IsNullOrEmpty(dir); i++)
                 {
-                    string cand = Path.Combine(dir, "frontend_support", "dist", "index.html");
+                    string cand = Path.Combine(dir, "frontend_support", "dist", _entryHtml); // 엔트리별 존재 확인 (P4-1c)
                     if (File.Exists(cand))
                     {
                         string distDir = Path.Combine(dir, "frontend_support", "dist");
@@ -298,6 +342,8 @@ namespace PlantFlow_Support
 
         private void Fail(string reason)
         {
+            if (_failed) return; // 1회 래치 — 폴백 중복 실행 방지 (P4-1a)
+            _failed = true;
             Log("InitFailed: " + reason);
             if (_status != null)
             {
@@ -311,6 +357,13 @@ namespace PlantFlow_Support
         private void NotifyMeshFailed(string reason)
         {
             Log(reason);
+            // 도킹 탭엔 PNG 폴백이 없다 → React 3D 패널에 오류 표시 (P4-1d)
+            try
+            {
+                if (_coreReady && Browser?.CoreWebView2 != null)
+                    PostPayload(JsonConvert.SerializeObject(new { kind = "meshError", reason = reason }));
+            }
+            catch (Exception ex) { Log("meshError 통지 실패: " + ex.Message); }
             MeshFailed?.Invoke(this, reason);
         }
 
@@ -325,6 +378,29 @@ namespace PlantFlow_Support
             {
                 System.Diagnostics.Debug.WriteLine("[PFS-WebView] Log failed: " + ex.Message);
             }
+        }
+
+        // JS focusin/focusout → KeepFocus 토글 신호. 계약: {"ch":"ui","event":"focus"|"blur"} (P4-1b)
+        private bool TryHandleUiMessage(string msg)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(msg) || msg.IndexOf("\"ui\"", StringComparison.Ordinal) < 0) return false;
+                var jo = Newtonsoft.Json.Linq.JObject.Parse(msg);
+                if ((string)jo["ch"] != "ui") return false;
+                string ev = (string)jo["event"];
+                if (ev == "focus") WebFocusGained?.Invoke(this, EventArgs.Empty);
+                else if (ev == "blur") WebFocusLost?.Invoke(this, EventArgs.Empty);
+                return true;
+            }
+            catch (Exception ex) { Log("ui message parse 실패: " + ex.Message); return false; }
+        }
+
+        // 도킹↔플로팅 전환 등 호스트발 재배치 요청(PFO WebViewPaletteSet 패턴) (P4-4).
+        public void RelayoutWebView()
+        {
+            try { if (IsHandleCreated && Browser != null) Browser.Bounds = this.ClientRectangle; }
+            catch (Exception ex) { Log("RelayoutWebView 실패: " + ex.Message); }
         }
 
         // DPI/도킹 변경 시 재배치(PFO 패턴 축약).

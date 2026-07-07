@@ -203,6 +203,11 @@ export function createMeshViewer(container: HTMLElement, opts: MeshViewerOptions
       return;
     }
     if (data?.ch === "catalog") return;
+    if (data?.ch === "ui") return; // 호스트행 포커스 신호 — 뷰어 무관 (P4-1b)
+    if (data?.kind === "meshError") {
+      showMeshError(String(data.reason ?? "unknown")); // 서버측 mesh 빌드 실패 통지 (P4-1d)
+      return;
+    }
     if (data?.kind === "mesh") {
       renderMesh(data, "host");
       return;
