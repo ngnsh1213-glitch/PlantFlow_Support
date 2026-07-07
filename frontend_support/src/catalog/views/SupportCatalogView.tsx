@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Box, Database, Eye, FileUp, Plus, RefreshCcw, Save, Trash2 } from "lucide-react";
-import { motion } from "framer-motion";
+import { Box, Eye, FileUp, Plus, RefreshCcw, Save, Trash2 } from "lucide-react";
 import { Button } from "../../design-system/ui/Button";
 import { Card, CardContent } from "../../design-system/ui/Card";
 import { Input } from "../../design-system/ui/Input";
 import { SettingsCard } from "../../design-system/ui/SettingsCard";
 import { SettingsField, SettingsSelect } from "../../design-system/ui/SettingsControls";
+import MeshViewer from "./MeshViewer";
 import { realCatalogApi, isWebViewCatalogAvailable } from "../api/realCatalogApi";
 import { mockCatalogApi } from "../api/mockCatalogApi";
 import type { CatalogApi, CatalogType, ParameterDef, VariantInput, VariantRow } from "../api/catalogApi";
@@ -194,8 +194,10 @@ export default function SupportCatalogView() {
             </SettingsCard>
             <Card className="min-h-[178px] flex-[0.9] overflow-hidden !rounded-[14px] !border-slate-200/70 !bg-white/70">
               <CardContent className="flex h-full flex-col p-4">
-                <div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 font-bold text-slate-800"><Box size={17} className="text-blue-600" />3D Preview Panel</div><span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">P3 stub</span></div>
-                <motion.div initial={{ opacity: 0.72 }} animate={{ opacity: 1 }} className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50/70 text-center text-sm text-slate-500"><div><Database className="mx-auto mb-2 text-slate-400" size={24} /><div>DTO v1: {catalogApi.dtoVersion}</div><div className="mt-1 text-[12px]">Canvas integration is deferred to P3.</div></div></motion.div>
+                <div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 font-bold text-slate-800"><Box size={17} className="text-blue-600" />3D Preview Panel</div><span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">live</span></div>
+                <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+                  <MeshViewer />
+                </div>
               </CardContent>
             </Card>
           </div>
