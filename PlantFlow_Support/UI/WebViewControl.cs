@@ -337,6 +337,8 @@ namespace PlantFlow_Support
         {
             if (string.Equals(entryHtml, "catalog.html", StringComparison.OrdinalIgnoreCase))
                 return "catalog.html";
+            if (string.Equals(entryHtml, "app.html", StringComparison.OrdinalIgnoreCase))
+                return "app.html";
             return "index.html";
         }
 

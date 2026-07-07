@@ -41,7 +41,7 @@ namespace PlantFlow_Support
             {
                 try
                 {
-                    object result = Execute(request.Method, request.Args ?? new JArray());
+                    object result = Execute(request.Method, request.Args ?? new JArray(), log);
                     return Response.Ok(request.Id, result);
                 }
                 catch (Exception ex)
@@ -82,7 +82,7 @@ namespace PlantFlow_Support
             else run();
         }
 
-        private static object Execute(string method, JArray args)
+        private static object Execute(string method, JArray args, Action<string> log)
         {
             switch (method)
             {
@@ -104,7 +104,14 @@ namespace PlantFlow_Support
                 case "loadAcat":
                     lock (CatalogLock)
                     {
-                        _catalog = CreateCatalog();
+                        string acat = CatalogManager.ResolveAcatPath();
+                        if (string.IsNullOrEmpty(acat))
+                            acat = PromptAcatPathOnUi(); // 자동탐색 실패 → 파일 선택 폴백
+                        if (string.IsNullOrEmpty(acat))
+                            return new { ok = false, message = ".acat 미선택." };
+                        _catalog = new CatalogManager(acat);
+                        try { CatalogManager.SaveLastAcatPath(_catalog.AcatPath); }
+                        catch (Exception ex) { log("SaveLastAcatPath 실패: " + ex.Message); }
                         return new { ok = true, message = "Catalog loaded: " + _catalog.AcatPath };
                     }
                 default:
@@ -119,6 +126,33 @@ namespace PlantFlow_Support
                 if (_catalog == null) _catalog = CreateCatalog();
                 return _catalog;
             }
+        }
+
+        // UI 스레드에서 .acat 파일 선택. bridge dispatch는 백그라운드 스레드이므로 활성 폼으로 Invoke.
+        private static string PromptAcatPathOnUi()
+        {
+            string result = null;
+            // 정규화: 이 파일 스코프에서 Application은 AutoCAD Application으로 바인딩됨 → WinForms 명시 필수.
+            var main = System.Windows.Forms.Form.ActiveForm ?? (System.Windows.Forms.Application.OpenForms.Count > 0 ? System.Windows.Forms.Application.OpenForms[0] : null);
+            Action pick = () =>
+            {
+                using (var dlg = new OpenFileDialog())
+                {
+                    dlg.Title = "Select Pipe Support Catalog (.acat)";
+                    dlg.Filter = "Pipe Support Catalog (*.acat)|*.acat|All files (*.*)|*.*";
+                    if (dlg.ShowDialog() == DialogResult.OK) result = dlg.FileName;
+                }
+            };
+            try
+            {
+                if (main != null && main.InvokeRequired) main.Invoke(pick);
+                else pick();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("[PFS-CatalogBridge] PromptAcatPathOnUi 실패: " + ex.Message);
+            }
+            return result;
         }
 
         private static CatalogManager CreateCatalog()

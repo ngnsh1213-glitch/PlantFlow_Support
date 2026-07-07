@@ -13,7 +13,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         preview: "index.html",
-        catalog: "catalog.html"
+        catalog: "catalog.html",
+        app: "app.html"
       }
     }
   },

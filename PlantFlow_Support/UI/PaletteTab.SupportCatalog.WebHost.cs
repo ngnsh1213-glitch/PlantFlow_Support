@@ -16,6 +16,7 @@ namespace PlantFlow_Support
         // LoadCatalog 성공 경로에서만 호출(.acat 미발견 시 레거시 browse UX 보존).
         private void TrySwapCatalogTabToWeb()
         {
+            if (_shellDesired) return; // Phase 0: 셸이 catalog을 라우트로 흡수 — per-tab 스왑 선행 차단
             if (_catalogWeb != null || _catalogSwapFailed || tabSupportCatalog == null) return;
             try
             {
@@ -81,7 +82,7 @@ namespace PlantFlow_Support
         // CustomPaletteSet StateChanged/SizeChanged → WebView 재배치 위임 (P4-4).
         internal void RelayoutCatalogWeb()
         {
-            try { _catalogWeb?.RelayoutWebView(); }
+            try { _shellWeb?.RelayoutWebView(); _catalogWeb?.RelayoutWebView(); }
             catch (Exception ex) { Log("RelayoutCatalogWeb 실패: " + ex.Message); }
         }
     }

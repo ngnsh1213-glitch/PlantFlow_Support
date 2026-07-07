@@ -54,7 +54,17 @@ namespace PlantFlow_Support
       {
           Log("InitializeSupportCatalog Failed: " + ex.Message);
       }
-      
+
+      try
+      {
+          this.InitializeShell(); // Phase 0: 전체 TabControl → app.html 셸
+          Log("InitializeShell Success");
+      }
+      catch (System.Exception ex)
+      {
+          Log("InitializeShell Failed: " + ex.Message);
+      }
+
       Log("PaletteTab Constructor Finished");
     }
 
