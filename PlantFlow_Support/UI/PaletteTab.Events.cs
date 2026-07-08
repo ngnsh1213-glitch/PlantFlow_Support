@@ -112,9 +112,11 @@ namespace PlantFlow_Support
           else
           {
             SelectionSet selectionSet = selection.Value;
-            ObjectId id = ObjectId.Null;
+            List<ObjectId> frameworkIds = new List<ObjectId>();
             List<AttachmentInfo> attachmentInfoList = new List<AttachmentInfo>();
             List<ObjectId> objectIdList = new List<ObjectId>();
+            Dictionary<ObjectId, Point3d> pipeSnapPoints = new Dictionary<ObjectId, Point3d>();
+            Dictionary<ObjectId, PortCollection> pipePorts = new Dictionary<ObjectId, PortCollection>();
             using (document.LockDocument())
             {
               using (Transaction transaction = database.TransactionManager.StartTransaction())
@@ -126,6 +128,17 @@ namespace PlantFlow_Support
                   {
                     case Pipe _:
                       objectIdList.Add(objectId);
+                      try
+                      {
+                        pipePorts[objectId] = (dbObject as Part).GetPorts((PortType) 7);
+                      }
+                      catch (Exception ex)
+                      {
+                        string pipePortError = "AddSupportCore pipe port 조회 실패 id=" + objectId + " error=" + ex.Message;
+                        DiagLog(pipePortError);
+                        PlantOrthoView.FileDiag(pipePortError);
+                        pipeSnapPoints[objectId] = this.GetPartNearestPoint(dbObject as Part, Point3d.Origin);
+                      }
                       break;
                     case Support _:
                       StringCollection stringCollection = new StringCollection()
@@ -154,7 +167,7 @@ namespace PlantFlow_Support
                           });
                           continue;
                         case "FRAMEWORK":
-                          id = objectId;
+                          frameworkIds.Add(objectId);
                           continue;
                         default:
                           continue;
@@ -164,62 +177,209 @@ namespace PlantFlow_Support
                 transaction.Commit();
               }
             }
-            SupportInfo info;
-            string[] new_sp;
-            if (!this.EntityIsSupport(database, id, viewDir, out info, out new_sp))
+            if (frameworkIds.Count == 0)
             {
-              if (string.IsNullOrEmpty(new_sp[0]))
-              {
-                code = "ER1007";
-                msg = "This support is unnamed. Please check the SupportName property.";
-                return;
-              }
-              else
-              {
-                code = "ER1002";
-                msg = "Selected object are not Plant Support type. Please reselect!";
-                return;
-              }
-            }
-            else if (this.SupportSelection.ContainsKey(info.Name))
-            {
-              code = "ER1003";
-              msg = "Already existed in current selection list. Please reselect!";
+              code = "ER1002";
+              msg = "Selected object are not Plant Support type. Please reselect!";
               return;
             }
-            else
+
+            List<SupportInfo> supportInfos = new List<SupportInfo>();
+            Dictionary<string, string[]> supportRows = new Dictionary<string, string[]>();
+            int unnamedCount = 0;
+            int invalidCount = 0;
+            int duplicateCount = 0;
+            foreach (ObjectId frameworkId in frameworkIds)
+            {
+              SupportInfo info;
+              string[] new_sp;
+              if (!this.EntityIsSupport(database, frameworkId, viewDir, out info, out new_sp))
+              {
+                if (new_sp != null && new_sp.Length > 0 && string.IsNullOrEmpty(new_sp[0]))
+                  unnamedCount++;
+                else
+                  invalidCount++;
+                continue;
+              }
+
+              if (this.SupportSelection.ContainsKey(info.Name) || supportRows.ContainsKey(info.Name) || this.ListViewContainsSupport(info.Name))
+              {
+                duplicateCount++;
+                continue;
+              }
+
+              supportInfos.Add(info);
+              supportRows[info.Name] = new_sp;
+            }
+
+            if (supportInfos.Count == 0)
+            {
+              if (duplicateCount > 0)
+              {
+                code = "ER1003";
+                msg = "Already existed in current selection list. Please reselect!";
+                return;
+              }
+
+              code = unnamedCount > 0 ? "ER1007" : "ER1002";
+              msg = unnamedCount > 0
+                ? "This support is unnamed. Please check the SupportName property."
+                : "Selected object are not Plant Support type. Please reselect!";
+              return;
+            }
+
+            Dictionary<string, List<AttachmentInfo>> attachmentsBySupport = new Dictionary<string, List<AttachmentInfo>>();
+            Dictionary<string, List<ObjectId>> pipesBySupport = new Dictionary<string, List<ObjectId>>();
+            foreach (SupportInfo info in supportInfos)
+            {
+              attachmentsBySupport[info.Name] = new List<AttachmentInfo>();
+              pipesBySupport[info.Name] = new List<ObjectId>();
+            }
+
+            foreach (AttachmentInfo attachmentInfo in attachmentInfoList)
+            {
+              SupportInfo owner = this.FindNearestSupport(supportInfos, attachmentInfo == null ? null : attachmentInfo.PPoints);
+              if (owner != null)
+                attachmentsBySupport[owner.Name].Add(attachmentInfo);
+            }
+
+            foreach (ObjectId pipeId in objectIdList)
+            {
+              SupportInfo owner = pipePorts.ContainsKey(pipeId) ? this.FindNearestSupport(supportInfos, pipePorts[pipeId]) : null;
+              if (owner == null)
+              {
+                Point3d pipePoint = pipeSnapPoints.ContainsKey(pipeId) ? pipeSnapPoints[pipeId] : Point3d.Origin;
+                owner = this.FindNearestSupport(supportInfos, pipePoint);
+              }
+              if (owner != null)
+                pipesBySupport[owner.Name].Add(pipeId);
+            }
+
+            int addedCount = 0;
+            foreach (SupportInfo info in supportInfos)
             {
               int num8 = 1;
-              foreach (AttachmentInfo attachmentInfo in attachmentInfoList)
+              foreach (AttachmentInfo attachmentInfo in attachmentsBySupport[info.Name])
               {
                 string str = info.Name + ":R" + num8.ToString();
                 attachmentInfo.Name = "R" + num8.ToString();
-                PSUtil.dl_manager.SetProperties(attachmentInfo.Id, new StringCollection()
+                try
                 {
-                  "SupportName"
-                }, new StringCollection() { str });
+                  PSUtil.dl_manager.SetProperties(attachmentInfo.Id, new StringCollection()
+                  {
+                    "SupportName"
+                  }, new StringCollection() { str });
+                }
+                catch (Exception ex)
+                {
+                  string attachmentNameError = "AddSupportCore attachment SupportName set 실패 support='" + info.Name + "' id=" + attachmentInfo.Id + " error=" + ex.Message;
+                  DiagLog(attachmentNameError);
+                  PlantOrthoView.FileDiag(attachmentNameError);
+                }
                 ++num8;
               }
-              info.AttachmentList = attachmentInfoList;
-              info.PipeList = objectIdList;
+              info.AttachmentList = attachmentsBySupport[info.Name];
+              info.PipeList = pipesBySupport[info.Name];
               this.SupportSelection.Add(info.Name, info);
-              ListViewItem listViewItem1 = new ListViewItem(new_sp);
-              foreach (ListViewItem listViewItem2 in this.lvSupportName.Items)
-              {
-                if (listViewItem2.SubItems[0].Text == new_sp[0])
-                {
-                  code = "ER1003";
-                  msg = "This support already add to the current selection list.";
-                  return;
-                }
-              }
+              ListViewItem listViewItem1 = new ListViewItem(supportRows[info.Name]);
               this.lvSupportName.Items.Add(listViewItem1);
-              added = new { name = info.Name, view = viewDir };
-              PSUtil.ed.Regen();
+              addedCount++;
             }
+            added = new { count = addedCount, duplicates = duplicateCount, unnamed = unnamedCount, invalid = invalidCount, view = viewDir };
+            if (addedCount > 1 || duplicateCount > 0 || unnamedCount > 0 || invalidCount > 0)
+            {
+              string addSummary = "AddSupportCore summary added=" + addedCount + " duplicate=" + duplicateCount + " unnamed=" + unnamedCount + " invalid=" + invalidCount;
+              DiagLog(addSummary);
+              PlantOrthoView.FileDiag(addSummary);
+            }
+            PSUtil.ed.Regen();
           }
         }
       }
+    }
+
+    private bool ListViewContainsSupport(string supportName)
+    {
+      foreach (ListViewItem item in this.lvSupportName.Items)
+      {
+        if (item.SubItems.Count > 0 && item.SubItems[0].Text == supportName)
+          return true;
+      }
+      return false;
+    }
+
+    private SupportInfo FindNearestSupport(List<SupportInfo> supports, Point3d point)
+    {
+      SupportInfo nearest = null;
+      double nearestDistance = double.MaxValue;
+      foreach (SupportInfo support in supports)
+      {
+        double distance = support.DatumPoint.DistanceTo(point);
+        if (distance < nearestDistance)
+        {
+          nearestDistance = distance;
+          nearest = support;
+        }
+      }
+      return nearest;
+    }
+
+    private SupportInfo FindNearestSupport(List<SupportInfo> supports, PortCollection ports)
+    {
+      if (ports == null || ports.Count == 0)
+        return null;
+
+      SupportInfo nearest = null;
+      double nearestDistance = double.MaxValue;
+      foreach (SupportInfo support in supports)
+      {
+        foreach (Port port in (PnP3dCollection) ports)
+        {
+          double distance = support.DatumPoint.DistanceTo(port.Position);
+          if (distance < nearestDistance)
+          {
+            nearestDistance = distance;
+            nearest = support;
+          }
+        }
+      }
+      return nearest;
+    }
+
+    private Point3d GetPartNearestPoint(Part part, Point3d fallback)
+    {
+      if (part == null)
+        return fallback;
+      try
+      {
+        return this.GetNearestPortPoint(part.GetPorts((PortType) 7), fallback);
+      }
+      catch (Exception ex)
+      {
+        string partPointError = "GetPartNearestPoint 실패: " + ex.Message;
+        DiagLog(partPointError);
+        PlantOrthoView.FileDiag(partPointError);
+        return fallback;
+      }
+    }
+
+    private Point3d GetNearestPortPoint(PortCollection ports, Point3d fallback)
+    {
+      if (ports == null || ports.Count == 0)
+        return fallback;
+
+      Point3d nearest = fallback;
+      double nearestDistance = double.MaxValue;
+      foreach (Port port in (PnP3dCollection) ports)
+      {
+        double distance = port.Position.DistanceTo(fallback);
+        if (distance < nearestDistance)
+        {
+          nearestDistance = distance;
+          nearest = port.Position;
+        }
+      }
+      return nearest;
     }
 
     private void Export2DCore(out string code)

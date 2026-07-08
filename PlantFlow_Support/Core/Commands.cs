@@ -107,6 +107,7 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSORTHOPHASE2 실패: OrthoView 인스턴스 없음");
         editor?.WriteMessage("\n[PFS-DIAG] PFSORTHOPHASE2 실패: OrthoView 인스턴스 없음");
+        Commands.ContinueBatchAfterFailure("PFSORTHOPHASE2.OrthoViewNull", null);
         return;
       }
 
@@ -119,8 +120,61 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSORTHOPHASE2 예외: " + ex.GetType().Name + ": " + ex.Message);
         editor?.WriteMessage("\n[PFS-DIAG] PFSORTHOPHASE2 예외: " + ex.GetType().Name + ": " + ex.Message);
+        Commands.ContinueBatchAfterFailure("PFSORTHOPHASE2", ex);
       }
       PlantOrthoView.FileDiag("PFSORTHOPHASE2 종료");
+    }
+
+    internal static void ContinueBatchAfterFailure(string stage, System.Exception ex)
+    {
+      try
+      {
+        PlantOrthoView.FileDiag("ContinueBatchAfterFailure stage=" + stage + " IsMoreThanOne=" + Commands.IsMoreThanOne + " ItemNo=" + Commands.ItemNo
+          + (ex == null ? "" : " error=" + ex.GetType().Name + ": " + ex.Message));
+        if (!Commands.IsMoreThanOne || Commands.PSUtil == null || Commands.PSUtil.lvSupportName == null)
+          return;
+
+        int itemNo = Commands.ItemNo;
+        if (itemNo >= Commands.PSUtil.lvSupportName.Items.Count - 1)
+        {
+          PlantOrthoView.FileDiag("ContinueBatchAfterFailure 종료: 마지막 item(itemNo=" + itemNo + ")");
+          return;
+        }
+
+        Document activeDoc = Application.DocumentManager.MdiActiveDocument;
+        Document sourceDoc = null;
+        foreach (Document document in Application.DocumentManager)
+        {
+          if (string.Compare(document.Name, Commands.DocumentName, true) == 0)
+          {
+            sourceDoc = document;
+            break;
+          }
+        }
+
+        if (activeDoc != null && (sourceDoc == null || string.Compare(activeDoc.Name, sourceDoc.Name, true) != 0))
+        {
+          PlantOrthoView.FileDiag("ContinueBatchAfterFailure: Ortho/비원본 doc 정리 위해 PFSORTHOCONTINUE 큐잉 doc='" + activeDoc.Name + "'");
+          activeDoc.SendStringToExecute("._PFSORTHOCONTINUE\n", true, false, false);
+          return;
+        }
+
+        if (sourceDoc != null)
+        {
+          Application.DocumentManager.MdiActiveDocument = sourceDoc;
+          PlantOrthoView.FileDiag("ContinueBatchAfterFailure: 원본 doc 재활성 후 다음 item PSUtil.run(" + itemNo + ")");
+        }
+        else
+        {
+          PlantOrthoView.FileDiag("ContinueBatchAfterFailure: 원본 doc 찾지 못함 DocumentName='" + Commands.DocumentName + "'");
+        }
+
+        Commands.PSUtil.run(itemNo);
+      }
+      catch (System.Exception continueEx)
+      {
+        PlantOrthoView.FileDiag("ContinueBatchAfterFailure 자체 실패: " + continueEx.GetType().Name + ": " + continueEx.Message);
+      }
     }
 
     public static void Export2DSession()

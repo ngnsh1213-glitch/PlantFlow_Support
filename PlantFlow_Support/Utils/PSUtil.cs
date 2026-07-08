@@ -12,6 +12,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Data.SQLite;
 using System.Windows.Forms;
+using System;
 
 namespace PlantFlow_Support
 {
@@ -124,13 +125,22 @@ namespace PlantFlow_Support
 
         public void run(int item_no)
         {
-            // Keeps dependency on Commands / internal logic
             item_no++;
             Commands.ItemNo = item_no;
             string text = this.lvSupportName.Items[item_no].SubItems[0].Text;
             if (this.lvSupportName.Items.Count > 1) Commands.IsMoreThanOne = true;
             Commands.SupportName = text;
-            new PlantOrthoView(this.SupportSelection[text]).run();
+            try
+            {
+                new PlantOrthoView(this.SupportSelection[text]).run();
+            }
+            catch (Exception ex)
+            {
+                PlantOrthoView.FileDiag("PSUtil.run 실패 support='" + text + "' itemNo=" + item_no + " error=" + ex.GetType().Name + ": " + ex.Message);
+                if (!Commands.IsMoreThanOne)
+                    throw;
+                Commands.ContinueBatchAfterFailure("PSUtil.run", ex);
+            }
         }
 
         public void LimitView() => CadUtils.LimitView(this.SupportSelection);
