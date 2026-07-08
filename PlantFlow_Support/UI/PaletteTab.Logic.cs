@@ -80,6 +80,48 @@ namespace PlantFlow_Support
         this.ViewDirectionVectors["Right"] = Vector3d.XAxis;
     }
 
+    private List<ViewSpec> CreateViewSpecs(IEnumerable<string> viewNames)
+    {
+        List<ViewSpec> specs = new List<ViewSpec>();
+        if (viewNames == null)
+            viewNames = new string[] { "Top" };
+
+        foreach (string rawViewName in viewNames)
+        {
+            string viewName = string.IsNullOrEmpty(rawViewName) ? "Top" : rawViewName.Trim();
+            if (specs.Any(v => string.Equals(v.ViewName, viewName, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            if (!this.ViewTypes.ContainsKey(viewName))
+            {
+                DiagLog("CreateViewSpecs skip unknown view='" + viewName + "'");
+                PlantOrthoView.FileDiag("CreateViewSpecs skip unknown view='" + viewName + "'");
+                continue;
+            }
+
+            ViewSpec spec = new ViewSpec();
+            spec.ViewName = viewName;
+            spec.ViewType = this.ViewTypes[viewName];
+            spec.UCS = this.UCSs.ContainsKey(viewName) ? this.UCSs[viewName] : Matrix3d.Identity;
+            spec.UpVector = this.UpVectors.ContainsKey(viewName) ? this.UpVectors[viewName] : Vector3d.YAxis.Negate();
+            spec.ViewDirection = this.ViewDirectionVectors.ContainsKey(viewName) ? this.ViewDirectionVectors[viewName] : Vector3d.ZAxis;
+            spec.PaperCenter = Point3d.Origin;
+            specs.Add(spec);
+        }
+
+        if (specs.Count == 0)
+        {
+            ViewSpec fallback = new ViewSpec();
+            fallback.ViewName = "Top";
+            fallback.ViewType = this.ViewTypes.ContainsKey("Top") ? this.ViewTypes["Top"] : PlantFlow_Support.Commands.ViewType.Top;
+            fallback.UCS = this.UCSs.ContainsKey("Top") ? this.UCSs["Top"] : Matrix3d.Identity;
+            fallback.UpVector = this.UpVectors.ContainsKey("Top") ? this.UpVectors["Top"] : Vector3d.YAxis.Negate();
+            fallback.ViewDirection = this.ViewDirectionVectors.ContainsKey("Top") ? this.ViewDirectionVectors["Top"] : Vector3d.ZAxis;
+            fallback.PaperCenter = Point3d.Origin;
+            specs.Add(fallback);
+        }
+        return specs;
+    }
+
     private void InitializePSDM()
     {
       this.SupportData.Columns.Add("PnPID", typeof (long));

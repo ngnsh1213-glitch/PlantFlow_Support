@@ -62,7 +62,7 @@ namespace PlantFlow_Support
       string msg;
       object added;
       bool cancelled;
-      AddSupportCore(this.cbbViewDirection.Text, out code, out msg, out added, out cancelled);
+      AddSupportCore(this.GetSelectedViewNames(), out code, out msg, out added, out cancelled);
       if (cancelled)
         return;
       if (code != null)
@@ -73,10 +73,38 @@ namespace PlantFlow_Support
 
     private void AddSupportCore(string viewDir, out string code, out string msg, out object added, out bool cancelled)
     {
+      AddSupportCore(new List<string>() { viewDir }, out code, out msg, out added, out cancelled);
+    }
+
+    private List<string> GetSelectedViewNames()
+    {
+      List<string> views = new List<string>();
+      if (this.clbViewDirections != null)
+      {
+        foreach (object item in this.clbViewDirections.CheckedItems)
+        {
+          string view = item == null ? string.Empty : item.ToString();
+          if (!string.IsNullOrEmpty(view) && !views.Contains(view))
+            views.Add(view);
+        }
+      }
+      if (views.Count == 0 && this.cbbViewDirection != null && !string.IsNullOrEmpty(this.cbbViewDirection.Text))
+        views.Add(this.cbbViewDirection.Text);
+      if (views.Count == 0)
+        views.Add("Top");
+      return views;
+    }
+
+    private void AddSupportCore(List<string> viewDirs, out string code, out string msg, out object added, out bool cancelled)
+    {
       code = null;
       msg = null;
       added = null;
       cancelled = false;
+      if (viewDirs == null || viewDirs.Count == 0)
+        viewDirs = new List<string>() { "Top" };
+      string representativeView = viewDirs[0];
+      string viewSummary = string.Join(",", viewDirs.ToArray());
       var PSUtil = new PSUtil();
       if (string.IsNullOrEmpty(this.tbTemplate.Text))
       {
@@ -193,13 +221,23 @@ namespace PlantFlow_Support
             {
               SupportInfo info;
               string[] new_sp;
-              if (!this.EntityIsSupport(database, frameworkId, viewDir, out info, out new_sp))
+              if (!this.EntityIsSupport(database, frameworkId, representativeView, out info, out new_sp))
               {
                 if (new_sp != null && new_sp.Length > 0 && string.IsNullOrEmpty(new_sp[0]))
                   unnamedCount++;
                 else
                   invalidCount++;
                 continue;
+              }
+              info.ViewSpecs = this.CreateViewSpecs(viewDirs);
+              if (info.ViewSpecs.Count > 0)
+              {
+                ViewSpec firstSpec = info.ViewSpecs[0];
+                info.ViewType = firstSpec.ViewType;
+                info.UCS = firstSpec.UCS;
+                info.UpVector = firstSpec.UpVector;
+                info.ViewDirection = firstSpec.ViewDirection;
+                new_sp[1] = viewSummary;
               }
 
               if (this.SupportSelection.ContainsKey(info.Name) || supportRows.ContainsKey(info.Name) || this.ListViewContainsSupport(info.Name))
@@ -285,7 +323,7 @@ namespace PlantFlow_Support
               this.lvSupportName.Items.Add(listViewItem1);
               addedCount++;
             }
-            added = new { count = addedCount, duplicates = duplicateCount, unnamed = unnamedCount, invalid = invalidCount, view = viewDir };
+            added = new { count = addedCount, duplicates = duplicateCount, unnamed = unnamedCount, invalid = invalidCount, view = viewSummary };
             if (addedCount > 1 || duplicateCount > 0 || unnamedCount > 0 || invalidCount > 0)
             {
               string addSummary = "AddSupportCore summary added=" + addedCount + " duplicate=" + duplicateCount + " unnamed=" + unnamedCount + " invalid=" + invalidCount;

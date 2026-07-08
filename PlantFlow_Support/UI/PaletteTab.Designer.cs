@@ -19,6 +19,7 @@ namespace PlantFlow_Support
     private ToolStripMenuItem tmsRemove;
     private ToolStripMenuItem tmsClearItem;
     private ComboBox cbbViewDirection;
+    private CheckedListBox clbViewDirections;
     private Label label1;
     private Button btExportMTO;
     private TextBox tbSaveMTOAs;
@@ -119,6 +120,7 @@ namespace PlantFlow_Support
       this.tmsRemove = new ToolStripMenuItem();
       this.tmsClearItem = new ToolStripMenuItem();
       this.cbbViewDirection = new ComboBox();
+      this.clbViewDirections = new CheckedListBox();
       this.label1 = new Label();
       this.btExportMTO = new Button();
       this.tbSaveMTOAs = new TextBox();
@@ -289,7 +291,7 @@ namespace PlantFlow_Support
       this.csmPSDM.SuspendLayout();
       this.SuspendLayout();
       this.btExport.BackColor = SystemColors.Info;
-      this.btExport.Location = new Point(8, 119);
+      this.btExport.Location = new Point(8, 162);
       this.btExport.Name = "btExport";
       this.btExport.Size = new Size(75, 23);
       this.btExport.TabIndex = 0;
@@ -368,6 +370,24 @@ namespace PlantFlow_Support
       this.cbbViewDirection.Name = "cbbViewDirection";
       this.cbbViewDirection.Size = new Size(76, 21);
       this.cbbViewDirection.TabIndex = 10;
+      this.cbbViewDirection.Visible = false;
+      this.clbViewDirections.CheckOnClick = true;
+      this.clbViewDirections.FormattingEnabled = true;
+      this.clbViewDirections.Items.AddRange(new object[6]
+      {
+        (object) "Top",
+        (object) "Bottom",
+        (object) "Front",
+        (object) "Back",
+        (object) "Left",
+        (object) "Right"
+      });
+      this.clbViewDirections.Location = new Point(8, 59);
+      this.clbViewDirections.Margin = new Padding(2);
+      this.clbViewDirections.Name = "clbViewDirections";
+      this.clbViewDirections.Size = new Size(76, 94);
+      this.clbViewDirections.TabIndex = 10;
+      this.clbViewDirections.SetItemChecked(0, true);
       this.label1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
       this.label1.AutoSize = true;
       this.label1.Location = new Point(8, 38);
@@ -377,7 +397,7 @@ namespace PlantFlow_Support
       this.label1.TabIndex = 11;
       this.label1.Text = "View Direction:";
       this.btExportMTO.BackColor = SystemColors.Info;
-      this.btExportMTO.Location = new Point(8, 88);
+      this.btExportMTO.Location = new Point(8, 191);
       this.btExportMTO.Name = "btExportMTO";
       this.btExportMTO.Size = new Size(75, 23);
       this.btExportMTO.TabIndex = 12;
@@ -767,6 +787,7 @@ namespace PlantFlow_Support
       this.tabAuto2D.Controls.Add((Control) this.btExportMTO);
       this.tabAuto2D.Controls.Add((Control) this.panel1);
       this.tabAuto2D.Controls.Add((Control) this.cbbViewDirection);
+      this.tabAuto2D.Controls.Add((Control) this.clbViewDirections);
       this.tabAuto2D.Controls.Add((Control) this.label1);
       this.tabAuto2D.Controls.Add((Control) this.btAdd);
       this.tabAuto2D.Controls.Add((Control) this.lvSupportName);

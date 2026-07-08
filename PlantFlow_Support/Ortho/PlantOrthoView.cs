@@ -59,6 +59,9 @@ namespace PlantFlow_Support
     private string m_strViewType;
     private Vector3d m_viewDir;
     private Vector3d m_upVector;
+    private Point3d m_currentPaperCenter = new Point3d(380.0, 330.0, 0.0);
+    private bool m_orthoContinueQueued = false;
+    private bool m_anySuccessView = false;
     private Point3d m_lowerLeftCubePt = Point3d.Origin;
     private Point3d m_upperRightCubePt = Point3d.Origin;
     private StringCollection m_FrozenDwgLayers;
@@ -214,7 +217,73 @@ namespace PlantFlow_Support
       this.m_strViewType = this.m_strViewName;
       this.m_viewDir = PlantOrthoView.SPInfo.ViewDirection;
       this.m_upVector = PlantOrthoView.SPInfo.UpVector;
+      this.EnsureViewSpecs();
       this.ScheduleCreateOrthoFromCubePhase2();
+    }
+
+    private void EnsureViewSpecs()
+    {
+      if (PlantOrthoView.SPInfo == null)
+        return;
+      if (PlantOrthoView.SPInfo.ViewSpecs != null && PlantOrthoView.SPInfo.ViewSpecs.Count > 0)
+        return;
+
+      PlantOrthoView.SPInfo.ViewSpecs = new List<ViewSpec>();
+      PlantOrthoView.SPInfo.ViewSpecs.Add(new ViewSpec()
+      {
+        ViewName = PlantOrthoView.SPInfo.ViewType.ToString(),
+        ViewType = PlantOrthoView.SPInfo.ViewType,
+        UCS = PlantOrthoView.SPInfo.UCS,
+        ViewDirection = PlantOrthoView.SPInfo.ViewDirection,
+        UpVector = PlantOrthoView.SPInfo.UpVector,
+        PaperCenter = new Point3d(380.0, 330.0, 0.0)
+      });
+    }
+
+    private Point3d GetPaperCenterForViewSpec(ViewSpec spec, double viewportWidth, double viewportHeight)
+    {
+      Point3d frontCenter = new Point3d(380.0, 330.0, 0.0);
+      double gap = 40.0;
+      double xStep = Math.Max(viewportWidth * 0.5, 180.0) + gap;
+      double yStep = Math.Max(viewportHeight * 0.5, 180.0) + gap;
+      string viewName = spec == null || string.IsNullOrEmpty(spec.ViewName) ? "Top" : spec.ViewName;
+
+      if (string.Equals(viewName, "Front", StringComparison.OrdinalIgnoreCase))
+        return frontCenter;
+      if (string.Equals(viewName, "Top", StringComparison.OrdinalIgnoreCase))
+        return new Point3d(frontCenter.X, frontCenter.Y + yStep, 0.0);
+      if (string.Equals(viewName, "Bottom", StringComparison.OrdinalIgnoreCase))
+        return new Point3d(frontCenter.X, frontCenter.Y - yStep, 0.0);
+      if (string.Equals(viewName, "Right", StringComparison.OrdinalIgnoreCase))
+        return new Point3d(frontCenter.X + xStep, frontCenter.Y, 0.0);
+      if (string.Equals(viewName, "Left", StringComparison.OrdinalIgnoreCase))
+        return new Point3d(frontCenter.X - xStep, frontCenter.Y, 0.0);
+      if (string.Equals(viewName, "Back", StringComparison.OrdinalIgnoreCase))
+        return new Point3d(frontCenter.X + (xStep * 2.0), frontCenter.Y, 0.0);
+      return frontCenter;
+    }
+
+    private void ApplyViewSpecToCurrentState(ViewSpec spec)
+    {
+      if (spec == null)
+        throw new ArgumentNullException("spec");
+
+      this.m_strViewName = string.IsNullOrEmpty(spec.ViewName) ? spec.ViewType.ToString() : spec.ViewName;
+      this.m_viewType = spec.ViewType;
+      this.m_strViewType = this.m_strViewName;
+      this.m_viewDir = spec.ViewDirection;
+      this.m_upVector = spec.UpVector;
+      this.m_currentPaperCenter = spec.PaperCenter;
+      settings.OrthoView = this.m_strViewName;
+
+      if (PlantOrthoView.SPInfo != null)
+      {
+        PlantOrthoView.SPInfo.ViewType = spec.ViewType;
+        PlantOrthoView.SPInfo.ViewDirection = spec.ViewDirection;
+        PlantOrthoView.SPInfo.UpVector = spec.UpVector;
+        PlantOrthoView.SPInfo.UCS = spec.UCS;
+      }
+      this.PoDiag("ApplyViewSpec view='" + this.m_strViewName + "' viewType=" + this.m_viewType + " paperCenter=" + this.m_currentPaperCenter);
     }
 
     private bool SelectOrthoDwg(ref Document currentDoc)
@@ -602,12 +671,28 @@ namespace PlantFlow_Support
       orthoDoc.SendStringToExecute("._PFSORTHOPHASE2\n", true, false, false);
     }
 
+    // continuation(PFSORTHOCONTINUE=CloseAndSave+PIPE재활성+배치진행)을 정확히 1회만 큐잉. 뷰 루프 종료 시 호출.
+    private void QueueOrthoContinue(string reason)
+    {
+      if (this.m_orthoContinueQueued)
+      {
+        FileDiag("QueueOrthoContinue skip(중복) reason='" + reason + "'");
+        return;
+      }
+      Document orthoDoc = this.FindOpenDocument(this.CurrentOrthoDwgName);
+      if (orthoDoc == null)
+      {
+        FileDiag("QueueOrthoContinue 실패: ortho 문서 없음 ortho='" + this.CurrentOrthoDwgName + "' reason='" + reason + "'");
+        return;
+      }
+      this.m_orthoContinueQueued = true;
+      FileDiag("QueueOrthoContinue: PFSORTHOCONTINUE 큐잉 reason='" + reason + "' target='" + orthoDoc.Name + "' 성공뷰수기록됨");
+      orthoDoc.SendStringToExecute("._PFSORTHOCONTINUE\n", true, false, false);
+    }
+
     public void CreateOrthoFromCube()
     {
       this.OrthoCube.OnCloseDoc();
-      Solid3d cubeSolid = (Solid3d) null;
-      using (Application.DocumentManager.MdiActiveDocument.LockDocument())
-        cubeSolid = this.OrthoCube.MakeCubeCopy();
       foreach (Document document in Application.DocumentManager)
       {
         if (string.Compare(document.Name, this.CurrentOrthoDwgName, true) == 0)
@@ -625,15 +710,59 @@ namespace PlantFlow_Support
       this.EraseSourceCubeSolids();
       this.CloseOrthoViewDoc();
       if (!this.EnsureCurrentOrthoDocument("CreateOrthoFromCube before CreateOrthos"))
+        return;
+
+      this.EnsureViewSpecs();
+      List<ViewSpec> specs = PlantOrthoView.SPInfo == null ? null : PlantOrthoView.SPInfo.ViewSpecs;
+      if (specs == null || specs.Count == 0)
       {
-        if (cubeSolid != null)
-          cubeSolid.Dispose();
+        FileDiag("CreateOrthoFromCube: specs 없음 — continuation만 큐잉 후 종료");
+        this.QueueOrthoContinue("specs 없음");
         return;
       }
-      this.CreateOrthos(this.SelectedModels, this.m_strViewName, this.m_dScale, this.m_dViewportWidth, this.m_dViewportHeight, this.m_dViewportDepth, this.m_viewType, this.m_strViewType, this.m_viewDir, this.m_upVector, this.m_lowerLeftCubePt, this.m_upperRightCubePt, cubeSolid);
-      if (cubeSolid == null)
-        return;
-      cubeSolid.Dispose();
+
+      try
+      {
+        for (int i = 0; i < specs.Count; i++)
+        {
+          ViewSpec spec = specs[i];
+          // 단일뷰는 기존 중앙(380,330) 유지(회귀 방지). 3각법 오프셋은 다중뷰에서만 적용.
+          spec.PaperCenter = specs.Count <= 1
+            ? new Point3d(380.0, 330.0, 0.0)
+            : this.GetPaperCenterForViewSpec(spec, this.m_dViewportWidth, this.m_dViewportHeight);
+          this.ApplyViewSpecToCurrentState(spec);
+          bool isLastView = i == specs.Count - 1;
+          Solid3d cubeSolid = (Solid3d)null;
+          try
+          {
+            using (Application.DocumentManager.MdiActiveDocument.LockDocument())
+              cubeSolid = this.OrthoCube.MakeCubeCopy();
+            if (!this.EnsureCurrentOrthoDocument("CreateOrthoFromCube loop view='" + this.m_strViewName + "'"))
+            {
+              this.PoDiag("CreateOrthoFromCube view skip(문서검증 실패) view='" + this.m_strViewName + "' — 다음 뷰 진행");
+              continue;
+            }
+            this.PoDiag("CreateOrthoFromCube view loop " + (i + 1) + "/" + specs.Count + " view='" + this.m_strViewName + "' isLast=" + isLastView);
+            this.CreateOrthos(this.SelectedModels, this.m_strViewName, this.m_dScale, this.m_dViewportWidth, this.m_dViewportHeight, this.m_dViewportDepth, this.m_viewType, this.m_strViewType, this.m_viewDir, this.m_upVector, this.m_lowerLeftCubePt, this.m_upperRightCubePt, cubeSolid, this.m_currentPaperCenter, isLastView);
+            this.m_anySuccessView = true;
+          }
+          catch (Exception ex)
+          {
+            // 개별 뷰 예외는 기록하고 계속 진행해 continuation을 보장한다.
+            this.PoDiag("CreateOrthoFromCube view loop 예외 view='" + this.m_strViewName + "': " + ex.Message);
+          }
+          finally
+          {
+            if (cubeSolid != null)
+              cubeSolid.Dispose();
+          }
+        }
+      }
+      finally
+      {
+        FileDiag("CreateOrthoFromCube 뷰 루프 종료 anySuccessView=" + this.m_anySuccessView + " specCount=" + specs.Count);
+        this.QueueOrthoContinue("뷰 루프 종료");
+      }
     }
 
     public void CreateOrthos(
@@ -649,7 +778,9 @@ namespace PlantFlow_Support
       Vector3d upVector,
       Point3d lowerLeftPt,
       Point3d upperRightPt,
-      Solid3d cubeSolid)
+      Solid3d cubeSolid,
+      Point3d paperCenter,
+      bool isLastView)
     {
       PoDiag("CreateOrthos 진입 selectedModels.Count=" + (selectedModels == null ? 0 : selectedModels.Count)
         + " viewName='" + strViewName + "' viewType='" + strViewType + "' lowerLeft=" + lowerLeftPt + " upperRight=" + upperRightPt
@@ -681,7 +812,7 @@ namespace PlantFlow_Support
           else
           {
             double newVPScale = 0.0;
-            bool _placementOk = this.ProcessViewportPlacement(viewportWidth, viewportHeight, scale, out newScale, out viewportId, out ptIns, out newVPWidth, out newVPHeight, out newVPScale, out rotationAngle);
+            bool _placementOk = this.ProcessViewportPlacement(viewportWidth, viewportHeight, scale, paperCenter, out newScale, out viewportId, out ptIns, out newVPWidth, out newVPHeight, out newVPScale, out rotationAngle);
             PoDiag("CreateOrthos ProcessViewportPlacement result=" + _placementOk + " viewportId=" + viewportId
               + " ptIns=" + ptIns + " newVPWidth=" + newVPWidth + " newVPHeight=" + newVPHeight
               + " newVPScale=" + newVPScale + " rotationAngle=" + rotationAngle);
@@ -718,7 +849,7 @@ namespace PlantFlow_Support
             }
           }
           PoDiag("CreateOrthos GenerateOrthos 호출 직전 viewportId=" + viewportId + " viewportWidth=" + viewportWidth + " viewportHeight=" + viewportHeight + " scale=" + scale);
-          this.GenerateOrthos(selectedModels, strViewName, strViewType, lowerLeftPt, upperRightPt, viewType, ptIns, viewDir, upVector, viewportId, viewportWidth, viewportHeight, viewportDepth, scale, rotationAngle, cubeSolid);
+          this.GenerateOrthos(selectedModels, strViewName, strViewType, lowerLeftPt, upperRightPt, viewType, ptIns, viewDir, upVector, viewportId, viewportWidth, viewportHeight, viewportDepth, scale, rotationAngle, cubeSolid, isLastView);
           PoDiag("CreateOrthos GenerateOrthos 호출 완료");
           CommonUIUtils.acedPostCommandPrompt();
         }
@@ -990,7 +1121,8 @@ namespace PlantFlow_Support
       double viewportDepth,
       double scale,
       double viewportRotation,
-      Solid3d cubeSolid)
+      Solid3d cubeSolid,
+      bool isLastView)
     {
       try
       {
@@ -1092,7 +1224,7 @@ namespace PlantFlow_Support
         FileDiag("GenerateOrthos: FlattenDiagStage1 반환, FlattenDiagStage2 호출 직전");
         this.FlattenDiagStage2(_flattenBaseline);
         FileDiag("GenerateOrthos: FlattenDiagStage2 반환, AnnotateViewport 호출 직전");
-        this.m_viewportManager.AnnotateViewport(viewportId);
+        this.m_viewportManager.AnnotateViewport(viewportId, isLastView);
         FileDiag("GenerateOrthos: AnnotateViewport 반환");
       }
       catch (OutOfMemoryException ex)
@@ -1394,6 +1526,7 @@ namespace PlantFlow_Support
       double viewportWidth,
       double viewportHeight,
       double scale,
+      Point3d paperCenter,
       out double newScale,
       out ObjectId viewportId,
       out Point3d ptIns,
@@ -1402,7 +1535,7 @@ namespace PlantFlow_Support
       out double newVPScale,
       out double rotationAngle)
     {
-        return m_viewportManager.ProcessViewportPlacement(viewportWidth, viewportHeight, scale, out newScale, out viewportId, out ptIns, out newVPWidth, out newVPHeight, out newVPScale, out rotationAngle);
+        return m_viewportManager.ProcessViewportPlacement(viewportWidth, viewportHeight, scale, paperCenter, out newScale, out viewportId, out ptIns, out newVPWidth, out newVPHeight, out newVPScale, out rotationAngle);
     }
 
     public void TurnOffSysVars()

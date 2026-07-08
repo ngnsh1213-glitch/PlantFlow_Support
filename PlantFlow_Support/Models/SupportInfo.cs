@@ -14,12 +14,29 @@ using Autodesk.ProcessPower.DataObjects;
 #nullable disable
 namespace PlantFlow_Support
 {
+  public class ViewSpec
+  {
+    public string ViewName { get; set; }
+
+    public PlantFlow_Support.Commands.ViewType ViewType { get; set; }
+
+    public Matrix3d UCS { get; set; }
+
+    public Vector3d ViewDirection { get; set; }
+
+    public Vector3d UpVector { get; set; }
+
+    public Point3d PaperCenter { get; set; }
+  }
+
   public class SupportInfo
   {
     public string Name { get; set; }
     public PnPDatabase PnPDatabase { get; set; }
 
     public PlantFlow_Support.Commands.ViewType ViewType { get; set; }
+
+    public List<ViewSpec> ViewSpecs { get; set; } = new List<ViewSpec>();
 
     public int NumberOfView { get; set; }
 
