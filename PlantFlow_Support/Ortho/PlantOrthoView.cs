@@ -42,6 +42,7 @@ namespace PlantFlow_Support
     private string strCurrent3DDwgName = string.Empty;
     private Database m_dwgDatabase;
     private PlantOrthoCube m_plantOrthoCube;
+    private System.Collections.Generic.List<ObjectId> m_cubeSolidIds;
     private string m_tempFileName = string.Empty;
     private StringCollection m_sysVars;
     private bool m_insulationDisplay;
@@ -281,6 +282,133 @@ namespace PlantFlow_Support
       return false;
     }
 
+    private System.Collections.Generic.HashSet<ObjectId> SnapshotSourceModelSpaceIds(string reason)
+    {
+      var ids = new System.Collections.Generic.HashSet<ObjectId>();
+      try
+      {
+        Document srcDoc = this.FindOpenDocument(this.strCurrent3DDwgName);
+        if (srcDoc == null)
+        {
+          FileDiag("source cube snapshot skip reason='" + reason + "' source doc not found model3d='" + this.strCurrent3DDwgName + "'");
+          return null;
+        }
+        using (srcDoc.LockDocument())
+        using (Transaction tr = srcDoc.Database.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = (BlockTable)tr.GetObject(srcDoc.Database.BlockTableId, OpenMode.ForRead);
+          BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+          foreach (ObjectId id in ms)
+            ids.Add(id);
+          tr.Commit();
+        }
+        FileDiag("source cube snapshot reason='" + reason + "' count=" + ids.Count + " doc='" + srcDoc.Name + "'");
+      }
+      catch (Exception ex)
+      {
+        FileDiag("source cube snapshot 예외 reason='" + reason + "': " + ex.GetType().Name + ": " + ex.Message);
+        return null;
+      }
+      return ids;
+    }
+
+    private void CaptureSourceCubeSolids(System.Collections.Generic.HashSet<ObjectId> beforeIds)
+    {
+      this.m_cubeSolidIds = new System.Collections.Generic.List<ObjectId>();
+      try
+      {
+        if (beforeIds == null)
+        {
+          FileDiag("source cube capture skip: baseline snapshot unavailable");
+          return;
+        }
+        Document srcDoc = this.FindOpenDocument(this.strCurrent3DDwgName);
+        if (srcDoc == null)
+        {
+          FileDiag("source cube capture skip: source doc not found model3d='" + this.strCurrent3DDwgName + "'");
+          return;
+        }
+        int newCount = 0;
+        using (srcDoc.LockDocument())
+        using (Transaction tr = srcDoc.Database.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = (BlockTable)tr.GetObject(srcDoc.Database.BlockTableId, OpenMode.ForRead);
+          BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+          foreach (ObjectId id in ms)
+          {
+            if (beforeIds.Contains(id))
+              continue;
+            newCount++;
+            try
+            {
+              Solid3d solid = tr.GetObject(id, OpenMode.ForRead, false) as Solid3d;
+              if (solid != null)
+                this.m_cubeSolidIds.Add(id);
+            }
+            catch (Exception ix)
+            {
+              FileDiag("source cube capture 신규 id 조회 예외 id='" + id.ToString() + "': " + ix.GetType().Name + ": " + ix.Message);
+            }
+          }
+          tr.Commit();
+        }
+        FileDiag("source cube capture newIds=" + newCount + " solidIds=" + this.m_cubeSolidIds.Count + " doc='" + srcDoc.Name + "'");
+        if (this.m_cubeSolidIds.Count == 0)
+          FileDiag("source cube capture solidIds=0: cube가 source model DB 외부에 생성됐을 가능성 있음");
+      }
+      catch (Exception ex)
+      {
+        FileDiag("source cube capture 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void EraseSourceCubeSolids()
+    {
+      try
+      {
+        if (this.m_cubeSolidIds == null || this.m_cubeSolidIds.Count == 0)
+        {
+          FileDiag("source cube 정리 skip: tracked solidIds empty model3d='" + this.strCurrent3DDwgName + "'");
+          return;
+        }
+        Document srcDoc = this.FindOpenDocument(this.strCurrent3DDwgName);
+        if (srcDoc == null)
+        {
+          FileDiag("source cube 정리 skip: source doc not found model3d='" + this.strCurrent3DDwgName + "'");
+          return;
+        }
+        int erased = 0;
+        int failed = 0;
+        using (srcDoc.LockDocument())
+        using (Transaction tr = srcDoc.Database.TransactionManager.StartTransaction())
+        {
+          foreach (ObjectId id in this.m_cubeSolidIds)
+          {
+            try
+            {
+              Entity ent = tr.GetObject(id, OpenMode.ForWrite, false) as Entity;
+              if (ent != null && !ent.IsErased)
+              {
+                ent.Erase();
+                erased++;
+              }
+            }
+            catch (Exception ix)
+            {
+              failed++;
+              FileDiag("source cube 정리 개별 예외 id='" + id.ToString() + "': " + ix.GetType().Name + ": " + ix.Message);
+            }
+          }
+          tr.Commit();
+        }
+        FileDiag("source cube 정리 erased=" + erased + " failed=" + failed + " tracked=" + this.m_cubeSolidIds.Count + " doc='" + srcDoc.Name + "'");
+      }
+      catch (Exception ex)
+      {
+        FileDiag("source cube 정리 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
     public static bool cchNewProjectDwgRun(string prjType, bool mustClose = true)
     {
       string createdPath;
@@ -364,6 +492,7 @@ namespace PlantFlow_Support
       try
       {
         Extents3d ext = Exts;
+        System.Collections.Generic.HashSet<ObjectId> _sourceCubeBefore = this.SnapshotSourceModelSpaceIds("before InitializeCube");
         this.m_plantOrthoCube = new PlantOrthoCube();
         this.m_plantOrthoCube.InitializeCube(ext);
         this.m_lowerLeftPt = ext.MinPoint;
@@ -372,6 +501,7 @@ namespace PlantFlow_Support
         if (string.IsNullOrEmpty(PlantOrthoView.settings.OrthoView))
           PlantOrthoView.settings.OrthoView = UIUtils.s_TopView;
         this.m_plantOrthoCube.SetOrthoViewFaceColor((Autodesk.ProcessPower.PnP3dOrthoDrawingsUI.Commands.ViewType)(int)UIUtils.GetViewTypeFromName(PlantOrthoView.settings.OrthoView));
+        this.CaptureSourceCubeSolids(_sourceCubeBefore);
       }
       catch (Exception _cvx)
       {
@@ -491,6 +621,8 @@ namespace PlantFlow_Support
       this.m_lowerLeftCubePt = extents.MinPoint;
       this.m_upperRightCubePt = extents.MaxPoint;
       this.m_dViewportDepth = this.m_upperRightCubePt.Z - this.m_lowerLeftCubePt.Z;
+      // 큐브 Extents 캡처 완료 후 원본 큐브 정리(투영 전). 조기 삭제 시 OrthoCube.Extents 퇴화(1E+20)→투영 실패 회귀 방지.
+      this.EraseSourceCubeSolids();
       this.CloseOrthoViewDoc();
       if (!this.EnsureCurrentOrthoDocument("CreateOrthoFromCube before CreateOrthos"))
       {

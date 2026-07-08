@@ -264,7 +264,8 @@ namespace PlantFlow_Support
                 // 정의부에는 투영된 절대 페이퍼 좌표로 저장. BlockReference는 원점 삽입 → 현 위치 그대로.
                 Line paperLine = new Line(projection.ProjectPoint(sourceLine.StartPoint), projection.ProjectPoint(sourceLine.EndPoint));
                 paperLine.Layer = sourceLine.Layer;
-                paperLine.Color = sourceLine.Color;
+                // 서포트 지오메트리 색: WHITE(ACI 7, 배경따라 흑/백 자동). BYLAYER/BYBLOCK 대신 명시(사용자 결정 2026-07-08).
+                paperLine.Color = Color.FromColorIndex((ColorMethod)195, (short)7);
                 paperLine.Linetype = sourceLine.Linetype;
                 paperLine.LineWeight = sourceLine.LineWeight;
                 blockDef.AppendEntity(paperLine);

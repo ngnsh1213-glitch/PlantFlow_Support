@@ -62,10 +62,21 @@ namespace PlantFlow_Support
       PlantOrthoView.FileDiag("PFSORTHOCONTINUE: CloseAndSave 호출 직전 filename='" + filename + "'");
       DocumentExtension.CloseAndSave(mdiActiveDocument, filename);
       PlantOrthoView.FileDiag("PFSORTHOCONTINUE: CloseAndSave 반환, PIPE 재활성 직전");
+      Document reactivatedDoc = null;
       foreach (Document document in Application.DocumentManager)
       {
         if (string.Compare(document.Name, Commands.DocumentName, true) == 0)
+        {
           Application.DocumentManager.MdiActiveDocument = document;
+          reactivatedDoc = document;
+        }
+      }
+      // 큐브를 원본(PIPE) DB에서 지웠으나 삭제 시점 비활성이라 화면 잔상이 남음(REGENALL 전까지).
+      // 재활성 후 REGENALL 큐잉으로 표시 갱신 → 초록 clip cube 잔상 자동 제거(사용자 확인 case A).
+      if (reactivatedDoc != null)
+      {
+        PlantOrthoView.FileDiag("PFSORTHOCONTINUE: PIPE 재활성 후 REGENALL 큐잉 doc='" + reactivatedDoc.Name + "'");
+        reactivatedDoc.SendStringToExecute("._REGENALL\n", true, false, false);
       }
       if (!Commands.IsMoreThanOne)
       {
