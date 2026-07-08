@@ -22,6 +22,7 @@ namespace PlantFlow_Support
     public class OrthoViewportManager
     {
         private PlantOrthoView m_owner;
+        private const string FlatLayerName = "PFS_ORTHO_FLATTEN";
 
         public OrthoViewportManager(PlantOrthoView owner)
         {
@@ -41,25 +42,23 @@ namespace PlantFlow_Support
             rotationAngle = 0.0;
             Document mdiActiveDocument = Application.DocumentManager.MdiActiveDocument;
             Database database = mdiActiveDocument.Database;
-            using (mdiActiveDocument.LockDocument())
+            PlantOrthoView.FileDiag("ProcessViewportPlacement enter (상위 락 사용, 자체 LockDocument 없음)");
+            using (Transaction transaction = database.TransactionManager.StartTransaction())
             {
-                using (Transaction transaction = database.TransactionManager.StartTransaction())
+                BlockTable blockTable = transaction.GetObject(database.BlockTableId, (OpenMode)0) as BlockTable;
+                BlockTableRecord blockTableRecord = transaction.GetObject(((SymbolTable)blockTable)[BlockTableRecord.PaperSpace], (OpenMode)1) as BlockTableRecord;
+                Application.SetSystemVariable("TILEMODE", (object)0);
+                mdiActiveDocument.Editor.SwitchToPaperSpace();
+                using (Viewport viewport = new Viewport())
                 {
-                    BlockTable blockTable = transaction.GetObject(database.BlockTableId, (OpenMode)0) as BlockTable;
-                    BlockTableRecord blockTableRecord = transaction.GetObject(((SymbolTable)blockTable)[BlockTableRecord.PaperSpace], (OpenMode)1) as BlockTableRecord;
-                    Application.SetSystemVariable("TILEMODE", (object)0);
-                    mdiActiveDocument.Editor.SwitchToPaperSpace();
-                    using (Viewport viewport = new Viewport())
-                    {
-                        viewport.CenterPoint = ptIns;
-                        viewport.Width = newVPWidth;
-                        viewport.Height = newVPHeight;
-                        blockTableRecord.AppendEntity((Entity)viewport);
-                        transaction.AddNewlyCreatedDBObject((DBObject)viewport, true);
-                        viewportId = ((DBObject)viewport).Id;
-                    }
-                    transaction.Commit();
+                    viewport.CenterPoint = ptIns;
+                    viewport.Width = newVPWidth;
+                    viewport.Height = newVPHeight;
+                    blockTableRecord.AppendEntity((Entity)viewport);
+                    transaction.AddNewlyCreatedDBObject((DBObject)viewport, true);
+                    viewportId = ((DBObject)viewport).Id;
                 }
+                transaction.Commit();
             }
             return true;
         }
@@ -68,75 +67,297 @@ namespace PlantFlow_Support
         {
             Document mdiActiveDocument = Application.DocumentManager.MdiActiveDocument;
             Database database = mdiActiveDocument.Database;
-            using (mdiActiveDocument.LockDocument())
+            using (Transaction trans = database.TransactionManager.StartTransaction())
             {
-                using (Transaction trans = database.TransactionManager.StartTransaction())
+                PSUtil.Log("AnnotateViewport: Transaction Started. ViewportId: " + viewport_id.ToString());
+                PlantOrthoView.FileDiag("FlattenStage3 AnnotateViewport enter (상위 락 사용, 자체 LockDocument 없음)");
+
+                BlockTable blockTable = trans.GetObject(database.BlockTableId, (OpenMode)0) as BlockTable;
+                BlockTableRecord blockTableRecord1 = trans.GetObject(((SymbolTable)blockTable)[BlockTableRecord.ModelSpace], (OpenMode)1) as BlockTableRecord;
+                BlockTableRecord blockTableRecord2 = trans.GetObject(((SymbolTable)blockTable)[BlockTableRecord.PaperSpace], (OpenMode)1) as BlockTableRecord;
+
+                PSUtil.Log("AnnotateViewport: Ensuring Layers...");
+                EnsureLayers(trans, database);
+                PSUtil.Log("AnnotateViewport: Ensuring TextStyle...");
+                ObjectId textStyleId = EnsureTextStyle(trans, database);
+                PSUtil.Log("AnnotateViewport: Ensuring DimStyle...");
+                ObjectId dimStyleId = EnsureDimStyle(trans, database, textStyleId);
+
+                PSUtil.Log("AnnotateViewport: Fixing Viewport Scale before projection...");
+                FixViewportScale(trans, viewport_id);
+                Viewport viewport = trans.GetObject(viewport_id, (OpenMode)1) as Viewport;
+                ViewportProjection projection = ViewportProjection.FromViewport(viewport);
+                PlantOrthoView.FileDiag("FlattenStage3 projection ready center=" + viewport.CenterPoint
+                    + " viewCenter=" + viewport.ViewCenter + " customScale=" + viewport.CustomScale
+                    + " viewDir=" + viewport.ViewDirection + " twist=" + viewport.TwistAngle
+                    + " topCheck=paper=center+(dcs-viewCenter)*0.1, Top은 Y반전 없음");
+
+                PSUtil.Log("AnnotateViewport: Collecting Model Extents...");
+                Dictionary<string, Extents3d> componentExtents;
+                Extents3d geometricExtents;
+                CollectModelExtents(trans, blockTableRecord1, out componentExtents, out geometricExtents);
+
+                int clonedFlatLines = CloneFlattenLinesToPaper(trans, blockTableRecord1, blockTableRecord2, projection);
+                PlantOrthoView.FileDiag("FlattenStage3 PS flat line clone count=" + clonedFlatLines);
+
+                PSUtil.Log("AnnotateViewport: Ensuring Datum Blocks...");
+                EnsureDatumBlocks(trans, blockTable, textStyleId);
+                PSUtil.Log("AnnotateViewport: Inserting Datum Symbol...");
+                InsertDatumSymbol(trans, blockTableRecord2, blockTable, projection);
+
+                PSUtil.Log("AnnotateViewport: Ensuring MLeader Styles...");
+                EnsureMLeaderStyles(trans, database, blockTable);
+
+                PSUtil.Log("AnnotateViewport: Creating BOM Table...");
+                List<string[]> bomData = CreateBOMTable(trans, database, blockTableRecord2, textStyleId);
+
+                // Transform extents if needed (Right/Left view). WCS calculation values remain separate
+                // from paper placement points to avoid 1/10 label-value collapse.
+                if (new[] { "Right", "Left" }.Contains(m_owner.CurrentViewTypeString))
                 {
-                    PSUtil.Log("AnnotateViewport: Transaction Started. ViewportId: " + viewport_id.ToString());
-
-                    BlockTable blockTable = trans.GetObject(database.BlockTableId, (OpenMode)0) as BlockTable;
-                    BlockTableRecord blockTableRecord1 = trans.GetObject(((SymbolTable)blockTable)[BlockTableRecord.ModelSpace], (OpenMode)1) as BlockTableRecord;
-                    BlockTableRecord blockTableRecord2 = trans.GetObject(((SymbolTable)blockTable)[BlockTableRecord.PaperSpace], (OpenMode)1) as BlockTableRecord;
-                    
-                    PSUtil.Log("AnnotateViewport: Ensuring Layers...");
-                    EnsureLayers(trans, database);
-                    PSUtil.Log("AnnotateViewport: Ensuring TextStyle...");
-                    ObjectId textStyleId = EnsureTextStyle(trans, database);
-                    PSUtil.Log("AnnotateViewport: Ensuring DimStyle...");
-                    ObjectId dimStyleId = EnsureDimStyle(trans, database, textStyleId);
-
-                    PSUtil.Log("AnnotateViewport: Collecting Model Extents...");
-                    Dictionary<string, Extents3d> componentExtents;
-                    Extents3d geometricExtents;
-                    CollectModelExtents(trans, blockTableRecord1, out componentExtents, out geometricExtents);
-
-                    PSUtil.Log("AnnotateViewport: Ensuring Datum Blocks...");
-                    EnsureDatumBlocks(trans, blockTable, textStyleId);
-                    PSUtil.Log("AnnotateViewport: Inserting Datum Symbol...");
-                    InsertDatumSymbol(trans, blockTableRecord1, blockTable);
-
-                    PSUtil.Log("AnnotateViewport: Ensuring MLeader Styles...");
-                    EnsureMLeaderStyles(trans, database, blockTable);
-
-                    PSUtil.Log("AnnotateViewport: Creating BOM Table...");
-                    List<string[]> bomData = CreateBOMTable(trans, database, blockTableRecord2, textStyleId);
-                    
-                    // Transform extents if needed (Right/Left view)
-                    if (new[] { "Right", "Left" }.Contains(m_owner.CurrentViewTypeString))
+                    geometricExtents.TransformBy(PlantOrthoView.SPInfo.UCS);
+                    Dictionary<string, Extents3d> tempDict = new Dictionary<string, Extents3d>();
+                    foreach (var kvp in componentExtents)
                     {
-                        geometricExtents.TransformBy(PlantOrthoView.SPInfo.UCS);
-                        Dictionary<string, Extents3d> tempDict = new Dictionary<string, Extents3d>();
-                        foreach (var kvp in componentExtents)
-                        {
-                            Extents3d ext = kvp.Value;
-                            ext.TransformBy(PlantOrthoView.SPInfo.UCS);
-                            tempDict.Add(kvp.Key, ext);
-                        }
-                        componentExtents = tempDict;
+                        Extents3d ext = kvp.Value;
+                        ext.TransformBy(PlantOrthoView.SPInfo.UCS);
+                        tempDict.Add(kvp.Key, ext);
                     }
+                    componentExtents = tempDict;
+                }
 
-                    PSUtil.Log("AnnotateViewport: Creating Annotations...");
-                    CreateAnnotations(trans, blockTable, blockTableRecord1, textStyleId, dimStyleId, geometricExtents, componentExtents, bomData);
+                PSUtil.Log("AnnotateViewport: Creating Annotations...");
+                CreateAnnotations(trans, blockTable, blockTableRecord2, textStyleId, dimStyleId, geometricExtents, componentExtents, bomData, projection);
 
-                    PSUtil.Log("AnnotateViewport: Adding Title View Label...");
-                    AddTitleViewLabel(trans, blockTableRecord2, textStyleId);
-                    PSUtil.Log("AnnotateViewport: Updating Title Block Attributes...");
-                    UpdateTitleBlockAttributes(trans, blockTableRecord2);
-                    
-                    PSUtil.Log("AnnotateViewport: Fixing Viewport Scale...");
-                    FixViewportScale(trans, viewport_id);
+                PSUtil.Log("AnnotateViewport: Adding Title View Label...");
+                AddTitleViewLabel(trans, blockTableRecord2, textStyleId);
+                PSUtil.Log("AnnotateViewport: Updating Title Block Attributes...");
+                UpdateTitleBlockAttributes(trans, blockTableRecord2);
 
-                    PSUtil.Log("AnnotateViewport: Committing Transaction...");
+                List<ObjectId> cleanupIds = CollectModelCleanupIds(trans, blockTableRecord1);
+                int erasedModelObjects = EraseIfAlive(trans, cleanupIds);
+                int erasedViewport = EraseIfAlive(trans, new ObjectId[] { viewport_id });
+                PlantOrthoView.FileDiag("FlattenStage3 cleanup modelErased=" + erasedModelObjects + " viewportErased=" + erasedViewport);
 
-                    trans.Commit();
+                PSUtil.Log("AnnotateViewport: Committing Transaction...");
+                trans.Commit();
+            }
+            mdiActiveDocument.SendStringToExecute("._PSPACE\n", true, false, false);
+            Commands.ViewportId = ObjectId.Null;
+            PlantOrthoView.FileDiag("FlattenStage3 AnnotateViewport 종료: PFSORTHOCONTINUE 큐잉");
+            mdiActiveDocument.SendStringToExecute("._PFSORTHOCONTINUE\n", true, false, false);
+        }
+
+        private sealed class ViewportProjection
+        {
+            private readonly Point3d _paperCenter;
+            private readonly Point2d _viewCenter;
+            private readonly double _customScale;
+            private readonly Matrix3d _wcsToDcs;
+
+            private ViewportProjection(Point3d paperCenter, Point2d viewCenter, double customScale, Matrix3d wcsToDcs)
+            {
+                _paperCenter = paperCenter;
+                _viewCenter = viewCenter;
+                _customScale = customScale;
+                _wcsToDcs = wcsToDcs;
+            }
+
+            public static ViewportProjection FromViewport(Viewport viewport)
+            {
+                if (viewport == null)
+                    throw new ArgumentNullException("viewport");
+
+                Vector3d viewDirection = viewport.ViewDirection;
+                if (viewDirection.Length < 1e-9)
+                    viewDirection = Vector3d.ZAxis;
+
+                Point3d viewTarget = viewport.ViewTarget;
+                Matrix3d dcsToWcs =
+                    Matrix3d.Rotation(-viewport.TwistAngle, viewDirection, viewTarget) *
+                    Matrix3d.Displacement(viewTarget - Point3d.Origin) *
+                    Matrix3d.PlaneToWorld(viewDirection);
+
+                return new ViewportProjection(
+                    viewport.CenterPoint,
+                    viewport.ViewCenter,
+                    viewport.CustomScale,
+                    dcsToWcs.Inverse());
+            }
+
+            public Point3d ProjectPoint(Point3d wcsPoint)
+            {
+                Point3d dcsPoint = wcsPoint.TransformBy(_wcsToDcs);
+                double paperX = _paperCenter.X + (dcsPoint.X - _viewCenter.X) * _customScale;
+                double paperY = _paperCenter.Y + (dcsPoint.Y - _viewCenter.Y) * _customScale;
+                return new Point3d(paperX, paperY, 0.0);
+            }
+
+            public Point3d[] ProjectPoints(Point3d[] wcsPoints)
+            {
+                if (wcsPoints == null)
+                    return new Point3d[0];
+
+                Point3d[] paperPoints = new Point3d[wcsPoints.Length];
+                for (int i = 0; i < wcsPoints.Length; i++)
+                    paperPoints[i] = ProjectPoint(wcsPoints[i]);
+                return paperPoints;
+            }
+
+            public Extents3d ProjectExtents(Extents3d wcsExtents)
+            {
+                Point3d min = wcsExtents.MinPoint;
+                Point3d max = wcsExtents.MaxPoint;
+                Point3d[] corners = new Point3d[]
+                {
+                    new Point3d(min.X, min.Y, min.Z),
+                    new Point3d(min.X, max.Y, min.Z),
+                    new Point3d(max.X, min.Y, min.Z),
+                    new Point3d(max.X, max.Y, min.Z),
+                    new Point3d(min.X, min.Y, max.Z),
+                    new Point3d(min.X, max.Y, max.Z),
+                    new Point3d(max.X, min.Y, max.Z),
+                    new Point3d(max.X, max.Y, max.Z)
+                };
+
+                Extents3d projected = new Extents3d();
+                bool hasPoint = false;
+                foreach (Point3d corner in corners)
+                {
+                    Point3d paperPoint = ProjectPoint(corner);
+                    if (!hasPoint)
+                    {
+                        projected = new Extents3d(paperPoint, paperPoint);
+                        hasPoint = true;
+                    }
+                    else
+                    {
+                        projected.AddPoint(paperPoint);
+                    }
+                }
+                return projected;
+            }
+        }
+
+        private int CloneFlattenLinesToPaper(Transaction trans, BlockTableRecord modelSpace, BlockTableRecord paperSpace, ViewportProjection projection)
+        {
+            // 서포트 지오메트리를 낱개 Line 대신 숨김 익명 블록(*U##)으로 묶어 배치(사용자 결정 2026-07-08).
+            // 이름은 "*U" 익명 접두사 → AutoCAD가 유니크 *U## 자동 발급(이름 충돌 관리 불요).
+            Database db = paperSpace.Database;
+            BlockTable bt = trans.GetObject(db.BlockTableId, OpenMode.ForWrite) as BlockTable;
+
+            BlockTableRecord blockDef = new BlockTableRecord();
+            blockDef.Name = "*U";
+            blockDef.Origin = Point3d.Origin;
+            ObjectId blockDefId = bt.Add(blockDef);
+            trans.AddNewlyCreatedDBObject(blockDef, true);
+
+            int cloned = 0;
+            foreach (ObjectId id in modelSpace)
+            {
+                Entity entity = trans.GetObject(id, OpenMode.ForRead) as Entity;
+                if (!(entity is Line sourceLine))
+                    continue;
+                if (!string.Equals(sourceLine.Layer, FlatLayerName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // 정의부에는 투영된 절대 페이퍼 좌표로 저장. BlockReference는 원점 삽입 → 현 위치 그대로.
+                Line paperLine = new Line(projection.ProjectPoint(sourceLine.StartPoint), projection.ProjectPoint(sourceLine.EndPoint));
+                paperLine.Layer = sourceLine.Layer;
+                paperLine.Color = sourceLine.Color;
+                paperLine.Linetype = sourceLine.Linetype;
+                paperLine.LineWeight = sourceLine.LineWeight;
+                blockDef.AppendEntity(paperLine);
+                trans.AddNewlyCreatedDBObject(paperLine, true);
+                cloned++;
+            }
+
+            if (cloned == 0)
+            {
+                // 빈 블록 방지: 방금 만든 정의 제거.
+                blockDef.Erase();
+                PlantOrthoView.FileDiag("CloneFlattenLinesToPaper: flat line 0건 — 익명 블록 미생성");
+                return 0;
+            }
+
+            BlockReference blockRef = new BlockReference(Point3d.Origin, blockDefId);
+            blockRef.Layer = FlatLayerName;
+            paperSpace.AppendEntity(blockRef);
+            trans.AddNewlyCreatedDBObject(blockRef, true);
+            PlantOrthoView.FileDiag("CloneFlattenLinesToPaper: 익명 블록 생성 lines=" + cloned + " blockDefId=" + blockDefId);
+            return cloned;
+        }
+
+        private List<ObjectId> CollectModelCleanupIds(Transaction trans, BlockTableRecord modelSpace)
+        {
+            List<ObjectId> ids = new List<ObjectId>();
+            foreach (ObjectId id in modelSpace)
+            {
+                Entity entity = trans.GetObject(id, OpenMode.ForRead) as Entity;
+                if (entity == null)
+                    continue;
+
+                if (string.Equals(entity.Layer, FlatLayerName, StringComparison.OrdinalIgnoreCase))
+                {
+                    ids.Add(id);
+                    continue;
+                }
+
+                BlockReference blockReference = entity as BlockReference;
+                if (blockReference == null)
+                    continue;
+
+                try
+                {
+                    BlockTableRecord definition = trans.GetObject(blockReference.BlockTableRecord, OpenMode.ForRead) as BlockTableRecord;
+                    string name = definition == null ? string.Empty : definition.Name;
+                    if (name.StartsWith("*", StringComparison.Ordinal))
+                        ids.Add(id);
+                }
+                catch (System.Exception ex)
+                {
+                    PlantOrthoView.FileDiag("CollectModelCleanupIds 블록명 확인 예외: " + ex.Message);
                 }
             }
-            mdiActiveDocument.SendStringToExecute("._AUTO2DPROCESSZOOM\n", true, false, false);
-            mdiActiveDocument.SendStringToExecute("._MSPACE\n", true, false, false);
-            mdiActiveDocument.SendStringToExecute("._AUTO2DPROCESSZOOM\n", true, false, false);
-            mdiActiveDocument.SendStringToExecute("._PSPACE\n", true, false, false);
-            Commands.ViewportId = viewport_id;
-            mdiActiveDocument.SendStringToExecute("PFSORTHOUPDATESCALE\n", false, false, true);
+            return ids;
+        }
+
+        private int EraseIfAlive(Transaction trans, IEnumerable<ObjectId> ids)
+        {
+            int erased = 0;
+            if (ids == null)
+                return erased;
+
+            foreach (ObjectId id in ids)
+            {
+                if (id.IsNull || id.IsErased)
+                    continue;
+                try
+                {
+                    Entity entity = trans.GetObject(id, OpenMode.ForWrite, false) as Entity;
+                    if (entity == null || entity.IsErased)
+                        continue;
+                    entity.Erase();
+                    erased++;
+                }
+                catch (System.Exception ex)
+                {
+                    PlantOrthoView.FileDiag("EraseIfAlive 예외 id=" + id + ": " + ex.Message);
+                }
+            }
+            return erased;
+        }
+
+        private string FormatPaperDimensionValue(double value)
+        {
+            return Math.Abs(value).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private void PreserveDimensionText(RotatedDimension dimension, double sourceLength)
+        {
+            if (dimension == null)
+                return;
+            dimension.DimensionText = FormatPaperDimensionValue(sourceLength);
         }
 
         private void EnsureLayers(Transaction trans, Database db)
@@ -170,28 +391,12 @@ namespace PlantFlow_Support
 
         private ObjectId EnsureDimStyle(Transaction trans, Database db, ObjectId textStyleId)
         {
-            // Logic for DS_85...
-            DimStyleTable dimStyleTable = trans.GetObject(db.DimStyleTableId, (OpenMode)1) as DimStyleTable;
-            string str6 = "DS_85";
-            if (((SymbolTable)dimStyleTable).Has(str6)) return ((SymbolTable)dimStyleTable)[str6];
-
-            DimStyleTableRecord styleTableRecord = new DimStyleTableRecord();
-            ((SymbolTableRecord)styleTableRecord).Name = str6;
-            styleTableRecord.Dimclrd = Color.FromColorIndex((ColorMethod)195, (short)1);
-            styleTableRecord.Dimclre = Color.FromColorIndex((ColorMethod)195, (short)1);
-            styleTableRecord.Dimexe = 1.5;
-            styleTableRecord.Dimexo = 1.5;
-            styleTableRecord.Dimdli = 8.0;
-            styleTableRecord.Dimasz = 4.0;
-            styleTableRecord.Dimcen = 0.0;
-            styleTableRecord.Dimtxsty = textStyleId;
-            styleTableRecord.Dimtxt = 3.0;
-            styleTableRecord.Dimclrt = Color.FromColorIndex((ColorMethod)195, (short)3);
-            styleTableRecord.Dimgap = 1.5;
-            styleTableRecord.Dimscale = 0.0;
-            ObjectId id = ((SymbolTable)dimStyleTable).Add((SymbolTableRecord)styleTableRecord);
-            trans.AddNewlyCreatedDBObject((DBObject)styleTableRecord, true);
-            return id;
+            // STANDARD 순정 사용(사용자 결정 2026-07-08). 커스텀 DS_85 미생성 — 미세 설정은 후일.
+            // 측정값(실 mm) 보존은 스타일과 무관하게 PreserveDimensionText가 담당.
+            DimStyleTable dimStyleTable = trans.GetObject(db.DimStyleTableId, (OpenMode)0) as DimStyleTable;
+            if (dimStyleTable != null && ((SymbolTable)dimStyleTable).Has("STANDARD"))
+                return ((SymbolTable)dimStyleTable)["STANDARD"];
+            return db.Dimstyle;
         }
 
         private void CollectModelExtents(Transaction trans, BlockTableRecord btr, out Dictionary<string, Extents3d> dict, out Extents3d geometricExtents)
@@ -223,7 +428,10 @@ namespace PlantFlow_Support
                             dict.Add(key, blockRef.GeometricExtents);
                         }
                      }
-                     catch {}
+                     catch (System.Exception ex)
+                     {
+                        PlantOrthoView.FileDiag("CollectModelExtents blockRef 예외 id=" + objectId + ": " + ex.Message);
+                     }
                  }
                  else if (dbObject is Solid3d) dbObject.Erase();
             }
@@ -392,7 +600,7 @@ namespace PlantFlow_Support
              }
         }
 
-        private void InsertDatumSymbol(Transaction trans, BlockTableRecord btr, BlockTable bt)
+        private void InsertDatumSymbol(Transaction trans, BlockTableRecord btr, BlockTable bt, ViewportProjection projection)
         {
             Point3d datumPoint = PlantOrthoView.SPInfo.DatumPoint;
             string viewType = m_owner.CurrentViewTypeString;
@@ -408,7 +616,7 @@ namespace PlantFlow_Support
 
             BlockReference blockReference = new BlockReference(Point3d.Origin, ((SymbolTable)bt)["DATUM_SYMBOL"]);
             blockReference.TransformBy(PlantOrthoView.SPInfo.UCS);
-            blockReference.Position = datumPoint;
+            blockReference.Position = projection.ProjectPoint(datumPoint);
             blockReference.Layer = "AUTO_DIM";
             btr.AppendEntity(blockReference);
             trans.AddNewlyCreatedDBObject(blockReference, true);
@@ -530,7 +738,7 @@ namespace PlantFlow_Support
             return strArrayList;
         }
 
-        private void CreateAnnotations(Transaction trans, BlockTable bt, BlockTableRecord btr, ObjectId textStyleId, ObjectId dimStyleId, Extents3d extents, Dictionary<string, Extents3d> dict, List<string[]> bomData)
+        private void CreateAnnotations(Transaction trans, BlockTable bt, BlockTableRecord btr, ObjectId textStyleId, ObjectId dimStyleId, Extents3d extents, Dictionary<string, Extents3d> dict, List<string[]> bomData, ViewportProjection projection)
         {
             Dictionary<string, Point3d[]> dictionary4 = new Dictionary<string, Point3d[]>();
             BOMs boMs = new BOMs(PlantOrthoView.SPInfo.Ids[0], PlantOrthoView.SPInfo.AttachmentList); // Needed for HANTEC args? Same instance?
@@ -556,11 +764,16 @@ namespace PlantFlow_Support
 
             double dim_line_point = 0.0;
             double dim_line_point_vertical = 0.0;
-            List<Point3d> _unused;
-            // Dimensions
-            List<RotatedDimension> dims = PSUtil.CreateAttaDimension(PSUtil.AttaDPointArrangement(extents, dict.Values.ToList(), PlantOrthoView.SPInfo.UCS, out dim_line_point, out dim_line_point_vertical, out _unused), dim_line_point, PlantOrthoView.SPInfo.UCS, dimStyleId);
-            foreach (RotatedDimension dim in dims)
+            List<Point3d> sourceVerticalDPoints;
+            List<Point3d> sourceHorizontalDPoints = PSUtil.AttaDPointArrangement(extents, dict.Values.ToList(), PlantOrthoView.SPInfo.UCS, out dim_line_point, out dim_line_point_vertical, out sourceVerticalDPoints);
+            Point3d[] paperHorizontalDPoints = projection.ProjectPoints(sourceHorizontalDPoints.ToArray());
+            double paperDimLinePoint = paperHorizontalDPoints.Length == 0 ? 0.0 : paperHorizontalDPoints.Max(p => p.Y);
+            List<RotatedDimension> dims = PSUtil.CreateAttaDimension(paperHorizontalDPoints.ToList(), paperDimLinePoint, Matrix3d.Identity, dimStyleId);
+            for (int i = 0; i < dims.Count; i++)
             {
+                RotatedDimension dim = dims[i];
+                if (i + 1 < sourceHorizontalDPoints.Count)
+                    PreserveDimensionText(dim, sourceHorizontalDPoints[i + 1].X - sourceHorizontalDPoints[i].X);
                 btr.AppendEntity((Entity)dim);
                 trans.AddNewlyCreatedDBObject((DBObject)dim, true);
             }
@@ -573,11 +786,14 @@ namespace PlantFlow_Support
             // Or better: Let's assume standard behavior (create dims).
             if (!IsExtentsNull(extents)) // Helper check
             {
+               Extents3d paperExtents = projection.ProjectExtents(extents);
                RotatedDimension dimension1;
-               PSUtil.CreateHorizontalDimension(extents, PlantOrthoView.SPInfo.UCS, dimStyleId, dim_line_point + 50.0, out dimension1);
+               PSUtil.CreateHorizontalDimension(paperExtents, Matrix3d.Identity, dimStyleId, paperExtents.MaxPoint.Y, out dimension1);
+               PreserveDimensionText(dimension1, extents.MaxPoint.X - extents.MinPoint.X);
                btr.AppendEntity((Entity)dimension1); trans.AddNewlyCreatedDBObject((DBObject)dimension1, true);
                RotatedDimension dimension2;
-               PSUtil.CreateVerticalDimension(extents, PlantOrthoView.SPInfo.UCS, dimStyleId, dim_line_point_vertical + 50.0, out dimension2);
+               PSUtil.CreateVerticalDimension(paperExtents, Matrix3d.Identity, dimStyleId, paperExtents.MaxPoint.X, out dimension2);
+               PreserveDimensionText(dimension2, extents.MaxPoint.Y - extents.MinPoint.Y);
                btr.AppendEntity((Entity)dimension2); trans.AddNewlyCreatedDBObject((DBObject)dimension2, true);
             }
             
@@ -598,7 +814,7 @@ namespace PlantFlow_Support
                     {
                         string key = str13 + "_" + index.ToString();
                         if (dictionary4.ContainsKey(key)) {
-                             MLeader mleader = PSUtil.CreateMLeader(trans, ((SymbolTable)bt)["CIRCLE_ST"], ml_style_id1, dictionary4[key], str13, PlantOrthoView.SPInfo.UCS);
+                             MLeader mleader = PSUtil.CreateMLeader(trans, ((SymbolTable)bt)["CIRCLE_ST"], ml_style_id1, projection.ProjectPoints(dictionary4[key]), str13, Matrix3d.Identity);
                              btr.AppendEntity((Entity)mleader); trans.AddNewlyCreatedDBObject((DBObject)mleader, true);
                         }
                     }
@@ -618,16 +834,16 @@ namespace PlantFlow_Support
                      Point3d point3d8 = new Point3d(point3d5.X, point3d5.Y - num / 2.0, 0.0);
                      Point3d point3d9 = new Point3d(point3d8.X - 50.0, point3d8.Y - 50.0, 0.0);
                      
-                     MLeader mleader1 = PSUtil.CreateMLeader(new Point3d[2] { point3d6, point3d7 }, new MText() { Contents = strArray6[8], TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, PlantOrthoView.SPInfo.UCS);
+                     MLeader mleader1 = PSUtil.CreateMLeader(projection.ProjectPoints(new Point3d[2] { point3d6, point3d7 }), new MText() { Contents = strArray6[8], TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
                      btr.AppendEntity((Entity)mleader1); trans.AddNewlyCreatedDBObject((DBObject)mleader1, true);
                      
-                     MLeader mleader2 = PSUtil.CreateMLeader(new Point3d[2] { point3d8, point3d9 }, new MText() { Contents = "B.O.P+" + strArray6[6], TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, PlantOrthoView.SPInfo.UCS);
+                     MLeader mleader2 = PSUtil.CreateMLeader(projection.ProjectPoints(new Point3d[2] { point3d8, point3d9 }), new MText() { Contents = "B.O.P+" + strArray6[6], TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
                      btr.AppendEntity((Entity)mleader2); trans.AddNewlyCreatedDBObject((DBObject)mleader2, true);
                      
                      // Joint Tag if not J?
                      if (!str13.Contains("J") && dictionary4.ContainsKey(str13))
                      {
-                          MLeader mleader = PSUtil.CreateMLeader(trans, ((SymbolTable)bt)["CIRCLE_ST"], ml_style_id1, dictionary4[str13], str13, PlantOrthoView.SPInfo.UCS);
+                          MLeader mleader = PSUtil.CreateMLeader(trans, ((SymbolTable)bt)["CIRCLE_ST"], ml_style_id1, projection.ProjectPoints(dictionary4[str13]), str13, Matrix3d.Identity);
                           btr.AppendEntity((Entity)mleader); trans.AddNewlyCreatedDBObject((DBObject)mleader, true);
                      }
                 }
@@ -635,9 +851,9 @@ namespace PlantFlow_Support
             
             if (flag2 && dictionary4.ContainsKey("PLN") && dictionary4.ContainsKey("BOP"))
             {
-               MLeader mleader4 = PSUtil.CreateMLeader(dictionary4["PLN"], new MText() { Contents = PlantOrthoView.SPInfo.PipeLineNo, TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, PlantOrthoView.SPInfo.UCS);
+               MLeader mleader4 = PSUtil.CreateMLeader(projection.ProjectPoints(dictionary4["PLN"]), new MText() { Contents = PlantOrthoView.SPInfo.PipeLineNo, TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
                btr.AppendEntity((Entity)mleader4); trans.AddNewlyCreatedDBObject((DBObject)mleader4, true);
-               MLeader mleader5 = PSUtil.CreateMLeader(dictionary4["BOP"], new MText() { Contents = "B.O.P+" + PlantOrthoView.SPInfo.BOP, TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, PlantOrthoView.SPInfo.UCS);
+               MLeader mleader5 = PSUtil.CreateMLeader(projection.ProjectPoints(dictionary4["BOP"]), new MText() { Contents = "B.O.P+" + PlantOrthoView.SPInfo.BOP, TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
                btr.AppendEntity((Entity)mleader5); trans.AddNewlyCreatedDBObject((DBObject)mleader5, true);
             }
         }
@@ -671,7 +887,11 @@ namespace PlantFlow_Support
                     {
                         obj = trans.GetObject(id, OpenMode.ForRead);
                     }
-                    catch { continue; } // Skip objects we can't open
+                    catch (System.Exception ex)
+                    {
+                        PSUtil.Log("UpdateTitleBlockAttributes: object open skip id=" + id + " ex=" + ex.Message);
+                        continue;
+                    }
 
                     if (obj is BlockReference br && br.Name == "DRAWING_TITLE")
                     {

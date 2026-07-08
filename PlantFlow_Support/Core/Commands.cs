@@ -24,108 +24,13 @@ namespace PlantFlow_Support
     public void UpdateStandardScale()
     {
       Document mdiActiveDocument = Application.DocumentManager.MdiActiveDocument;
-      Editor editor = mdiActiveDocument.Editor;
-      Database database = mdiActiveDocument.Database;
-      PlantOrthoView.FileDiag("PFSORTHOUPDATESCALE 진입 doc='" + mdiActiveDocument.Name + "'");
-
-      if (Commands.ViewportId == ObjectId.Null)
+      if (mdiActiveDocument == null)
       {
-          editor.WriteMessage("\nError: ViewportId is null. Skipping UpdateStandardScale.\n");
-          return;
+        PlantOrthoView.FileDiag("PFSORTHOUPDATESCALE no-op: active doc null");
+        return;
       }
 
-      using (mdiActiveDocument.LockDocument())
-      {
-        using (Transaction transaction = database.TransactionManager.StartTransaction())
-        {
-          try
-          {
-              BlockTable blockTable = transaction.GetObject(database.BlockTableId, (OpenMode) 0) as BlockTable;
-              BlockTableRecord blockTableRecord = transaction.GetObject(((SymbolTable) blockTable)[BlockTableRecord.ModelSpace], (OpenMode) 1) as BlockTableRecord;
-              string currentLayout = LayoutManager.Current.CurrentLayout;
-              DBDictionary dbDictionary = transaction.GetObject(database.LayoutDictionaryId, (OpenMode) 0) as DBDictionary;
-              
-              if (!dbDictionary.Contains(currentLayout)) {
-                  editor.WriteMessage("\nError: Current layout '" + currentLayout + "' not found in dictionary.\n");
-                  return;
-              }
-
-              Layout layout = transaction.GetObject((ObjectId) dbDictionary[currentLayout], (OpenMode) 0) as Layout;
-              
-              // Removed suspicious/useless line: transaction.GetObject(layout.BlockTableRecordId, (OpenMode) 1);
-
-              double customScale = 1.0;
-              try {
-                  if (Commands.ViewportId == ObjectId.Null) {
-                      editor.WriteMessage("\nWarning: ViewportId is Null in inner check.\n");
-                  } else {
-                      customScale = (transaction.GetObject(Commands.ViewportId, (OpenMode) 1) as Viewport).CustomScale;
-                  }
-              } catch (System.Exception ex) {
-                  editor.WriteMessage("\nWarning: Could not get CustomScale from Viewport (" + ex.Message + "). Using default 1.0.\n");
-              }
-
-              foreach (ObjectId objectId in blockTableRecord)
-              {
-                try 
-                {
-                    DBObject dbObject = transaction.GetObject(objectId, (OpenMode) 1);
-                    switch (dbObject)
-                    {
-                      case RotatedDimension _:
-                        ((Dimension) dbObject).Dimscale = 1.0 / customScale;
-                        continue;
-                      case MLeader _:
-                        ((MLeader) dbObject).Scale = 1.0 / customScale;
-                        continue;
-                      case BlockReference _:
-                        BlockReference blockReference = (BlockReference) dbObject;
-                        if (blockReference.Name == "DATUM_SYMBOL")
-                        {
-                          try 
-                          {
-                              Point3d position = blockReference.Position;
-                              Matrix3d matrix3d = Matrix3d.Scaling(1.0 / customScale, position);
-                              ((Entity) blockReference).TransformBy(matrix3d);
-                          }
-                          catch (Autodesk.AutoCAD.Runtime.Exception ex)
-                          {
-                              if (ex.ErrorStatus == ErrorStatus.CannotScaleNonUniformly)
-                              {
-                                  editor.WriteMessage("\nWarning: Cannot scale DATUM_SYMBOL non-uniformly. Skipped.\n");
-                              }
-                              else
-                              {
-                                  throw; 
-                              }
-                          }
-                          continue;
-                        }
-                        continue;
-                      default:
-                        continue;
-                    }
-                }
-                catch (System.Exception ex)
-                {
-                    editor.WriteMessage("\nError processing entity " + objectId + ": " + ex.Message + "\n");
-                }
-              }
-              transaction.Commit();
-          }
-          catch (System.Exception ex)
-          {
-              editor.WriteMessage("\nCRITICAL EXCEPTION in UpdateStandardScale: " + ex.ToString() + "\n");
-          }
-        }
-      }
-      mdiActiveDocument.SendStringToExecute("._MSPACE\n", true, false, false);
-      // Removed recursive call that causes infinite loop/freezing
-      // mdiActiveDocument.SendStringToExecute("._AUTO2DPROCESSZOOM\n", true, false, false);
-      mdiActiveDocument.SendStringToExecute("._PSPACE\n", true, false, false);
-      // Removed unknown command
-      // mdiActiveDocument.SendStringToExecute("._AUTO2DEXPORTLAYOUTTOACAD2D\n", true, false, false);
-      PlantOrthoView.FileDiag("PFSORTHOUPDATESCALE 종료: PFSORTHOCONTINUE 큐잉");
+      PlantOrthoView.FileDiag("PFSORTHOUPDATESCALE no-op: Stage3 paper-space annotations already use real text height; 10x 보정 생략 doc='" + mdiActiveDocument.Name + "'");
       mdiActiveDocument.SendStringToExecute("._PFSORTHOCONTINUE\n", true, false, false);
     }
 
@@ -142,9 +47,14 @@ namespace PlantFlow_Support
         {
           if (Commands.ViewportId != ObjectId.Null)
           {
-             try {
+             try
+             {
                 (transaction.GetObject(Commands.ViewportId, (OpenMode) 1) as Viewport).Locked = true;
-             } catch {}
+             }
+             catch (System.Exception ex)
+             {
+                PlantOrthoView.FileDiag("PFSORTHOCONTINUE viewport lock skip: " + ex.Message);
+             }
           }
           transaction.Commit();
         }
