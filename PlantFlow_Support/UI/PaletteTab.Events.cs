@@ -642,6 +642,26 @@ namespace PlantFlow_Support
           return false;
         }
 
+        Vector3d safeViewDir;
+        Vector3d safeUp;
+        double chosenExpose;
+        double currentExpose;
+        bool pipeSetNonEmpty;
+        if (this.TrySafeMainViewBasis(info, axis, database, out safeViewDir, out safeUp, out chosenExpose, out currentExpose, out pipeSetNonEmpty)
+          && pipeSetNonEmpty
+          && chosenExpose > currentExpose + 0.01)
+        {
+          up = safeUp;
+          mainViewDir = safeViewDir;
+          PlantOrthoView.FileDiag("VIEWAXIS_APPLY support='" + info.Name + "' newViewDir=" + mainViewDir + " newUp=" + up
+            + " expose " + currentExpose.ToString("0.###") + "->" + chosenExpose.ToString("0.###"));
+        }
+        else
+        {
+          PlantOrthoView.FileDiag("VIEWAXIS_KEEP support='" + info.Name + "' viewDir=" + mainViewDir + " up=" + up
+            + " (pipeNonEmpty=" + pipeSetNonEmpty + ")");
+        }
+
         PlantOrthoView.FileDiag("PIPEAXIS_COMPUTE support='" + info.Name + "' axis=" + axis
           + " up=" + up + " mainViewDir=" + mainViewDir + " src=" + source
           + " bestPipeId=" + bestPipeId + " bestS1Dot=" + bestDot.ToString("0.###")
@@ -654,6 +674,358 @@ namespace PlantFlow_Support
         return false;
       }
     }
+
+    private sealed class SafeViewPipeInfo
+    {
+      public Vector3d Axis;
+      public string AxisLabel;
+      public bool Spurious;
+      public bool ConnMatched;
+      public double MinZ;
+      public double MaxZ;
+      public ObjectId PipeId;
+    }
+
+    private bool TrySafeMainViewBasis(SupportInfo info, Vector3d pipeAxis, Database database, out Vector3d safeViewDir, out Vector3d safeUp, out double chosenExpose, out double currentExpose, out bool pipeSetNonEmpty)
+    {
+      safeViewDir = Vector3d.XAxis;
+      safeUp = Vector3d.ZAxis;
+      chosenExpose = 0.0;
+      currentExpose = 0.0;
+      pipeSetNonEmpty = false;
+      try
+      {
+        if (info == null || database == null)
+          return false;
+
+        Vector3d currentMainViewDir;
+        Vector3d currentUp;
+        if (!this.ComputeMainViewBasis(pipeAxis, out currentUp, out currentMainViewDir))
+          return false;
+        Extents3d supportExtents;
+        bool hasSupportExtents = this.TryGetSupportExtents(info, database, out supportExtents);
+        const double SupportPipeZMargin = 150.0; // Pipe can sit above support steel by radius/gap; tune after VIEWAXIS_SAFE logs.
+        double supportMinZ = hasSupportExtents ? supportExtents.MinPoint.Z : info.DatumPoint.Z - 1.0;
+        double supportMaxZ = hasSupportExtents ? supportExtents.MaxPoint.Z : info.DatumPoint.Z + 1.0;
+        double supportMinZWithMargin = supportMinZ - SupportPipeZMargin;
+        double supportMaxZWithMargin = supportMaxZ + SupportPipeZMargin;
+
+        List<SafeViewPipeInfo> pipes = new List<SafeViewPipeInfo>();
+        if (info.PipeList != null && info.PipeList.Count > 0)
+        {
+          using (Transaction transaction = database.TransactionManager.StartTransaction())
+          {
+            int index = 0;
+            foreach (ObjectId pipeId in info.PipeList)
+            {
+              try
+              {
+                Part part = transaction.GetObject(pipeId, OpenMode.ForRead) as Part;
+                if (part == null)
+                {
+                  index++;
+                  continue;
+                }
+
+                Vector3d axis;
+                double length;
+                string method;
+                int portCount;
+                string portDump;
+                if (!this.TryGetPipeAxis(part, out axis, out length, out method, out portCount, out portDump))
+                {
+                  index++;
+                  continue;
+                }
+
+                double minZ;
+                double maxZ;
+                bool hasZRange = this.TryGetPortZRange(part, out minZ, out maxZ);
+                double zGap = hasZRange ? this.ComputeZGap(minZ, maxZ, supportMinZ, supportMaxZ) : double.NaN;
+                bool connMatched = hasZRange && maxZ >= supportMinZWithMargin && minZ <= supportMaxZWithMargin;
+                bool spurious = hasZRange && !connMatched;
+                pipes.Add(new SafeViewPipeInfo()
+                {
+                  Axis = axis,
+                  AxisLabel = "p" + index + ":" + this.FormatAxisForLog(axis) + ":zgap=" + zGap.ToString("0.###"),
+                  Spurious = spurious,
+                  ConnMatched = connMatched,
+                  MinZ = hasZRange ? minZ : double.NaN,
+                  MaxZ = hasZRange ? maxZ : double.NaN,
+                  PipeId = pipeId
+                });
+              }
+              catch (Exception exPipe)
+              {
+                PlantOrthoView.FileDiag("VIEWAXIS_SAFE pipe 예외 support='" + info.Name + "' id=" + pipeId + ": " + exPipe.GetType().Name + ": " + exPipe.Message);
+              }
+              index++;
+            }
+            transaction.Commit();
+          }
+        }
+
+        List<Vector3d> supportPipeAxes = pipes.Where(p => !p.Spurious).Select(p => p.Axis).ToList();
+        Vector3d longestAxis;
+        string longestAxisName;
+        double dx;
+        double dy;
+        double dz;
+        this.GetLongestExtentAxis(hasSupportExtents ? supportExtents : info.Extents, out longestAxis, out longestAxisName, out dx, out dy, out dz);
+
+        Vector3d[] candidates = new Vector3d[]
+        {
+          Vector3d.XAxis, Vector3d.XAxis.Negate(),
+          Vector3d.YAxis, Vector3d.YAxis.Negate(),
+          Vector3d.ZAxis, Vector3d.ZAxis.Negate(),
+          currentMainViewDir
+        };
+
+        string chosen = this.FormatAxisForLog(currentMainViewDir);
+        Vector3d chosenViewDir = currentMainViewDir.Length > 1e-9 ? currentMainViewDir.GetNormal() : Vector3d.XAxis;
+        Vector3d chosenUp = Vector3d.ZAxis;
+        bool chosenSafe = false;
+        bool fallbackUsed = true;
+        currentExpose = 1.0 - Math.Abs(longestAxis.DotProduct(currentMainViewDir.Length > 1e-9 ? currentMainViewDir.GetNormal() : Vector3d.XAxis));
+        chosenExpose = currentExpose;
+        double bestExpose = double.MinValue;
+        var candidateLog = new System.Text.StringBuilder();
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+          Vector3d candidate = candidates[i];
+          if (candidate.Length <= 1e-9)
+            continue;
+
+          Vector3d viewDir = candidate.GetNormal();
+          double maxDotP = this.MaxDotAgainstP(viewDir, supportPipeAxes);
+          Vector3d candidateUp;
+          double maxUpDotP;
+          bool hasSafeUp = this.TryFindSafeUpCandidate(viewDir, supportPipeAxes, out candidateUp, out maxUpDotP);
+          bool safe = supportPipeAxes.Count > 0 && maxDotP < 0.1 && hasSafeUp;
+          double exposeScore = 1.0 - Math.Abs(longestAxis.DotProduct(viewDir));
+          string label = i == candidates.Length - 1 ? "current" + this.FormatAxisForLog(viewDir) : this.FormatAxisForLog(viewDir);
+          candidateLog.Append(label + ":" + maxDotP.ToString("0.###") + ":" + (safe ? "T" : "F") + ":" + exposeScore.ToString("0.###") + ":up=" + (hasSafeUp ? this.FormatAxisForLog(candidateUp) : "none") + " ");
+          if (safe && exposeScore > bestExpose)
+          {
+            bestExpose = exposeScore;
+            chosen = label;
+            chosenViewDir = viewDir;
+            chosenUp = candidateUp;
+            chosenSafe = true;
+            chosenExpose = exposeScore;
+            fallbackUsed = false;
+          }
+        }
+
+        PlantOrthoView.FileDiag("VIEWAXIS_SAFE support='" + info.Name + "' P=[" + this.FormatPipeSet(pipes, false) + "] spurious=[" + this.FormatPipeSet(pipes, true) + "]"
+          + " bbox=(" + dx.ToString("0.###") + "," + dy.ToString("0.###") + "," + dz.ToString("0.###") + ") bboxZ=(" + supportMinZ.ToString("0.###") + ".." + supportMaxZ.ToString("0.###") + ") zMargin=" + SupportPipeZMargin.ToString("0.###") + " bboxSource=" + (hasSupportExtents ? "geometric" : "datumFallback") + " longestAxis=" + longestAxisName
+          + " candidates=[" + candidateLog.ToString().Trim() + "] chosen=" + chosen
+          + " chosenSafe=" + (chosenSafe ? "T" : "F") + " chosenUp=" + this.FormatAxisForLog(chosenUp) + " chosenExpose=" + chosenExpose.ToString("0.###")
+          + " fallbackUsed=" + (fallbackUsed ? "T" : "F") + " currentMainViewDir=" + this.FormatAxisForLog(currentMainViewDir)
+          + " pipeAxis=" + this.FormatAxisForLog(pipeAxis));
+
+        safeViewDir = chosenViewDir;
+        safeUp = chosenUp;
+        pipeSetNonEmpty = supportPipeAxes.Count > 0;
+        return chosenSafe && !fallbackUsed;
+      }
+      catch (Exception ex)
+      {
+        PlantOrthoView.FileDiag("VIEWAXIS_SAFE 예외 support='" + (info == null ? "?" : info.Name) + "': " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+    private bool TryGetSupportExtents(SupportInfo info, Database database, out Extents3d supportExtents)
+    {
+      supportExtents = new Extents3d();
+      bool hasExtents = false;
+      if (info == null || database == null || info.Ids == null || info.Ids.Length == 0)
+        return false;
+
+      using (Transaction transaction = database.TransactionManager.StartTransaction())
+      {
+        foreach (ObjectId id in info.Ids)
+        {
+          if (id.IsNull || id.IsErased)
+            continue;
+
+          try
+          {
+            Entity entity = transaction.GetObject(id, OpenMode.ForRead, false) as Entity;
+            if (entity == null)
+              continue;
+
+            Extents3d extents = entity.GeometricExtents;
+            if (!hasExtents)
+            {
+              supportExtents = extents;
+              hasExtents = true;
+            }
+            else
+            {
+              supportExtents.AddExtents(extents);
+            }
+          }
+          catch (Exception ex)
+          {
+            PlantOrthoView.FileDiag("VIEWAXIS_SAFE bbox 예외 support='" + info.Name + "' id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+        transaction.Commit();
+      }
+      return hasExtents;
+    }
+    private double ComputeZGap(double pipeMinZ, double pipeMaxZ, double supportMinZ, double supportMaxZ)
+    {
+      if (pipeMaxZ < supportMinZ)
+        return supportMinZ - pipeMaxZ;
+      if (pipeMinZ > supportMaxZ)
+        return pipeMinZ - supportMaxZ;
+      return 0.0;
+    }
+    private bool TryGetPortZRange(Part part, out double minZ, out double maxZ)
+    {
+      minZ = double.MaxValue;
+      maxZ = double.MinValue;
+      if (part == null)
+        return false;
+
+      PortCollection ports = part.GetPorts((PortType) 7);
+      if (ports == null || ports.Count == 0)
+        return false;
+
+      foreach (Port port in (PnP3dCollection) ports)
+      {
+        double z = port.Position.Z;
+        if (z < minZ)
+          minZ = z;
+        if (z > maxZ)
+          maxZ = z;
+      }
+      return minZ != double.MaxValue && maxZ != double.MinValue;
+    }
+
+    private void GetLongestExtentAxis(Extents3d extents, out Vector3d longestAxis, out string longestAxisName, out double dx, out double dy, out double dz)
+    {
+      dx = Math.Abs(extents.MaxPoint.X - extents.MinPoint.X);
+      dy = Math.Abs(extents.MaxPoint.Y - extents.MinPoint.Y);
+      dz = Math.Abs(extents.MaxPoint.Z - extents.MinPoint.Z);
+      longestAxis = Vector3d.XAxis;
+      longestAxisName = "X";
+      if (dy > dx && dy >= dz)
+      {
+        longestAxis = Vector3d.YAxis;
+        longestAxisName = "Y";
+      }
+      else if (dz > dx && dz > dy)
+      {
+        longestAxis = Vector3d.ZAxis;
+        longestAxisName = "Z";
+      }
+    }
+
+    private bool TryFindSafeUpCandidate(Vector3d viewDir, List<Vector3d> pipeAxes, out Vector3d safeUp, out double maxUpDotP)
+    {
+      safeUp = Vector3d.ZAxis;
+      maxUpDotP = 0.0;
+      if (viewDir.Length <= 1e-9)
+        return false;
+
+      Vector3d v = viewDir.GetNormal();
+      List<Vector3d> upCandidates = new List<Vector3d>();
+      Vector3d gravityUp = this.RemoveAxisComponent(Vector3d.ZAxis, v);
+      if (gravityUp.Length > 1e-9)
+        upCandidates.Add(gravityUp.GetNormal());
+
+      Vector3d[] axes = new Vector3d[]
+      {
+        Vector3d.XAxis, Vector3d.XAxis.Negate(),
+        Vector3d.YAxis, Vector3d.YAxis.Negate(),
+        Vector3d.ZAxis, Vector3d.ZAxis.Negate()
+      };
+      foreach (Vector3d axis in axes)
+      {
+        if (axis.Length <= 1e-9)
+          continue;
+
+        Vector3d normal = axis.GetNormal();
+        if (Math.Abs(normal.DotProduct(v)) < 0.1)
+          upCandidates.Add(normal);
+      }
+
+      double bestDot = double.MaxValue;
+      bool found = false;
+      foreach (Vector3d candidate in upCandidates)
+      {
+        double dot = this.MaxDotAgainstP(candidate, pipeAxes);
+        if (dot < bestDot)
+        {
+          bestDot = dot;
+          safeUp = candidate;
+        }
+        if (dot < 0.1)
+        {
+          maxUpDotP = dot;
+          return true;
+        }
+        found = true;
+      }
+
+      maxUpDotP = found ? bestDot : 0.0;
+      return false;
+    }
+
+    private Vector3d RemoveAxisComponent(Vector3d source, Vector3d axis)
+    {
+      Vector3d normal = axis.Length > 1e-9 ? axis.GetNormal() : Vector3d.XAxis;
+      double dot = source.DotProduct(normal);
+      return new Vector3d(source.X - normal.X * dot, source.Y - normal.Y * dot, source.Z - normal.Z * dot);
+    }
+
+    private double MaxDotAgainstP(Vector3d candidate, List<Vector3d> pipeAxes)
+    {
+      if (candidate.Length <= 1e-9 || pipeAxes == null || pipeAxes.Count == 0)
+        return 0.0;
+
+      Vector3d normal = candidate.GetNormal();
+      double maxDot = 0.0;
+      foreach (Vector3d pipeAxis in pipeAxes)
+      {
+        if (pipeAxis.Length <= 1e-9)
+          continue;
+        double dot = Math.Abs(normal.DotProduct(pipeAxis.GetNormal()));
+        if (dot > maxDot)
+          maxDot = dot;
+      }
+      return maxDot;
+    }
+
+    private string FormatPipeSet(List<SafeViewPipeInfo> pipes, bool spurious)
+    {
+      if (pipes == null || pipes.Count == 0)
+        return "";
+
+      var builder = new System.Text.StringBuilder();
+      foreach (SafeViewPipeInfo pipe in pipes)
+      {
+        if (pipe.Spurious != spurious)
+          continue;
+        builder.Append(pipe.AxisLabel + ":z=" + pipe.MinZ.ToString("0.###") + ".." + pipe.MaxZ.ToString("0.###")
+          + ":conn=" + (pipe.ConnMatched ? "T" : "F") + " ");
+      }
+      return builder.ToString().Trim();
+    }
+
+    private string FormatAxisForLog(Vector3d axis)
+    {
+      if (axis.Length <= 1e-9)
+        return "(0,0,0)";
+
+      Vector3d n = axis.GetNormal();
+      return "(" + n.X.ToString("0.###") + "," + n.Y.ToString("0.###") + "," + n.Z.ToString("0.###") + ")";
+    }
+
 
     private bool ComputeMainViewBasis(Vector3d rawAxis, out Vector3d axisUp, out Vector3d mainViewDir)
     {
