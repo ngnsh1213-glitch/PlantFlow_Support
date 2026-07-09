@@ -318,6 +318,8 @@ namespace PlantFlow_Support
               }
               info.AttachmentList = attachmentsBySupport[info.Name];
               info.PipeList = pipesBySupport[info.Name];
+              this.RefreshViewSpecsAfterPipeResolution(info, viewDirs, database);
+              this.ProbePipeAxis(info, database);
               this.SupportSelection.Add(info.Name, info);
               ListViewItem listViewItem1 = new ListViewItem(supportRows[info.Name]);
               this.lvSupportName.Items.Add(listViewItem1);
@@ -382,6 +384,382 @@ namespace PlantFlow_Support
         }
       }
       return nearest;
+    }
+
+    // Spike-only diagnostics. Read-only pipe axis measurement; no support logic changes.
+    private void ProbePipeAxis(SupportInfo info, Database database)
+    {
+      try
+      {
+        if (info == null)
+          return;
+
+        int pipeCount = info.PipeList == null ? 0 : info.PipeList.Count;
+        string type = info.StdName ?? "";
+        if (pipeCount == 0)
+        {
+          PlantOrthoView.FileDiag("PIPEAXIS support='" + info.Name + "' type='" + type + "' pipeCount=0 FALLBACK_NEEDED");
+          return;
+        }
+
+        Vector3d s1 = info.SupportDirection;
+        Vector3d representativeAxis = Vector3d.ZAxis;
+        double representativeLength = -1.0;
+        bool connMatched = false;
+
+        using (Transaction transaction = database.TransactionManager.StartTransaction())
+        {
+          int index = 0;
+          foreach (ObjectId pipeId in info.PipeList)
+          {
+            try
+            {
+              Part part = transaction.GetObject(pipeId, OpenMode.ForRead) as Part;
+              if (part == null)
+              {
+                PlantOrthoView.FileDiag("PIPEAXIS pipe null support='" + info.Name + "' id=" + pipeId);
+                index++;
+                continue;
+              }
+
+              Vector3d axis;
+              double length;
+              string method;
+              int portCount;
+              string portDump;
+              if (!this.TryGetPipeAxis(part, out axis, out length, out method, out portCount, out portDump))
+              {
+                PlantOrthoView.FileDiag("PIPEAXIS axis 실패 support='" + info.Name + "' id=" + pipeId);
+                index++;
+                continue;
+              }
+
+              double dotZ = Math.Abs(axis.DotProduct(Vector3d.ZAxis));
+              double dotX = Math.Abs(axis.DotProduct(Vector3d.XAxis));
+              double dotY = Math.Abs(axis.DotProduct(Vector3d.YAxis));
+              string classification = dotZ > 0.9 ? "vertical" : dotX > 0.9 ? "horizontalX" : dotY > 0.9 ? "horizontalY" : "inclined";
+              double horizontalDot = Math.Sqrt(dotX * dotX + dotY * dotY);
+              double slopeDeg = Math.Acos(Math.Min(1.0, horizontalDot)) * 180.0 / Math.PI;
+              double s1dot = s1.Length > 1e-9 ? Math.Abs(s1.GetNormal().DotProduct(axis)) : 0.0;
+              double s1cross = s1.Length > 1e-9 ? s1.GetNormal().CrossProduct(axis).Length : 0.0;
+
+              PlantOrthoView.FileDiag("PIPEAXIS support='" + info.Name + "' type='" + type + "' pipe[" + index + "] id=" + pipeId
+                + " portCount=" + portCount + " ports=[" + portDump + "]"
+                + " axis=" + axis + " len=" + length + " method=" + method
+                + " class=" + classification + " slopeDeg=" + slopeDeg.ToString("0.##")
+                + " s1dot=" + s1dot.ToString("0.###") + " s1cross=" + s1cross.ToString("0.###"));
+
+              if (length > representativeLength)
+              {
+                representativeLength = length;
+                representativeAxis = axis;
+              }
+            }
+            catch (Exception ex)
+            {
+              PlantOrthoView.FileDiag("PIPEAXIS pipe 예외 support='" + info.Name + "' id=" + pipeId + ": " + ex.GetType().Name + ": " + ex.Message);
+            }
+            index++;
+          }
+          transaction.Commit();
+        }
+
+        PlantOrthoView.FileDiag("PIPEAXIS support='" + info.Name + "' pipeCount=" + pipeCount
+          + " representativeAxis(longest)=" + representativeAxis + " repLen=" + representativeLength
+          + " supportS1=" + s1 + " datum=" + info.DatumPoint + " connMatched=" + connMatched);
+      }
+      catch (Exception ex)
+      {
+        PlantOrthoView.FileDiag("ProbePipeAxis 예외 support='" + (info == null ? "?" : info.Name) + "': " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void RefreshViewSpecsAfterPipeResolution(SupportInfo info, IEnumerable<string> viewNames, Database database)
+    {
+      if (info == null)
+        return;
+
+      List<ViewSpec> specs = new List<ViewSpec>();
+      if (viewNames == null)
+        viewNames = new string[] { "Top" };
+
+      foreach (string rawViewName in viewNames)
+      {
+        string viewName = string.IsNullOrEmpty(rawViewName) ? "Top" : rawViewName.Trim();
+        if (specs.Any(v => string.Equals(v.ViewName, viewName, StringComparison.OrdinalIgnoreCase)))
+          continue;
+
+        if (string.Equals(viewName, "Main", StringComparison.OrdinalIgnoreCase))
+        {
+          ViewSpec mainSpec;
+          if (this.TryCreateMainViewSpec(info, database, out mainSpec))
+            specs.Add(mainSpec);
+          continue;
+        }
+
+        if (!this.ViewTypes.ContainsKey(viewName))
+        {
+          DiagLog("RefreshViewSpecsAfterPipeResolution skip unknown view='" + viewName + "'");
+          PlantOrthoView.FileDiag("RefreshViewSpecsAfterPipeResolution skip unknown view='" + viewName + "'");
+          continue;
+        }
+
+        specs.Add(this.CreateFixedViewSpec(viewName));
+      }
+
+      if (specs.Count == 0)
+        specs.Add(this.CreateFixedViewSpec("Top"));
+
+      info.ViewSpecs = specs;
+      ViewSpec firstSpec = specs[0];
+      info.ViewType = firstSpec.ViewType;
+      info.UCS = firstSpec.UCS;
+      info.UpVector = firstSpec.UpVector;
+      info.ViewDirection = firstSpec.ViewDirection;
+    }
+
+    private ViewSpec CreateFixedViewSpec(string viewName)
+    {
+      ViewSpec spec = new ViewSpec();
+      spec.ViewName = viewName;
+      spec.ViewType = this.ViewTypes.ContainsKey(viewName) ? this.ViewTypes[viewName] : PlantFlow_Support.Commands.ViewType.Top;
+      spec.UCS = this.UCSs.ContainsKey(viewName) ? this.UCSs[viewName] : Matrix3d.Identity;
+      spec.UpVector = this.UpVectors.ContainsKey(viewName) ? this.UpVectors[viewName] : Vector3d.YAxis.Negate();
+      spec.ViewDirection = this.ViewDirectionVectors.ContainsKey(viewName) ? this.ViewDirectionVectors[viewName] : Vector3d.ZAxis;
+      spec.PaperCenter = Point3d.Origin;
+      return spec;
+    }
+
+    private bool TryCreateMainViewSpec(SupportInfo info, Database database, out ViewSpec spec)
+    {
+      spec = null;
+      Vector3d axis;
+      Vector3d up;
+      Vector3d mainViewDir;
+      if (!this.ComputePipeAxis(info, database, out axis, out up, out mainViewDir))
+      {
+        PlantOrthoView.FileDiag("MAIN_VIEW_SPEC skip support='" + (info == null ? "?" : info.Name) + "' reason=axis_compute_failed");
+        return false;
+      }
+
+      spec = new ViewSpec();
+      spec.ViewName = "Main";
+      spec.ViewType = this.ViewTypes.ContainsKey("Front") ? this.ViewTypes["Front"] : PlantFlow_Support.Commands.ViewType.Front;
+      spec.UCS = Matrix3d.AlignCoordinateSystem(
+        Point3d.Origin,
+        Vector3d.XAxis,
+        Vector3d.YAxis,
+        Vector3d.ZAxis,
+        Point3d.Origin,
+        axis,
+        up,
+        mainViewDir);
+      spec.UpVector = up;
+      spec.ViewDirection = mainViewDir;
+      spec.PaperCenter = Point3d.Origin;
+      PlantOrthoView.FileDiag("MAIN_VIEW_SPEC support='" + info.Name + "' viewName=Main viewType=" + spec.ViewType
+        + " axis=" + axis + " up=" + up + " mainViewDir=" + mainViewDir
+        + " isStandardView=" + IsStandardViewDirection(mainViewDir));
+      return true;
+    }
+
+    private bool ComputePipeAxis(SupportInfo info, Database database, out Vector3d axis, out Vector3d up, out Vector3d mainViewDir)
+    {
+      axis = Vector3d.ZAxis;
+      up = Vector3d.ZAxis;
+      mainViewDir = Vector3d.XAxis;
+      try
+      {
+        if (info == null || database == null)
+          return false;
+
+        Vector3d s1 = info.SupportDirection;
+        Vector3d s1Normal = s1.Length > 1e-9 ? s1.GetNormal() : Vector3d.ZAxis;
+        bool foundPipe = false;
+        double bestDot = -1.0;
+        double bestLength = -1.0;
+        ObjectId bestPipeId = ObjectId.Null;
+        string bestMethod = "none";
+
+        if (info.PipeList != null && info.PipeList.Count > 0)
+        {
+          using (Transaction transaction = database.TransactionManager.StartTransaction())
+          {
+            foreach (ObjectId pipeId in info.PipeList)
+            {
+              try
+              {
+                Part part = transaction.GetObject(pipeId, OpenMode.ForRead) as Part;
+                if (part == null)
+                  continue;
+
+                Vector3d candidateAxis;
+                double candidateLength;
+                string method;
+                int portCount;
+                string portDump;
+                if (!this.TryGetPipeAxis(part, out candidateAxis, out candidateLength, out method, out portCount, out portDump))
+                  continue;
+
+                double s1dot = Math.Abs(s1Normal.DotProduct(candidateAxis));
+                if (s1dot > bestDot)
+                {
+                  foundPipe = true;
+                  bestDot = s1dot;
+                  bestLength = candidateLength;
+                  bestPipeId = pipeId;
+                  bestMethod = method;
+                  axis = candidateAxis;
+                }
+              }
+              catch (Exception exPipe)
+              {
+                PlantOrthoView.FileDiag("PIPEAXIS_COMPUTE pipe 예외 support='" + info.Name + "' id=" + pipeId + ": " + exPipe.GetType().Name + ": " + exPipe.Message);
+              }
+            }
+            transaction.Commit();
+          }
+        }
+
+        string source = "pipe";
+        if (!foundPipe)
+        {
+          if (s1.Length <= 1e-9)
+          {
+            PlantOrthoView.FileDiag("PIPEAXIS_COMPUTE 실패 support='" + info.Name + "' reason=no_pipe_and_s1_zero");
+            return false;
+          }
+          axis = s1.GetNormal();
+          source = "s1fallback";
+          bestDot = 1.0;
+          bestLength = 0.0;
+          bestMethod = "supportDirection";
+        }
+
+        if (!this.ComputeMainViewBasis(axis, out up, out mainViewDir))
+        {
+          PlantOrthoView.FileDiag("PIPEAXIS_COMPUTE 실패 support='" + info.Name + "' reason=basis_failed axis=" + axis);
+          return false;
+        }
+
+        PlantOrthoView.FileDiag("PIPEAXIS_COMPUTE support='" + info.Name + "' axis=" + axis
+          + " up=" + up + " mainViewDir=" + mainViewDir + " src=" + source
+          + " bestPipeId=" + bestPipeId + " bestS1Dot=" + bestDot.ToString("0.###")
+          + " bestLen=" + bestLength.ToString("0.###") + " method=" + bestMethod);
+        return true;
+      }
+      catch (Exception ex)
+      {
+        PlantOrthoView.FileDiag("ComputePipeAxis 예외 support='" + (info == null ? "?" : info.Name) + "': " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private bool ComputeMainViewBasis(Vector3d rawAxis, out Vector3d axisUp, out Vector3d mainViewDir)
+    {
+      axisUp = Vector3d.ZAxis;
+      mainViewDir = Vector3d.XAxis;
+      if (rawAxis.Length <= 1e-9)
+        return false;
+
+      Vector3d axis = rawAxis.GetNormal();
+      Vector3d preferredUp = Math.Abs(axis.DotProduct(Vector3d.ZAxis)) > 0.9 ? Vector3d.YAxis : Vector3d.ZAxis;
+      Vector3d rawViewDir = axis.CrossProduct(preferredUp);
+      if (rawViewDir.Length < 1e-6)
+      {
+        preferredUp = Math.Abs(axis.DotProduct(Vector3d.XAxis)) < 0.9 ? Vector3d.XAxis : Vector3d.YAxis;
+        rawViewDir = axis.CrossProduct(preferredUp);
+      }
+      if (rawViewDir.Length < 1e-6)
+        return false;
+
+      mainViewDir = rawViewDir.GetNormal();
+      axisUp = GetTwistNeutralUp(mainViewDir, mainViewDir.CrossProduct(axis).GetNormal());
+      return true;
+    }
+
+    private static bool IsStandardViewDirection(Vector3d viewDir)
+    {
+      if (viewDir.Length <= 1e-9)
+        return false;
+
+      Vector3d normal = viewDir.GetNormal();
+      return Math.Abs(Math.Abs(normal.DotProduct(Vector3d.XAxis)) - 1.0) < 1e-6
+        || Math.Abs(Math.Abs(normal.DotProduct(Vector3d.YAxis)) - 1.0) < 1e-6
+        || Math.Abs(Math.Abs(normal.DotProduct(Vector3d.ZAxis)) - 1.0) < 1e-6;
+    }
+
+    private static Vector3d GetTwistNeutralUp(Vector3d viewDir, Vector3d fallbackUp)
+    {
+      Vector3d up = fallbackUp.Length > 1e-9 ? fallbackUp.GetNormal() : Vector3d.ZAxis;
+      PlantOrthoView.FileDiag("MAIN_VIEW_UP_PHASE1 viewDir=" + viewDir + " up=" + up);
+      return up;
+    }
+
+    private bool TryGetPipeAxis(Part part, out Vector3d axis, out double length, out string method, out int portCount, out string portDump)
+    {
+      axis = Vector3d.ZAxis;
+      length = 0.0;
+      method = "direction";
+      portCount = 0;
+      portDump = "";
+      if (part == null)
+        return false;
+
+      PortCollection ports = part.GetPorts((PortType) 7);
+      portCount = ports == null ? 0 : ports.Count;
+      List<Point3d> points = new List<Point3d>();
+      Vector3d firstDirection = Vector3d.ZAxis;
+      var dump = new System.Text.StringBuilder();
+      int index = 0;
+
+      if (ports != null)
+      {
+        foreach (Port port in (PnP3dCollection) ports)
+        {
+          dump.Append(port.Name + ":" + port.Position + ":" + port.Direction + " ");
+          points.Add(port.Position);
+          if (index == 0)
+            firstDirection = port.Direction;
+          index++;
+        }
+      }
+      portDump = dump.ToString().Trim();
+
+      Point3d firstPoint = Point3d.Origin;
+      Point3d secondPoint = Point3d.Origin;
+      double maxDistance = -1.0;
+      for (int i = 0; i < points.Count; i++)
+      {
+        for (int j = i + 1; j < points.Count; j++)
+        {
+          double distance = points[i].DistanceTo(points[j]);
+          if (distance > maxDistance)
+          {
+            maxDistance = distance;
+            firstPoint = points[i];
+            secondPoint = points[j];
+          }
+        }
+      }
+
+      if (maxDistance > 1e-6)
+      {
+        axis = (secondPoint - firstPoint).GetNormal();
+        length = maxDistance;
+        method = "ports";
+        return true;
+      }
+
+      if (firstDirection.Length > 1e-9)
+      {
+        axis = firstDirection.GetNormal();
+        length = 0.0;
+        method = "direction";
+        return true;
+      }
+
+      return false;
     }
 
     private Point3d GetPartNearestPoint(Part part, Point3d fallback)
@@ -1195,3 +1573,4 @@ namespace PlantFlow_Support
     }
   }
 }
+

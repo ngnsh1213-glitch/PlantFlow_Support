@@ -98,7 +98,8 @@ namespace PlantFlow_Support
                 Extents3d geometricExtents;
                 CollectModelExtents(trans, blockTableRecord1, out componentExtents, out geometricExtents);
 
-                int clonedFlatLines = CloneFlattenLinesToPaper(trans, blockTableRecord1, blockTableRecord2, projection);
+                Extents3d flatPaperExtents;
+                int clonedFlatLines = CloneFlattenLinesToPaper(trans, blockTableRecord1, blockTableRecord2, projection, out flatPaperExtents);
                 PlantOrthoView.FileDiag("FlattenStage3 PS flat line clone count=" + clonedFlatLines);
 
                 PSUtil.Log("AnnotateViewport: Ensuring Datum Blocks...");
@@ -134,7 +135,7 @@ namespace PlantFlow_Support
                 }
 
                 PSUtil.Log("AnnotateViewport: Creating Annotations...");
-                CreateAnnotations(trans, blockTable, blockTableRecord2, textStyleId, dimStyleId, geometricExtents, componentExtents, bomData, projection);
+                CreateAnnotations(trans, blockTable, blockTableRecord2, textStyleId, dimStyleId, geometricExtents, componentExtents, bomData, projection, flatPaperExtents);
 
                 PSUtil.Log("AnnotateViewport: Adding Title View Label...");
                 int viewCount = (PlantOrthoView.SPInfo != null && PlantOrthoView.SPInfo.ViewSpecs != null) ? PlantOrthoView.SPInfo.ViewSpecs.Count : 1;
@@ -148,7 +149,7 @@ namespace PlantFlow_Support
                     Point3d c = viewport.CenterPoint;
                     labelPos = new Point3d(c.X - 30.0, c.Y - (viewport.Height * 0.5) - 12.0, 0.0);
                 }
-                PlantOrthoView.FileDiag("AddTitleViewLabel viewCount=" + viewCount + " labelPos=" + labelPos + " view='" + m_owner.CurrentViewTypeString + "'");
+                PlantOrthoView.FileDiag("AddTitleViewLabel viewCount=" + viewCount + " labelPos=" + labelPos + " view='" + m_owner.CurrentViewTypeString + "' label='" + m_owner.CurrentViewLabelString + "'");
                 AddTitleViewLabel(trans, blockTableRecord2, textStyleId, labelPos);
                 PSUtil.Log("AnnotateViewport: Updating Title Block Attributes...");
                 UpdateTitleBlockAttributes(trans, blockTableRecord2);
@@ -258,8 +259,9 @@ namespace PlantFlow_Support
             }
         }
 
-        private int CloneFlattenLinesToPaper(Transaction trans, BlockTableRecord modelSpace, BlockTableRecord paperSpace, ViewportProjection projection)
+        private int CloneFlattenLinesToPaper(Transaction trans, BlockTableRecord modelSpace, BlockTableRecord paperSpace, ViewportProjection projection, out Extents3d flatPaperExtents)
         {
+            flatPaperExtents = new Extents3d();
             // 서포트 지오메트리를 낱개 Line 대신 숨김 익명 블록(*U##)으로 묶어 배치(사용자 결정 2026-07-08).
             // 이름은 "*U" 익명 접두사 → AutoCAD가 유니크 *U## 자동 발급(이름 충돌 관리 불요).
             Database db = paperSpace.Database;
@@ -272,6 +274,10 @@ namespace PlantFlow_Support
             trans.AddNewlyCreatedDBObject(blockDef, true);
 
             int cloned = 0;
+            double bxMin = double.MaxValue;
+            double byMin = double.MaxValue;
+            double bxMax = double.MinValue;
+            double byMax = double.MinValue;
             foreach (ObjectId id in modelSpace)
             {
                 Entity entity = trans.GetObject(id, OpenMode.ForRead) as Entity;
@@ -282,6 +288,13 @@ namespace PlantFlow_Support
 
                 // 정의부에는 투영된 절대 페이퍼 좌표로 저장. BlockReference는 원점 삽입 → 현 위치 그대로.
                 Line paperLine = new Line(projection.ProjectPoint(sourceLine.StartPoint), projection.ProjectPoint(sourceLine.EndPoint));
+                foreach (Point3d p in new Point3d[] { paperLine.StartPoint, paperLine.EndPoint })
+                {
+                    if (p.X < bxMin) bxMin = p.X;
+                    if (p.Y < byMin) byMin = p.Y;
+                    if (p.X > bxMax) bxMax = p.X;
+                    if (p.Y > byMax) byMax = p.Y;
+                }
                 paperLine.Layer = sourceLine.Layer;
                 // 서포트 지오메트리 색: WHITE(ACI 7, 배경따라 흑/백 자동). BYLAYER/BYBLOCK 대신 명시(사용자 결정 2026-07-08).
                 paperLine.Color = Color.FromColorIndex((ColorMethod)195, (short)7);
@@ -304,6 +317,10 @@ namespace PlantFlow_Support
             blockRef.Layer = FlatLayerName;
             paperSpace.AppendEntity(blockRef);
             trans.AddNewlyCreatedDBObject(blockRef, true);
+            flatPaperExtents = new Extents3d(new Point3d(bxMin, byMin, 0.0), new Point3d(bxMax, byMax, 0.0));
+            PlantOrthoView.FileDiag("MEASURE block view='" + m_owner.CurrentViewTypeString
+                + "' bboxMin=(" + bxMin + "," + byMin + ") bboxMax=(" + bxMax + "," + byMax + ")"
+                + " center=(" + ((bxMin + bxMax) / 2.0) + "," + ((byMin + byMax) / 2.0) + ") lines=" + cloned);
             PlantOrthoView.FileDiag("CloneFlattenLinesToPaper: 익명 블록 생성 lines=" + cloned + " blockDefId=" + blockDefId);
             return cloned;
         }
@@ -762,7 +779,7 @@ namespace PlantFlow_Support
             return strArrayList;
         }
 
-        private void CreateAnnotations(Transaction trans, BlockTable bt, BlockTableRecord btr, ObjectId textStyleId, ObjectId dimStyleId, Extents3d extents, Dictionary<string, Extents3d> dict, List<string[]> bomData, ViewportProjection projection)
+        private void CreateAnnotations(Transaction trans, BlockTable bt, BlockTableRecord btr, ObjectId textStyleId, ObjectId dimStyleId, Extents3d extents, Dictionary<string, Extents3d> dict, List<string[]> bomData, ViewportProjection projection, Extents3d flatPaperExtents)
         {
             Dictionary<string, Point3d[]> dictionary4 = new Dictionary<string, Point3d[]>();
             BOMs boMs = new BOMs(PlantOrthoView.SPInfo.Ids[0], PlantOrthoView.SPInfo.AttachmentList); // Needed for HANTEC args? Same instance?
@@ -791,6 +808,11 @@ namespace PlantFlow_Support
             List<Point3d> sourceVerticalDPoints;
             List<Point3d> sourceHorizontalDPoints = PSUtil.AttaDPointArrangement(extents, dict.Values.ToList(), PlantOrthoView.SPInfo.UCS, out dim_line_point, out dim_line_point_vertical, out sourceVerticalDPoints);
             Point3d[] paperHorizontalDPoints = projection.ProjectPoints(sourceHorizontalDPoints.ToArray());
+            if (paperHorizontalDPoints.Length > 0)
+                PlantOrthoView.FileDiag("MEASURE ataDim view='" + m_owner.CurrentViewTypeString
+                    + "' first=(" + paperHorizontalDPoints[0].X + "," + paperHorizontalDPoints[0].Y + ")"
+                    + " last=(" + paperHorizontalDPoints[paperHorizontalDPoints.Length - 1].X + "," + paperHorizontalDPoints[paperHorizontalDPoints.Length - 1].Y + ")"
+                    + " count=" + paperHorizontalDPoints.Length);
             double paperDimLinePoint = paperHorizontalDPoints.Length == 0 ? 0.0 : paperHorizontalDPoints.Max(p => p.Y);
             List<RotatedDimension> dims = PSUtil.CreateAttaDimension(paperHorizontalDPoints.ToList(), paperDimLinePoint, Matrix3d.Identity, dimStyleId);
             for (int i = 0; i < dims.Count; i++)
@@ -802,15 +824,16 @@ namespace PlantFlow_Support
                 trans.AddNewlyCreatedDBObject((DBObject)dim, true);
             }
 
-            // Standard Dimensions
-            bool flag1 = false; // logic check... flag1 was defined as: 'if (str3 == PlantOrthoView.SPInfo.Name && str2 == "FRAMEWORK") { geometricExtents = ...; flag1 = false; }' (default true).
-            // In OrthoViewportManager.CollectModelExtents, I set geometricExtents.
-            // I should have passed 'flag1' status out of CollectModelExtents?
-            // Default logic: if geometricExtents is NOT empty, flag1 is false?
-            // Or better: Let's assume standard behavior (create dims).
             if (!IsExtentsNull(extents)) // Helper check
             {
-               Extents3d paperExtents = projection.ProjectExtents(extents);
+               bool useFlatAnchor = IsPipeAxisMainView() && !IsExtentsNull(flatPaperExtents);
+               Extents3d paperExtents = useFlatAnchor ? flatPaperExtents : projection.ProjectExtents(extents);
+               PlantOrthoView.FileDiag("MEASURE dim view='" + m_owner.CurrentViewTypeString
+                 + "' paperExtMin=(" + paperExtents.MinPoint.X + "," + paperExtents.MinPoint.Y + ")"
+                 + " paperExtMax=(" + paperExtents.MaxPoint.X + "," + paperExtents.MaxPoint.Y + ")"
+                 + " center=(" + ((paperExtents.MinPoint.X + paperExtents.MaxPoint.X) / 2.0) + "," + ((paperExtents.MinPoint.Y + paperExtents.MaxPoint.Y) / 2.0) + ")"
+                 + " usedUCS=" + (new[] { "Right", "Left" }.Contains(m_owner.CurrentViewTypeString))
+                 + " anchorSource=" + (useFlatAnchor ? "flatPaper" : "projectedWcs"));
                RotatedDimension dimension1;
                PSUtil.CreateHorizontalDimension(paperExtents, Matrix3d.Identity, dimStyleId, paperExtents.MaxPoint.Y, out dimension1);
                PreserveDimensionText(dimension1, extents.MaxPoint.X - extents.MinPoint.X);
@@ -838,7 +861,11 @@ namespace PlantFlow_Support
                     {
                         string key = str13 + "_" + index.ToString();
                         if (dictionary4.ContainsKey(key)) {
-                             MLeader mleader = PSUtil.CreateMLeader(trans, ((SymbolTable)bt)["CIRCLE_ST"], ml_style_id1, projection.ProjectPoints(dictionary4[key]), str13, Matrix3d.Identity);
+                             Point3d[] projectedLeaderPoints = projection.ProjectPoints(dictionary4[key]);
+                             if (projectedLeaderPoints.Length > 0)
+                                 PlantOrthoView.FileDiag("MEASURE leader view='" + m_owner.CurrentViewTypeString
+                                     + "' tag='" + key + "' anchor0=(" + projectedLeaderPoints[0].X + "," + projectedLeaderPoints[0].Y + ")");
+                             MLeader mleader = PSUtil.CreateMLeader(trans, ((SymbolTable)bt)["CIRCLE_ST"], ml_style_id1, projectedLeaderPoints, str13, Matrix3d.Identity);
                              btr.AppendEntity((Entity)mleader); trans.AddNewlyCreatedDBObject((DBObject)mleader, true);
                         }
                     }
@@ -858,16 +885,28 @@ namespace PlantFlow_Support
                      Point3d point3d8 = new Point3d(point3d5.X, point3d5.Y - num / 2.0, 0.0);
                      Point3d point3d9 = new Point3d(point3d8.X - 50.0, point3d8.Y - 50.0, 0.0);
                      
-                     MLeader mleader1 = PSUtil.CreateMLeader(projection.ProjectPoints(new Point3d[2] { point3d6, point3d7 }), new MText() { Contents = strArray6[8], TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
+                     Point3d[] projectedPipeTagPoints = projection.ProjectPoints(new Point3d[2] { point3d6, point3d7 });
+                     if (projectedPipeTagPoints.Length > 0)
+                         PlantOrthoView.FileDiag("MEASURE leader view='" + m_owner.CurrentViewTypeString
+                             + "' tag='" + strArray6[8] + "' anchor0=(" + projectedPipeTagPoints[0].X + "," + projectedPipeTagPoints[0].Y + ")");
+                     MLeader mleader1 = PSUtil.CreateMLeader(projectedPipeTagPoints, new MText() { Contents = strArray6[8], TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
                      btr.AppendEntity((Entity)mleader1); trans.AddNewlyCreatedDBObject((DBObject)mleader1, true);
                      
-                     MLeader mleader2 = PSUtil.CreateMLeader(projection.ProjectPoints(new Point3d[2] { point3d8, point3d9 }), new MText() { Contents = "B.O.P+" + strArray6[6], TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
+                     Point3d[] projectedBopTagPoints = projection.ProjectPoints(new Point3d[2] { point3d8, point3d9 });
+                     if (projectedBopTagPoints.Length > 0)
+                         PlantOrthoView.FileDiag("MEASURE leader view='" + m_owner.CurrentViewTypeString
+                             + "' tag='BOP:" + str13 + "' anchor0=(" + projectedBopTagPoints[0].X + "," + projectedBopTagPoints[0].Y + ")");
+                     MLeader mleader2 = PSUtil.CreateMLeader(projectedBopTagPoints, new MText() { Contents = "B.O.P+" + strArray6[6], TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
                      btr.AppendEntity((Entity)mleader2); trans.AddNewlyCreatedDBObject((DBObject)mleader2, true);
                      
                      // Joint Tag if not J?
                      if (!str13.Contains("J") && dictionary4.ContainsKey(str13))
                      {
-                          MLeader mleader = PSUtil.CreateMLeader(trans, ((SymbolTable)bt)["CIRCLE_ST"], ml_style_id1, projection.ProjectPoints(dictionary4[str13]), str13, Matrix3d.Identity);
+                          Point3d[] projectedLeaderPoints = projection.ProjectPoints(dictionary4[str13]);
+                          if (projectedLeaderPoints.Length > 0)
+                              PlantOrthoView.FileDiag("MEASURE leader view='" + m_owner.CurrentViewTypeString
+                                  + "' tag='" + str13 + "' anchor0=(" + projectedLeaderPoints[0].X + "," + projectedLeaderPoints[0].Y + ")");
+                          MLeader mleader = PSUtil.CreateMLeader(trans, ((SymbolTable)bt)["CIRCLE_ST"], ml_style_id1, projectedLeaderPoints, str13, Matrix3d.Identity);
                           btr.AppendEntity((Entity)mleader); trans.AddNewlyCreatedDBObject((DBObject)mleader, true);
                      }
                 }
@@ -875,9 +914,17 @@ namespace PlantFlow_Support
             
             if (flag2 && dictionary4.ContainsKey("PLN") && dictionary4.ContainsKey("BOP"))
             {
-               MLeader mleader4 = PSUtil.CreateMLeader(projection.ProjectPoints(dictionary4["PLN"]), new MText() { Contents = PlantOrthoView.SPInfo.PipeLineNo, TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
+               Point3d[] projectedPlnPoints = projection.ProjectPoints(dictionary4["PLN"]);
+               if (projectedPlnPoints.Length > 0)
+                   PlantOrthoView.FileDiag("MEASURE leader view='" + m_owner.CurrentViewTypeString
+                       + "' tag='PLN' anchor0=(" + projectedPlnPoints[0].X + "," + projectedPlnPoints[0].Y + ")");
+               MLeader mleader4 = PSUtil.CreateMLeader(projectedPlnPoints, new MText() { Contents = PlantOrthoView.SPInfo.PipeLineNo, TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
                btr.AppendEntity((Entity)mleader4); trans.AddNewlyCreatedDBObject((DBObject)mleader4, true);
-               MLeader mleader5 = PSUtil.CreateMLeader(projection.ProjectPoints(dictionary4["BOP"]), new MText() { Contents = "B.O.P+" + PlantOrthoView.SPInfo.BOP, TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
+               Point3d[] projectedBopPoints = projection.ProjectPoints(dictionary4["BOP"]);
+               if (projectedBopPoints.Length > 0)
+                   PlantOrthoView.FileDiag("MEASURE leader view='" + m_owner.CurrentViewTypeString
+                       + "' tag='BOP' anchor0=(" + projectedBopPoints[0].X + "," + projectedBopPoints[0].Y + ")");
+               MLeader mleader5 = PSUtil.CreateMLeader(projectedBopPoints, new MText() { Contents = "B.O.P+" + PlantOrthoView.SPInfo.BOP, TextHeight = 3.0, TextStyleId = textStyleId }, ml_style_id2, Matrix3d.Identity);
                btr.AppendEntity((Entity)mleader5); trans.AddNewlyCreatedDBObject((DBObject)mleader5, true);
             }
         }
@@ -885,11 +932,20 @@ namespace PlantFlow_Support
         private bool IsExtentsNull(Extents3d ext) {
             return ext.MinPoint.DistanceTo(ext.MaxPoint) < 1e-6; // Approximate check
         }
+
+        private bool IsPipeAxisMainView()
+        {
+            if (!string.Equals(m_owner.CurrentViewLabelString, "Main", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (PlantOrthoView.SPInfo == null)
+                return false;
+            return true;
+        }
         
         private void AddTitleViewLabel(Transaction trans, BlockTableRecord btr, ObjectId textStyleId, Point3d labelPos) {
              DBText dbText = new DBText();
              dbText.Position = labelPos;
-             dbText.TextString = "%%U" + PSUtil.TitleViewLabel(m_owner.CurrentViewTypeString);
+             dbText.TextString = "%%U" + PSUtil.TitleViewLabel(m_owner.CurrentViewLabelString);
              // ...
              btr.AppendEntity(dbText);
              trans.AddNewlyCreatedDBObject(dbText, true);

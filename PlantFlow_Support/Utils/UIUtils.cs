@@ -1,4 +1,4 @@
-﻿using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.ApplicationServices.Core;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
@@ -316,9 +316,19 @@ namespace PlantFlow_Support
       if (dwgSheetDef == null)
         return dwgViewDef1;
       IDwgViewDef.ViewParams viewParams;
+      upVector = UIUtils.NormalizeMainUpVector(strViewName, viewDir, upVector);
       UIUtils.CreateViewParams(viewDir, upVector, boxSize, ptIns, viewportWidth, viewportHeight, out viewParams);
       dwgViewDef = Dwg2dDef.NewViewDef(sheetDefs, strViewName, ref viewParams);
       return true;
+    }
+
+    private static Vector3d NormalizeMainUpVector(string strViewName, Vector3d viewDir, Vector3d upVector)
+    {
+      if (!string.Equals(strViewName, "Main", StringComparison.OrdinalIgnoreCase))
+        return upVector;
+
+      PlantOrthoView.FileDiag("MAIN_UP_PASSTHROUGH viewDir=" + viewDir + " up=" + upVector);
+      return upVector;
     }
 
     public static void CreateViewParams(
@@ -2460,3 +2470,4 @@ label_14:
     }
   }
 }
+

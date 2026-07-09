@@ -145,14 +145,38 @@ namespace PlantFlow_Support
         private async Task<string> AddFromSelectionAsync(DrawingBridge.Envelope env)
         {
             if (_drawingBusy) return DrawingBridge.Fail(env.Id, "ER_BUSY", "다른 작업이 진행 중입니다.");
-            string viewDir = (string)env.Args?[0] ?? "";
-            var allowed = new[] { "Top", "Bottom", "Front", "Back", "Left", "Right" };
-            if (Array.IndexOf(allowed, viewDir) < 0)
-                return DrawingBridge.Fail(env.Id, "ER_BADVIEW", "뷰 방향을 먼저 선택하세요.");
+            var allowed = new[] { "Main", "Top", "Bottom", "Front", "Back", "Left", "Right" };
+            var viewDirs = new System.Collections.Generic.List<string>();
+            try
+            {
+                var arr = env.Args?[0] as Newtonsoft.Json.Linq.JArray;
+                if (arr != null)
+                    foreach (var t in arr)
+                    {
+                        string v = (string)t;
+                        if (!string.IsNullOrEmpty(v) && Array.IndexOf(allowed, v) >= 0 && !viewDirs.Contains(v))
+                            viewDirs.Add(v);
+                    }
+                else
+                {
+                    // 하위호환: 단일 문자열도 허용
+                    string single = (string)env.Args?[0];
+                    if (!string.IsNullOrEmpty(single) && Array.IndexOf(allowed, single) >= 0)
+                        viewDirs.Add(single);
+                }
+            }
+            catch (Exception exView)
+            {
+                Log("addFromSelection views 파싱 실패: " + exView.Message);
+                return DrawingBridge.Fail(env.Id, "ER_BADVIEW", "뷰 파싱 실패");
+            }
+            if (viewDirs.Count == 0)
+                return DrawingBridge.Fail(env.Id, "ER_BADVIEW", "뷰 방향을 1개 이상 선택하세요.");
 
             _drawingBusy = true;
             try
             {
+                PlantOrthoView.FileDiag("AddFromSelectionAsync: views=" + string.Join(",", viewDirs.ToArray()));
                 var docs = AcadApp.DocumentManager;
                 var doc = docs.MdiActiveDocument;
                 if (doc == null) return DrawingBridge.Fail(env.Id, "ER1000", "열린 도면이 없습니다.");
@@ -162,7 +186,7 @@ namespace PlantFlow_Support
                 bool cancelled = false;
                 await docs.ExecuteInCommandContextAsync(async _ =>
                 {
-                    AddSupportCore(viewDir, out code, out msg, out added, out cancelled);
+                    AddSupportCore(viewDirs, out code, out msg, out added, out cancelled);
                     await Task.CompletedTask;
                 }, null);
 
@@ -199,6 +223,42 @@ namespace PlantFlow_Support
                 if (!string.IsNullOrEmpty(_captureDocName) &&
                     !string.Equals(doc.Name, _captureDocName, StringComparison.OrdinalIgnoreCase))
                     return DrawingBridge.Fail(env.Id, "ER_DOCMISMATCH", "서포트를 캡처한 도면과 현재 도면이 다릅니다. 목록을 지우고 다시 선택하세요.");
+
+                // §9: item.Selected는 반드시 command context 콜백 밖(UI 스레드)에서 세팅.
+                // 콜백 안 ListView 접근은 크로스스레드/데드락 위험이 있다.
+                try
+                {
+                    var arr = env.Args != null && env.Args.Count > 0 ? env.Args[0] as Newtonsoft.Json.Linq.JArray : null;
+                    var names = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    if (arr != null)
+                        foreach (var t in arr)
+                        {
+                            string n = (string)t;
+                            if (!string.IsNullOrEmpty(n))
+                                names.Add(n);
+                        }
+                    if (names.Count > 0)
+                    {
+                        int sel = 0;
+                        foreach (System.Windows.Forms.ListViewItem it in lvSupportName.Items)
+                        {
+                            bool on = names.Contains(it.SubItems[0].Text);
+                            it.Selected = on;
+                            if (on) sel++;
+                        }
+                        PlantOrthoView.FileDiag("Export2DAsync: 선택 필터 적용 selected=" + sel + "/" + lvSupportName.Items.Count);
+                    }
+                    else
+                    {
+                        foreach (System.Windows.Forms.ListViewItem it in lvSupportName.Items)
+                            it.Selected = false;
+                        PlantOrthoView.FileDiag("Export2DAsync: names 없음 → 전체 추출");
+                    }
+                }
+                catch (Exception exSel)
+                {
+                    Log("Export2DAsync 선택 세팅 실패: " + exSel.Message);
+                }
 
                 string code = null;
                 PlantOrthoView.FileDiag("Export2DAsync: ExecuteInCommandContextAsync 진입 직전");

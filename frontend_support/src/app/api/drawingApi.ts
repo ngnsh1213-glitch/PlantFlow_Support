@@ -73,13 +73,14 @@ function request<T>(method: string, args: unknown[] = [], timeoutMs = DEFAULT_TI
 export interface DrawingSupport { name: string; view: string; }
 export interface DrawingState { supports: DrawingSupport[]; gridReady: boolean; captureDoc: string; }
 export interface DrawingSettings { template: string; projectNo: string; revision: string; }
+export interface AddSummary { count: number; duplicates: number; unnamed: number; invalid: number; view: string; }
 
 export const drawingApi = {
   getState: () => request<DrawingState>("getState"),
   getSettings: () => request<DrawingSettings>("getSettings"),
   setSetting: (key: string, val: string) => request<{ ok: boolean }>("setSetting", [key, val]),
-  addFromSelection: (viewDir: string) => request<{ added: DrawingSupport; state: DrawingState }>("addFromSelection", [viewDir], PICK_TIMEOUT),
+  addFromSelection: (views: string[]) => request<{ added: AddSummary; state: DrawingState }>("addFromSelection", [views], PICK_TIMEOUT),
   removeSupport: (name: string) => request<DrawingState>("removeSupport", [name]),
   clearSupports: () => request<DrawingState>("clearSupports"),
-  export2D: () => request<{ ok: boolean }>("export2D", [], PICK_TIMEOUT),
+  export2D: (names: string[]) => request<{ ok: boolean }>("export2D", [names], PICK_TIMEOUT),
 };

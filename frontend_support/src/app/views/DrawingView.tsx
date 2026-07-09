@@ -6,13 +6,14 @@ import { Input } from "../../design-system/ui/Input";
 import { SettingsCard } from "../../design-system/ui/SettingsCard";
 import { drawingApi, isDrawingBridgeAvailable, type DrawingSettings, type DrawingState } from "../api/drawingApi";
 
-const VIEWS = ["Top", "Bottom", "Front", "Back", "Left", "Right"] as const;
+const VIEWS = ["Main", "Top", "Bottom", "Front", "Back", "Left", "Right"] as const;
 
 export default function DrawingView() {
   const bridge = isDrawingBridgeAvailable();
-  const [viewDir, setViewDir] = useState<string>("Top");
+  const [selectedViews, setSelectedViews] = useState<string[]>(["Top"]);
   const [state, setState] = useState<DrawingState>({ supports: [], gridReady: false, captureDoc: "" });
   const [settings, setSettings] = useState<DrawingSettings>({ template: "", projectNo: "", revision: "" });
+  const [checked, setChecked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string>("");
 
@@ -24,7 +25,9 @@ export default function DrawingView() {
   const refresh = useCallback(async () => {
     if (!bridge) return;
     try {
-      setState(await drawingApi.getState());
+      const nextState = await drawingApi.getState();
+      setState(nextState);
+      setChecked(new Set(nextState.supports.map((s) => s.name)));
       setSettings(await drawingApi.getSettings());
     } catch (e: any) {
       flash(e?.error ?? "상태 로드 실패");
@@ -47,9 +50,17 @@ export default function DrawingView() {
 
   const onAdd = () => guard(async () => {
     try {
-      const result = await drawingApi.addFromSelection(viewDir);
+      if (selectedViews.length === 0) {
+        flash("뷰를 1개 이상 선택하세요");
+        return;
+      }
+      const result = await drawingApi.addFromSelection(selectedViews);
       setState(result.state);
-      flash(`${result.added.name} (${result.added.view}) 추가`);
+      setChecked(new Set(result.state.supports.map((s) => s.name)));
+      const a = result.added;
+      let m = `${a.count}개 추가 (${a.view})`;
+      if (a.duplicates || a.unnamed || a.invalid) m += ` [중복 ${a.duplicates}/무명 ${a.unnamed}/무효 ${a.invalid}]`;
+      flash(m);
     } catch (e: any) {
       flash(e?.code === "USER_CANCELLED" ? "선택 취소됨" : e?.error ?? "추가 실패");
     }
@@ -57,7 +68,13 @@ export default function DrawingView() {
 
   const onRemove = (name: string) => guard(async () => {
     try {
-      setState(await drawingApi.removeSupport(name));
+      const nextState = await drawingApi.removeSupport(name);
+      setState(nextState);
+      setChecked((prev) => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
     } catch (e: any) {
       flash(e?.error ?? "삭제 실패");
     }
@@ -65,7 +82,9 @@ export default function DrawingView() {
 
   const onClear = () => guard(async () => {
     try {
-      setState(await drawingApi.clearSupports());
+      const nextState = await drawingApi.clearSupports();
+      setState(nextState);
+      setChecked(new Set());
     } catch (e: any) {
       flash(e?.error ?? "초기화 실패");
     }
@@ -73,7 +92,12 @@ export default function DrawingView() {
 
   const onExport2D = () => guard(async () => {
     try {
-      await drawingApi.export2D();
+      const names = state.supports.filter((s) => checked.has(s.name)).map((s) => s.name);
+      if (names.length === 0) {
+        flash("추출할 서포트를 선택하세요");
+        return;
+      }
+      await drawingApi.export2D(names);
       flash("Export 2D 완료");
     } catch (e: any) {
       flash(e?.error ?? "Export 실패");
@@ -85,6 +109,20 @@ export default function DrawingView() {
     drawingApi.setSetting(key, value).catch((e: any) => flash(`설정 저장 실패: ${e?.error ?? ""}`));
   };
 
+  const toggleView = (view: string) => {
+    setSelectedViews((prev) => {
+      if (prev.includes(view)) {
+        return prev.length > 1 ? prev.filter((v) => v !== view) : prev;
+      }
+      return [...prev, view];
+    });
+  };
+
+  const allChecked = state.supports.length > 0 && state.supports.every((s) => checked.has(s.name));
+  const toggleAllSupports = () => {
+    setChecked(allChecked ? new Set() : new Set(state.supports.map((s) => s.name)));
+  };
+
   return (
     <div className="relative flex h-full flex-col gap-3 overflow-auto bg-slate-100 p-4 text-slate-900">
       {toast && <div className="rounded-md bg-slate-800 px-3 py-2 text-sm text-white">{toast}</div>}
@@ -93,15 +131,20 @@ export default function DrawingView() {
       <SettingsCard title="Support Selection">
         <CardContent className="flex flex-col gap-3 p-4">
           <div className="flex items-center gap-2">
-            <select
-              value={viewDir}
-              onChange={(e) => setViewDir(e.target.value)}
-              disabled={busy}
-              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-            >
-              {VIEWS.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
-            <Button disabled={busy} onClick={onAdd}>
+            <div className="flex flex-wrap items-center gap-1">
+              {VIEWS.map((v) => (
+                <label key={v} className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={selectedViews.includes(v)}
+                    disabled={busy}
+                    onChange={() => toggleView(v)}
+                  />
+                  {v}
+                </label>
+              ))}
+            </div>
+            <Button disabled={busy || selectedViews.length === 0} onClick={onAdd}>
               {busy ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Plus size={15} className="mr-2" />}
               Add (도면 선택)
             </Button>
@@ -114,6 +157,15 @@ export default function DrawingView() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-[12px] uppercase text-slate-500">
                 <tr>
+                  <th className="w-10 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={allChecked}
+                      disabled={busy || state.supports.length === 0}
+                      onChange={toggleAllSupports}
+                      aria-label="전체 서포트 선택"
+                    />
+                  </th>
                   <th className="px-3 py-2">Support Name</th>
                   <th className="px-3 py-2">View</th>
                   <th className="w-10 px-3 py-2"></th>
@@ -122,6 +174,22 @@ export default function DrawingView() {
               <tbody>
                 {state.supports.map((support) => (
                   <tr key={support.name} className="border-t border-slate-100">
+                    <td className="px-3 py-1.5">
+                      <input
+                        type="checkbox"
+                        checked={checked.has(support.name)}
+                        disabled={busy}
+                        onChange={() => {
+                          setChecked((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(support.name)) next.delete(support.name);
+                            else next.add(support.name);
+                            return next;
+                          });
+                        }}
+                        aria-label={`${support.name} 선택`}
+                      />
+                    </td>
                     <td className="px-3 py-1.5">{support.name}</td>
                     <td className="px-3 py-1.5">{support.view}</td>
                     <td className="px-3 py-1.5">
@@ -133,7 +201,7 @@ export default function DrawingView() {
                 ))}
                 {state.supports.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-3 py-4 text-center text-slate-400">선택된 서포트 없음</td>
+                    <td colSpan={4} className="px-3 py-4 text-center text-slate-400">선택된 서포트 없음</td>
                   </tr>
                 )}
               </tbody>
@@ -154,6 +222,7 @@ export default function DrawingView() {
         <Button disabled={busy || state.supports.length === 0} onClick={onExport2D}>
           <FileOutput size={15} className="mr-2" />Export 2D
         </Button>
+        <span className="text-xs text-slate-500">드래그로 여러 서포트를 한 번에 선택할 수 있습니다</span>
         <Button variant="outline" disabled title="MTO는 재구현 예정(보류)">Export MTO (보류)</Button>
         {!state.gridReady && <span className="text-xs text-amber-600">Grid 미설정 - Export 2D 불가(그리드는 Phase 1b)</span>}
       </div>

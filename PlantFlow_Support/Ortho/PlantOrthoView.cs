@@ -79,6 +79,7 @@ namespace PlantFlow_Support
     public DataLinksManager DlManager => this.dl_manager; // Expose for OrthoViewportManager
     public Commands.ViewType CurrentViewType => this.m_viewType; // Expose for OrthoViewportManager
     public string CurrentViewTypeString => this.m_strViewType; // Expose for OrthoViewportManager
+    public string CurrentViewLabelString => string.IsNullOrEmpty(this.m_strViewName) ? this.m_strViewType : this.m_strViewName;
     public Database DwgDatabase => this.m_dwgDatabase; // Expose for OrthoViewportManager
 
     public Database OrthoDwgDatabase => this.m_dwgDatabase;
@@ -270,11 +271,11 @@ namespace PlantFlow_Support
 
       this.m_strViewName = string.IsNullOrEmpty(spec.ViewName) ? spec.ViewType.ToString() : spec.ViewName;
       this.m_viewType = spec.ViewType;
-      this.m_strViewType = this.m_strViewName;
+      this.m_strViewType = spec.ViewType.ToString();
       this.m_viewDir = spec.ViewDirection;
       this.m_upVector = spec.UpVector;
       this.m_currentPaperCenter = spec.PaperCenter;
-      settings.OrthoView = this.m_strViewName;
+      settings.OrthoView = this.m_strViewType;
 
       if (PlantOrthoView.SPInfo != null)
       {

@@ -91,6 +91,18 @@ namespace PlantFlow_Support
             string viewName = string.IsNullOrEmpty(rawViewName) ? "Top" : rawViewName.Trim();
             if (specs.Any(v => string.Equals(v.ViewName, viewName, StringComparison.OrdinalIgnoreCase)))
                 continue;
+            if (string.Equals(viewName, "Main", StringComparison.OrdinalIgnoreCase))
+            {
+                ViewSpec mainPlaceholder = new ViewSpec();
+                mainPlaceholder.ViewName = "Main";
+                mainPlaceholder.ViewType = this.ViewTypes.ContainsKey("Front") ? this.ViewTypes["Front"] : PlantFlow_Support.Commands.ViewType.Front;
+                mainPlaceholder.UCS = this.UCSs.ContainsKey("Front") ? this.UCSs["Front"] : Matrix3d.Identity;
+                mainPlaceholder.UpVector = this.UpVectors.ContainsKey("Front") ? this.UpVectors["Front"] : Vector3d.ZAxis;
+                mainPlaceholder.ViewDirection = this.ViewDirectionVectors.ContainsKey("Front") ? this.ViewDirectionVectors["Front"] : Vector3d.YAxis.Negate();
+                mainPlaceholder.PaperCenter = Point3d.Origin;
+                specs.Add(mainPlaceholder);
+                continue;
+            }
             if (!this.ViewTypes.ContainsKey(viewName))
             {
                 DiagLog("CreateViewSpecs skip unknown view='" + viewName + "'");
