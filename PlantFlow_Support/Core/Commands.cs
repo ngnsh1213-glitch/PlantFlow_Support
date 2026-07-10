@@ -308,6 +308,96 @@ namespace PlantFlow_Support
       ed.WriteMessage("\nPFSTESTVIEWBASE posted VIEWBASE + PFSCOUNTVIEW");
     }
 
+    private void RunViewBaseOriented(string orientKeyword)
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      PlantOrthoView.FileDiag("PFSVBORIENT enter orient=" + orientKeyword + " doc='" + doc.Name + "'");
+
+      s_viewbaseBaseline = new System.Collections.Generic.HashSet<ObjectId>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (!layoutBtrId.IsNull)
+          this.SnapshotBlockTableRecordIds(tr, layoutBtrId, s_viewbaseBaseline);
+        tr.Commit();
+      }
+
+      string cmd = "._VIEWBASE\n_M\n_E\nLayout1\n_O\n" + orientKeyword + "\n100,100\n\n\n";
+      doc.SendStringToExecute(cmd, true, false, false);
+      PlantOrthoView.FileDiag("PFSVBORIENT posted orient=" + orientKeyword + " cmd=" + cmd.Replace("\n", "|"));
+      ed.WriteMessage("\nPFSVBORIENT posted orient=" + orientKeyword);
+    }
+
+    [CommandMethod("PFSVBFRONT")]
+    public void VbFront()
+    {
+      this.RunViewBaseOriented("_Front");
+    }
+
+    [CommandMethod("PFSVBTOP")]
+    public void VbTop()
+    {
+      this.RunViewBaseOriented("_Top");
+    }
+
+    [CommandMethod("PFSVBLEFT")]
+    public void VbLeft()
+    {
+      this.RunViewBaseOriented("_Left");
+    }
+
+    [CommandMethod("PFSVBRIGHT")]
+    public void VbRight()
+    {
+      this.RunViewBaseOriented("_Right");
+    }
+
+    [CommandMethod("PFSVBCUR")]
+    public void VbCur()
+    {
+      this.RunViewBaseOriented("_Current");
+    }
+
+    private void RunVpointThenCurrent(string vpoint)
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      PlantOrthoView.FileDiag("PFSVBVP enter vpoint=" + vpoint + " doc='" + doc.Name + "'");
+
+      s_viewbaseBaseline = new System.Collections.Generic.HashSet<ObjectId>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (!layoutBtrId.IsNull)
+          this.SnapshotBlockTableRecordIds(tr, layoutBtrId, s_viewbaseBaseline);
+        tr.Commit();
+      }
+
+      string cmd = "_.-VPOINT\n" + vpoint + "\n._VIEWBASE\n_M\n_E\nLayout1\n_O\n_Current\n100,100\n\n\n";
+      doc.SendStringToExecute(cmd, true, false, false);
+      PlantOrthoView.FileDiag("PFSVBVP posted vpoint=" + vpoint + " cmd=" + cmd.Replace("\n", "|"));
+      ed.WriteMessage("\nPFSVBVP posted vpoint=" + vpoint);
+    }
+
+    [CommandMethod("PFSVBVPX")]
+    public void VbVpX()
+    {
+      this.RunVpointThenCurrent("1,0,0");
+    }
+
+    [CommandMethod("PFSVBVPTOP")]
+    public void VbVpTop()
+    {
+      this.RunVpointThenCurrent("0,0,1");
+    }
+
     [CommandMethod("PFSCOUNTVIEW")]
     public void CountViewCommand()
     {
