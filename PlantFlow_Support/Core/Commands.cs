@@ -13,6 +13,7 @@ namespace PlantFlow_Support
   {
     private static CustomPaletteSet palette;
     private static System.Collections.Generic.HashSet<ObjectId> s_viewbaseBaseline;
+    private const string ExportLayoutPath = @"C:\TEMP\pfs_vb_export.dwg";
     public static ObjectId ViewportId;
     public static string LayerName;
     public static int ItemNo;
@@ -525,6 +526,327 @@ namespace PlantFlow_Support
         if (childEntity != null)
           this.CountExplodedGeometry(tr, childEntity, ref line, ref circle, ref arc);
       }
+    }
+
+    [CommandMethod("PFSEXPORTLAYOUT")]
+    public void ExportLayoutCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      try
+      {
+        string directory = System.IO.Path.GetDirectoryName(ExportLayoutPath);
+        if (!string.IsNullOrEmpty(directory) && !System.IO.Directory.Exists(directory))
+          System.IO.Directory.CreateDirectory(directory);
+        if (System.IO.File.Exists(ExportLayoutPath))
+          System.IO.File.Delete(ExportLayoutPath);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSEXPORTLAYOUT prepare 예외: " + ex.GetType().Name + ": " + ex.Message);
+        ed.WriteMessage("\nPFSEXPORTLAYOUT prepare error: " + ex.GetType().Name + ": " + ex.Message);
+        return;
+      }
+
+      doc.SendStringToExecute("_.FILEDIA\n0\n_.EXPORTLAYOUT\n" + ExportLayoutPath + "\n_.FILEDIA\n1\n", true, false, false);
+      PlantOrthoView.FileDiag("PFSEXPORTLAYOUT queued -> " + ExportLayoutPath);
+      ed.WriteMessage("\nPFSEXPORTLAYOUT queued -> " + ExportLayoutPath);
+    }
+
+    [CommandMethod("PFSREADEXPORT")]
+    public void ReadExportCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      Editor ed = doc == null ? null : doc.Editor;
+      int line = 0;
+      int circle = 0;
+      int arc = 0;
+      int members = 0;
+      string source = "none";
+      Database targetDb = null;
+
+      try
+      {
+        string want = System.IO.Path.GetFullPath(ExportLayoutPath);
+        foreach (Document exportDoc in Application.DocumentManager)
+        {
+          string docName = exportDoc.Name;
+          if (!string.IsNullOrEmpty(docName) && string.Equals(System.IO.Path.GetFullPath(docName), want, System.StringComparison.OrdinalIgnoreCase))
+          {
+            targetDb = exportDoc.Database;
+            source = "open-doc";
+            break;
+          }
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSREADEXPORT doc-scan 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      Database sideDb = null;
+      try
+      {
+        if (targetDb == null)
+        {
+          if (!System.IO.File.Exists(ExportLayoutPath))
+          {
+            PlantOrthoView.FileDiag("PFSREADEXPORT: export 파일 없음 " + ExportLayoutPath);
+            ed?.WriteMessage("\nPFSREADEXPORT: export 파일 없음 " + ExportLayoutPath);
+            return;
+          }
+
+          string directory = System.IO.Path.GetDirectoryName(ExportLayoutPath);
+          string copyPath = System.IO.Path.Combine(directory, "pfs_vb_export_copy.dwg");
+          try
+          {
+            if (System.IO.File.Exists(copyPath))
+              System.IO.File.Delete(copyPath);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSREADEXPORT copy cleanup 예외: " + ex.GetType().Name + ": " + ex.Message);
+          }
+
+          System.IO.File.Copy(ExportLayoutPath, copyPath, true);
+          sideDb = new Database(false, true);
+          sideDb.ReadDwgFile(copyPath, System.IO.FileShare.Read, true, null);
+          targetDb = sideDb;
+          source = "file-copy";
+        }
+
+        using (Transaction tr = targetDb.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = tr.GetObject(targetDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          if (bt == null || !bt.Has(BlockTableRecord.ModelSpace))
+          {
+            PlantOrthoView.FileDiag("PFSREADEXPORT: ModelSpace 없음 source=" + source);
+            tr.Commit();
+            return;
+          }
+
+          BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+          if (ms != null)
+          {
+            foreach (ObjectId id in ms)
+            {
+              Entity entity = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+              if (entity == null)
+                continue;
+
+              members++;
+              this.CountExplodedGeometry(tr, entity, ref line, ref circle, ref arc);
+            }
+          }
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSREADEXPORT 예외: " + ex.GetType().Name + ": " + ex.Message + " source=" + source);
+        ed?.WriteMessage("\nPFSREADEXPORT error: " + ex.GetType().Name + ": " + ex.Message);
+        return;
+      }
+      finally
+      {
+        if (sideDb != null)
+          sideDb.Dispose();
+      }
+
+      PlantOrthoView.FileDiag("PFSREADEXPORT exp Line=" + line + " Circle=" + circle + " Arc=" + arc + " members=" + members + " source=" + source);
+      ed?.WriteMessage("\nPFSREADEXPORT exp Line=" + line + " Circle=" + circle + " Arc=" + arc + " members=" + members + " source=" + source);
+    }
+
+    [CommandMethod("PFSPLACEEXPORT")]
+    public void PlaceExportCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      Database targetDb = doc.Database;
+      int cloned = 0;
+      string source = "none";
+      Database sourceDb = null;
+      Database sideDb = null;
+
+      try
+      {
+        if (!System.IO.File.Exists(ExportLayoutPath))
+        {
+          PlantOrthoView.FileDiag("PFSPLACEEXPORT: export 파일 없음 " + ExportLayoutPath);
+          ed.WriteMessage("\nPFSPLACEEXPORT: export 파일 없음 " + ExportLayoutPath);
+          return;
+        }
+
+        try
+        {
+          sideDb = new Database(false, true);
+          sideDb.ReadDwgFile(ExportLayoutPath, System.IO.FileShare.Read, true, null);
+          sourceDb = sideDb;
+          source = "side-direct";
+        }
+        catch (System.Exception ex1)
+        {
+          PlantOrthoView.FileDiag("PFSPLACEEXPORT side-direct 실패: " + ex1.GetType().Name + ": " + ex1.Message);
+          if (sideDb != null)
+          {
+            sideDb.Dispose();
+            sideDb = null;
+          }
+
+          try
+          {
+            string dir = System.IO.Path.GetDirectoryName(ExportLayoutPath);
+            string copyPath = System.IO.Path.Combine(dir, "pfs_vb_export_copy.dwg");
+            try
+            {
+              if (System.IO.File.Exists(copyPath))
+                System.IO.File.Delete(copyPath);
+            }
+            catch (System.Exception cex)
+            {
+              PlantOrthoView.FileDiag("PFSPLACEEXPORT copy cleanup 예외: " + cex.GetType().Name + ": " + cex.Message);
+            }
+
+            System.IO.File.Copy(ExportLayoutPath, copyPath, true);
+            sideDb = new Database(false, true);
+            sideDb.ReadDwgFile(copyPath, System.IO.FileShare.Read, true, null);
+            sourceDb = sideDb;
+            source = "file-copy";
+          }
+          catch (System.Exception ex2)
+          {
+            PlantOrthoView.FileDiag("PFSPLACEEXPORT file-copy 실패: " + ex2.GetType().Name + ": " + ex2.Message);
+            if (sideDb != null)
+            {
+              sideDb.Dispose();
+              sideDb = null;
+            }
+
+            string want = System.IO.Path.GetFullPath(ExportLayoutPath);
+            foreach (Document exportDoc in Application.DocumentManager)
+            {
+              string dn = exportDoc.Name;
+              if (!string.IsNullOrEmpty(dn) && string.Equals(System.IO.Path.GetFullPath(dn), want, System.StringComparison.OrdinalIgnoreCase))
+              {
+                sourceDb = exportDoc.Database;
+                source = "open-doc";
+                break;
+              }
+            }
+          }
+        }
+
+        if (sourceDb == null)
+        {
+          PlantOrthoView.FileDiag("PFSPLACEEXPORT: 소스 DB 확보 실패");
+          ed.WriteMessage("\nPFSPLACEEXPORT: 소스 DB 확보 실패");
+          return;
+        }
+
+        ObjectIdCollection ids = new ObjectIdCollection();
+        using (Transaction str = sourceDb.TransactionManager.StartTransaction())
+        {
+          BlockTable sbt = str.GetObject(sourceDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          if (sbt == null || !sbt.Has(BlockTableRecord.ModelSpace))
+          {
+            PlantOrthoView.FileDiag("PFSPLACEEXPORT: side ModelSpace 없음 source=" + source);
+            str.Commit();
+            return;
+          }
+
+          BlockTableRecord sms = str.GetObject(sbt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+          if (sms != null)
+          {
+            foreach (ObjectId id in sms)
+              ids.Add(id);
+          }
+          str.Commit();
+        }
+
+        PlantOrthoView.FileDiag("PFSPLACEEXPORT side modelspace ids=" + ids.Count + " source=" + source);
+        if (ids.Count == 0)
+        {
+          PlantOrthoView.FileDiag("PFSPLACEEXPORT: side modelspace 비어있음 source=" + source);
+          ed.WriteMessage("\nPFSPLACEEXPORT: side modelspace 비어있음");
+          return;
+        }
+
+        using (DocumentLock dlk = doc.LockDocument())
+        using (Transaction ttr = targetDb.TransactionManager.StartTransaction())
+        {
+          BlockTable tbt = ttr.GetObject(targetDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          if (tbt == null || !tbt.Has(BlockTableRecord.ModelSpace))
+          {
+            PlantOrthoView.FileDiag("PFSPLACEEXPORT: target ModelSpace 없음");
+            ttr.Commit();
+            return;
+          }
+
+          ObjectId msId = tbt[BlockTableRecord.ModelSpace];
+          ObjectId flatLayerId = this.EnsureFlattenLayer(targetDb, ttr);
+          Database oldWorking = HostApplicationServices.WorkingDatabase;
+          IdMapping idMap = new IdMapping();
+          try
+          {
+            HostApplicationServices.WorkingDatabase = targetDb;
+            sourceDb.WblockCloneObjects(ids, msId, idMap, DuplicateRecordCloning.Replace, false);
+          }
+          finally
+          {
+            HostApplicationServices.WorkingDatabase = oldWorking;
+          }
+
+          foreach (IdPair pair in idMap)
+          {
+            if (!pair.IsPrimary || !pair.IsCloned)
+              continue;
+
+            Entity e = ttr.GetObject(pair.Value, OpenMode.ForWrite, false) as Entity;
+            if (e == null)
+              continue;
+
+            e.LayerId = flatLayerId;
+            cloned++;
+          }
+          ttr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSPLACEEXPORT 예외: " + ex.GetType().Name + ": " + ex.Message + " source=" + source);
+        ed.WriteMessage("\nPFSPLACEEXPORT error: " + ex.GetType().Name + ": " + ex.Message);
+        return;
+      }
+      finally
+      {
+        if (sideDb != null)
+          sideDb.Dispose();
+      }
+
+      PlantOrthoView.FileDiag("PFSPLACEEXPORT cloned=" + cloned + " layer=PFS_ORTHO_FLATTEN source=" + source);
+      ed.WriteMessage("\nPFSPLACEEXPORT cloned=" + cloned + " source=" + source);
+    }
+
+    private ObjectId EnsureFlattenLayer(Database db, Transaction tr)
+    {
+      LayerTable lt = tr.GetObject(db.LayerTableId, OpenMode.ForRead) as LayerTable;
+      const string name = "PFS_ORTHO_FLATTEN";
+      if (lt.Has(name))
+        return lt[name];
+
+      lt.UpgradeOpen();
+      LayerTableRecord ltr = new LayerTableRecord();
+      ltr.Name = name;
+      ltr.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex(Autodesk.AutoCAD.Colors.ColorMethod.ByAci, 1);
+      ObjectId lid = lt.Add(ltr);
+      tr.AddNewlyCreatedDBObject(ltr, true);
+      return lid;
     }
 
     [CommandMethod("PFS")]
