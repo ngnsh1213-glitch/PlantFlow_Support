@@ -501,6 +501,78 @@ namespace PlantFlow_Support
       ed.WriteMessage("\nPFSVB2M posted 2-view bundle (MODEL switch)");
     }
 
+    [CommandMethod("PFSVBMULTI")]
+    public void VbMultiCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      PromptPointResult p1 = ed.GetPoint("\n파이프 축 시작점 지정: ");
+      if (p1.Status != PromptStatus.OK)
+      {
+        PlantOrthoView.FileDiag("PFSVBMULTI: p1 취소");
+        return;
+      }
+
+      PromptPointOptions opt2 = new PromptPointOptions("\n파이프 축 끝점 지정: ");
+      opt2.UseBasePoint = true;
+      opt2.BasePoint = p1.Value;
+      PromptPointResult p2 = ed.GetPoint(opt2);
+      if (p2.Status != PromptStatus.OK)
+      {
+        PlantOrthoView.FileDiag("PFSVBMULTI: p2 취소");
+        return;
+      }
+
+      Vector3d v = p2.Value - p1.Value;
+      if (v.Length < 1e-6)
+      {
+        PlantOrthoView.FileDiag("PFSVBMULTI: 축 길이 0");
+        ed.WriteMessage("\n두 점 동일");
+        return;
+      }
+
+      v = v.GetNormal();
+      Vector3d g = Vector3d.ZAxis;
+      Vector3d upMain = g - (g.DotProduct(v)) * v;
+      if (upMain.Length < 1e-6)
+      {
+        g = Vector3d.XAxis;
+        upMain = g - (g.DotProduct(v)) * v;
+      }
+      if (upMain.Length < 1e-6)
+      {
+        g = Vector3d.YAxis;
+        upMain = g - (g.DotProduct(v)) * v;
+      }
+      upMain = upMain.GetNormal();
+
+      var ic = System.Globalization.CultureInfo.InvariantCulture;
+      System.Func<Vector3d, string> fmt = vec =>
+        vec.X.ToString("0.######", ic) + "," + vec.Y.ToString("0.######", ic) + "," + vec.Z.ToString("0.######", ic);
+      string vpMain = fmt(v);
+      string vpTop = fmt(upMain);
+
+      s_viewbaseBaseline = new System.Collections.Generic.HashSet<ObjectId>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (!layoutBtrId.IsNull)
+          this.SnapshotBlockTableRecordIds(tr, layoutBtrId, s_viewbaseBaseline);
+        tr.Commit();
+      }
+
+      string main = "_.MODEL\n_.-VPOINT\n" + vpMain + "\n._VIEWBASE\n_M\n_E\nLayout1\n_O\n_Current\n100,100\n\n\n";
+      string top = "_.MODEL\n_.-VPOINT\n" + vpTop + "\n._VIEWBASE\n_M\n_E\nLayout1\n_O\n_Current\n400,100\n\n\n";
+      string iso = "_.MODEL\n._VIEWBASE\n_M\n_E\nLayout1\n_O\n_SE\n700,100\n\n\n";
+      string cmd = main + top + iso;
+      doc.SendStringToExecute(cmd, true, false, false);
+      PlantOrthoView.FileDiag("PFSVBMULTI vMain=" + vpMain + " vTop=" + vpTop + " cmd=" + cmd.Replace("\n", "|"));
+      ed.WriteMessage("\nPFSVBMULTI posted 3-view bundle (Main/Top/ISO)");
+    }
+
     [CommandMethod("PFSCOUNTVIEW")]
     public void CountViewCommand()
     {
