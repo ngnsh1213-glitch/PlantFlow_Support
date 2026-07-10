@@ -5,6 +5,7 @@ using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.Runtime;
 using Autodesk.AutoCAD.Windows;
+using Autodesk.ProcessPower.PnP3dObjects;
 
 #nullable disable
 namespace PlantFlow_Support
@@ -571,6 +572,79 @@ namespace PlantFlow_Support
       doc.SendStringToExecute(cmd, true, false, false);
       PlantOrthoView.FileDiag("PFSVBMULTI vMain=" + vpMain + " vTop=" + vpTop + " cmd=" + cmd.Replace("\n", "|"));
       ed.WriteMessage("\nPFSVBMULTI posted 3-view bundle (Main/Top/ISO)");
+    }
+
+    [CommandMethod("PFSVBSUPPORT")]
+    public void VbSupportCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      PromptEntityOptions peo = new PromptEntityOptions("\n서포트 선택: ");
+      peo.SetRejectMessage("\nSupport 객체가 아닙니다.");
+      peo.AddAllowedClass(typeof(Support), false);
+      PromptEntityResult per = ed.GetEntity(peo);
+      if (per.Status != PromptStatus.OK)
+      {
+        PlantOrthoView.FileDiag("PFSVBSUPPORT: 선택 취소");
+        return;
+      }
+
+      ed.SetImpliedSelection(new ObjectId[0]);
+
+      Vector3d s1 = Vector3d.ZAxis;
+      bool found = false;
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        DBObject obj = tr.GetObject(per.ObjectId, OpenMode.ForRead);
+        Support sup = obj as Support;
+        if (sup != null)
+        {
+          PortCollection ports = ((Part)sup).GetPorts((PortType)7);
+          foreach (Port port in (PnP3dCollection)ports)
+          {
+            if (port.Name == "S1")
+            {
+              s1 = port.Direction;
+              found = true;
+              break;
+            }
+          }
+        }
+        tr.Commit();
+      }
+
+      if (!found)
+      {
+        PlantOrthoView.FileDiag("PFSVBSUPPORT: S1 포트 없음");
+        ed.WriteMessage("\nS1 포트 없음");
+        return;
+      }
+      if (s1.Length < 1e-6)
+      {
+        PlantOrthoView.FileDiag("PFSVBSUPPORT: S1 길이 0");
+        return;
+      }
+
+      s1 = s1.GetNormal();
+      var ic = System.Globalization.CultureInfo.InvariantCulture;
+      string vp = s1.X.ToString("0.######", ic) + "," + s1.Y.ToString("0.######", ic) + "," + s1.Z.ToString("0.######", ic);
+
+      s_viewbaseBaseline = new System.Collections.Generic.HashSet<ObjectId>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (!layoutBtrId.IsNull)
+          this.SnapshotBlockTableRecordIds(tr, layoutBtrId, s_viewbaseBaseline);
+        tr.Commit();
+      }
+
+      string cmd = "_.MODEL\n_.-VPOINT\n" + vp + "\n._VIEWBASE\n_M\n_E\nLayout1\n_O\n_Current\n100,100\n\n\n";
+      doc.SendStringToExecute(cmd, true, false, false);
+      PlantOrthoView.FileDiag("PFSVBSUPPORT s1=" + vp + " cmd=" + cmd.Replace("\n", "|"));
+      ed.WriteMessage("\nPFSVBSUPPORT s1=" + vp);
     }
 
     [CommandMethod("PFSCOUNTVIEW")]
