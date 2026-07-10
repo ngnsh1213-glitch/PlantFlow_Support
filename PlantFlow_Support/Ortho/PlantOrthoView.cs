@@ -15,6 +15,7 @@ using Autodesk.ProcessPower.P3dProjectParts;
 using Autodesk.ProcessPower.P3dUI;
 using Autodesk.ProcessPower.PlantInstance;
 using Autodesk.ProcessPower.PnP3dOrthoDrawingsUI;
+using Autodesk.ProcessPower.PnP3dObjects;
 using Autodesk.ProcessPower.PnPCommonUiUtils;
 using Autodesk.ProcessPower.ProjectManager;
 using System;
@@ -61,6 +62,7 @@ namespace PlantFlow_Support
     private Vector3d m_upVector;
     private Point3d m_currentPaperCenter = new Point3d(380.0, 330.0, 0.0);
     private bool m_orthoContinueQueued = false;
+    private List<ObjectId> m_spikeHiddenPipeIds = new List<ObjectId>();
     private bool m_anySuccessView = false;
     private Point3d m_lowerLeftCubePt = Point3d.Origin;
     private Point3d m_upperRightCubePt = Point3d.Origin;
@@ -74,6 +76,9 @@ namespace PlantFlow_Support
     private double m_paperWidth;
     private double m_paperHeight;
     public static SupportInfo SPInfo; // Made public for refactoring
+    private const bool SPIKE_PIPE_ISOLATION = false;
+    private const bool SPIKE_FLATSHOT = true;
+    private const string SPIKE_FLATSHOT_LAYER = "PFS_FLATSHOT_SPIKE";
     private DataLinksManager dl_manager;
 
     public DataLinksManager DlManager => this.dl_manager; // Expose for OrthoViewportManager
@@ -563,11 +568,22 @@ namespace PlantFlow_Support
       {
         Extents3d ext = Exts;
         System.Collections.Generic.HashSet<ObjectId> _sourceCubeBefore = this.SnapshotSourceModelSpaceIds("before InitializeCube");
+        this.m_spikeHiddenPipeIds.Clear();
+        bool spikePipeIsolation = this.ShouldRunSpikePipeIsolation();
+        Vector3d connAxis = Vector3d.XAxis;
+        bool hasConnAxis = spikePipeIsolation && this.TryGetSpikeConnMatchedPipeAxis(out connAxis);
+        if (spikePipeIsolation)
+          this.HideSpikeSupportPipes(this.m_spikeHiddenPipeIds);
+
         this.m_plantOrthoCube = new PlantOrthoCube();
         this.m_plantOrthoCube.InitializeCube(ext);
         this.m_lowerLeftPt = ext.MinPoint;
         this.m_upperRightPt = ext.MaxPoint;
-        this.SetView(ext, new Vector3d(-1.0, -1.0, 1.0), new Vector3d(0.0, 0.0, 1.0));
+        Vector3d spikeViewDir = hasConnAxis ? connAxis.GetNormal() : new Vector3d(-1.0, -1.0, 1.0);
+        Vector3d spikeUp = spikePipeIsolation ? (Math.Abs(spikeViewDir.DotProduct(Vector3d.ZAxis)) < 0.9 ? Vector3d.ZAxis : Vector3d.XAxis) : new Vector3d(0.0, 0.0, 1.0);
+        if (spikePipeIsolation)
+          FileDiag("SPIKE_ISOLATION forced support='" + (PlantOrthoView.SPInfo == null ? "?" : PlantOrthoView.SPInfo.Name) + "' pipeHidden=" + this.m_spikeHiddenPipeIds.Count + " method=erase viewDir=" + this.FormatSpikeAxis(spikeViewDir) + " up=" + this.FormatSpikeAxis(spikeUp) + " connPipeAxis=" + (hasConnAxis ? this.FormatSpikeAxis(connAxis) : "none"));
+        this.SetView(ext, spikeViewDir, spikeUp);
         if (string.IsNullOrEmpty(PlantOrthoView.settings.OrthoView))
           PlantOrthoView.settings.OrthoView = UIUtils.s_TopView;
         this.m_plantOrthoCube.SetOrthoViewFaceColor((Autodesk.ProcessPower.PnP3dOrthoDrawingsUI.Commands.ViewType)(int)UIUtils.GetViewTypeFromName(PlantOrthoView.settings.OrthoView));
@@ -576,9 +592,262 @@ namespace PlantFlow_Support
       catch (Exception _cvx)
       {
         PoDiag("CreateView 예외(삼킴 유지): " + _cvx.Message);
+        try { this.RestoreSpikePipesAfterPhase2(); }
+        catch (Exception rx) { FileDiag("SPIKE_ISOLATION catch-restore 예외: " + rx.GetType().Name + ": " + rx.Message); }
       }
     }
 
+    public void RestoreSpikePipesAfterPhase2()
+    {
+      if (this.m_spikeHiddenPipeIds == null || this.m_spikeHiddenPipeIds.Count == 0)
+        return;
+      this.RestoreSpikeSupportPipes(this.m_spikeHiddenPipeIds);
+      this.m_spikeHiddenPipeIds.Clear();
+    }
+
+    private bool ShouldRunSpikePipeIsolation()
+    {
+      if (!SPIKE_PIPE_ISOLATION || PlantOrthoView.SPInfo == null)
+        return false;
+
+      int viewCount = PlantOrthoView.SPInfo.ViewSpecs != null ? PlantOrthoView.SPInfo.ViewSpecs.Count : 1;
+      if (viewCount > 1)
+        return false;
+
+      Vector3d axis;
+      bool has = this.TryGetSpikeConnMatchedPipeAxis(out axis);
+      if (has)
+        FileDiag("SPIKE_ISOLATION target support='" + (PlantOrthoView.SPInfo.Name ?? "?") + "' connPipeAxis=" + this.FormatSpikeAxis(axis) + " viewCount=" + viewCount);
+      return has;
+    }
+
+
+    private bool TryGetSpikeConnMatchedPipeAxis(out Vector3d axis)
+    {
+      axis = Vector3d.XAxis;
+      if (PlantOrthoView.SPInfo == null || PlantOrthoView.SPInfo.PipeList == null || PlantOrthoView.SPInfo.PipeList.Count == 0)
+        return false;
+
+      Document srcDoc = this.FindOpenDocument(this.strCurrent3DDwgName);
+      if (srcDoc == null)
+      {
+        FileDiag("SPIKE_ISOLATION axis skip: source doc not found model3d='" + this.strCurrent3DDwgName + "'");
+        return false;
+      }
+
+      const double SupportPipeZMargin = 150.0;
+      double supportMinZ = PlantOrthoView.SPInfo.Extents.MinPoint.Z;
+      double supportMaxZ = PlantOrthoView.SPInfo.Extents.MaxPoint.Z;
+      double longest = 0.0;
+      bool found = false;
+      using (Transaction tr = srcDoc.Database.TransactionManager.StartTransaction())
+      {
+        foreach (ObjectId pipeId in PlantOrthoView.SPInfo.PipeList)
+        {
+          try
+          {
+            Part part = tr.GetObject(pipeId, OpenMode.ForRead, false) as Part;
+            if (part == null || part.IsErased)
+              continue;
+
+            double minZ;
+            double maxZ;
+            bool hasZRange = this.TryGetSpikePipeZRange(part, out minZ, out maxZ);
+            bool connMatched = hasZRange && maxZ >= supportMinZ - SupportPipeZMargin && minZ <= supportMaxZ + SupportPipeZMargin;
+            if (!connMatched)
+              continue;
+
+            Vector3d pipeAxis;
+            double pipeLength;
+            if (!this.TryGetSpikePipeAxis(part, out pipeAxis, out pipeLength))
+            {
+              FileDiag("SPIKE_ISOLATION axis pipe skip id='" + pipeId + "' reason=noAxis z=" + minZ.ToString("0.###") + ".." + maxZ.ToString("0.###"));
+              continue;
+            }
+
+            if (pipeLength > longest)
+            {
+              longest = pipeLength;
+              axis = pipeAxis;
+              found = true;
+            }
+          }
+          catch (Exception exPipe)
+          {
+            FileDiag("SPIKE_ISOLATION axis pipe 예외 id='" + pipeId + "': " + exPipe.GetType().Name + ": " + exPipe.Message);
+          }
+        }
+        tr.Commit();
+      }
+
+      if (!found)
+        FileDiag("SPIKE_ISOLATION axis none support='" + (PlantOrthoView.SPInfo.Name ?? "?") + "'");
+      return found;
+    }
+
+    private bool TryGetSpikePipeAxis(Part part, out Vector3d axis, out double length)
+    {
+      axis = Vector3d.XAxis;
+      length = 0.0;
+      if (part == null)
+        return false;
+
+      PortCollection ports = part.GetPorts((PortType) 7);
+      if (ports == null || ports.Count < 2)
+        return false;
+
+      Point3d? first = null;
+      Point3d? second = null;
+      foreach (Port port in (PnP3dCollection) ports)
+      {
+        if (!first.HasValue)
+        {
+          first = port.Position;
+          continue;
+        }
+        second = port.Position;
+        break;
+      }
+
+      if (!first.HasValue || !second.HasValue)
+        return false;
+
+      Vector3d rawAxis = second.Value - first.Value;
+      length = rawAxis.Length;
+      if (length <= 1e-6)
+        return false;
+
+      axis = rawAxis.GetNormal();
+      return true;
+    }
+    private void HideSpikeSupportPipes(List<ObjectId> hiddenPipeIds)
+    {
+      if (hiddenPipeIds == null || PlantOrthoView.SPInfo == null || PlantOrthoView.SPInfo.PipeList == null || PlantOrthoView.SPInfo.PipeList.Count == 0)
+        return;
+
+      Document srcDoc = this.FindOpenDocument(this.strCurrent3DDwgName);
+      if (srcDoc == null)
+      {
+        FileDiag("SPIKE_ISOLATION hide skip: source doc not found model3d='" + this.strCurrent3DDwgName + "'");
+        return;
+      }
+
+      const double SupportPipeZMargin = 150.0;
+      double supportMinZ = PlantOrthoView.SPInfo.Extents.MinPoint.Z;
+      double supportMaxZ = PlantOrthoView.SPInfo.Extents.MaxPoint.Z;
+      int skipped = 0;
+      using (srcDoc.LockDocument())
+      using (Transaction tr = srcDoc.Database.TransactionManager.StartTransaction())
+      {
+        foreach (ObjectId pipeId in PlantOrthoView.SPInfo.PipeList)
+        {
+          try
+          {
+            Part part = tr.GetObject(pipeId, OpenMode.ForWrite, false) as Part;
+            if (part == null || part.IsErased)
+            {
+              skipped++;
+              continue;
+            }
+
+            double minZ;
+            double maxZ;
+            bool hasZRange = this.TryGetSpikePipeZRange(part, out minZ, out maxZ);
+            bool connMatched = hasZRange && maxZ >= supportMinZ - SupportPipeZMargin && minZ <= supportMaxZ + SupportPipeZMargin;
+            if (!connMatched)
+            {
+              skipped++;
+              FileDiag("SPIKE_ISOLATION pipe skip id='" + pipeId + "' z=" + (hasZRange ? minZ.ToString("0.###") + ".." + maxZ.ToString("0.###") : "none") + " conn=F");
+              continue;
+            }
+
+            part.Erase();
+            hiddenPipeIds.Add(pipeId);
+            FileDiag("SPIKE_ISOLATION pipe hidden id='" + pipeId + "' z=" + minZ.ToString("0.###") + ".." + maxZ.ToString("0.###") + " conn=T");
+          }
+          catch (Exception exPipe)
+          {
+            skipped++;
+            FileDiag("SPIKE_ISOLATION pipe hide 예외 id='" + pipeId + "': " + exPipe.GetType().Name + ": " + exPipe.Message);
+          }
+        }
+        tr.Commit();
+      }
+      FileDiag("SPIKE_ISOLATION hide done support='" + PlantOrthoView.SPInfo.Name + "' pipeHidden=" + hiddenPipeIds.Count + " skipped=" + skipped + " method=erase");
+    }
+
+    private void RestoreSpikeSupportPipes(List<ObjectId> hiddenPipeIds)
+    {
+      if (hiddenPipeIds == null || hiddenPipeIds.Count == 0)
+      {
+        FileDiag("SPIKE_ISOLATION restore skip hidden=0");
+        return;
+      }
+
+      Document srcDoc = this.FindOpenDocument(this.strCurrent3DDwgName);
+      if (srcDoc == null)
+      {
+        FileDiag("SPIKE_ISOLATION restore failed: source doc not found model3d='" + this.strCurrent3DDwgName + "'");
+        return;
+      }
+
+      int restored = 0;
+      int failed = 0;
+      using (srcDoc.LockDocument())
+      using (Transaction tr = srcDoc.Database.TransactionManager.StartTransaction())
+      {
+        foreach (ObjectId pipeId in hiddenPipeIds)
+        {
+          try
+          {
+            Entity entity = tr.GetObject(pipeId, OpenMode.ForWrite, true) as Entity;
+            if (entity != null && entity.IsErased)
+            {
+              entity.Erase(false);
+              restored++;
+            }
+          }
+          catch (Exception exPipe)
+          {
+            failed++;
+            FileDiag("SPIKE_ISOLATION pipe restore 예외 id='" + pipeId + "': " + exPipe.GetType().Name + ": " + exPipe.Message);
+          }
+        }
+        tr.Commit();
+      }
+      FileDiag("SPIKE_ISOLATION restore done support='" + (PlantOrthoView.SPInfo == null ? "?" : PlantOrthoView.SPInfo.Name) + "' restored=" + restored + " failed=" + failed);
+    }
+
+    private bool TryGetSpikePipeZRange(Part part, out double minZ, out double maxZ)
+    {
+      minZ = double.MaxValue;
+      maxZ = double.MinValue;
+      if (part == null)
+        return false;
+
+      PortCollection ports = part.GetPorts((PortType) 7);
+      if (ports == null || ports.Count == 0)
+        return false;
+
+      foreach (Port port in (PnP3dCollection) ports)
+      {
+        double z = port.Position.Z;
+        if (z < minZ)
+          minZ = z;
+        if (z > maxZ)
+          maxZ = z;
+      }
+      return minZ != double.MaxValue && maxZ != double.MinValue;
+    }
+
+    private string FormatSpikeAxis(Vector3d axis)
+    {
+      if (axis.Length <= 1e-9)
+        return "(0,0,0)";
+
+      Vector3d n = axis.GetNormal();
+      return "(" + n.X.ToString("0.###") + "," + n.Y.ToString("0.###") + "," + n.Z.ToString("0.###") + ")";
+    }
     public void GenerateOrthoTemplateFile()
     {
       string projectDwgDirectory = this.orthoProjectpart.ProjectDwgDirectory;
@@ -1106,6 +1375,429 @@ namespace PlantFlow_Support
       }
     }
 
+
+    private bool TryRunFlatshotSpike(string strViewName, System.Collections.Generic.HashSet<ObjectId> baseline)
+    {
+      if (!SPIKE_FLATSHOT || PlantOrthoView.SPInfo == null)
+        return false;
+      if (!string.Equals(strViewName, "Main", StringComparison.OrdinalIgnoreCase) && !string.Equals(this.CurrentViewLabelString, "Main", StringComparison.OrdinalIgnoreCase))
+        return false;
+      string supportName = PlantOrthoView.SPInfo.Name ?? string.Empty;
+      if (supportName.IndexOf("GD1A-5", StringComparison.OrdinalIgnoreCase) < 0)
+        return false;
+
+      Vector3d pipeAxis;
+      if (!this.TryGetSpikeConnMatchedPipeAxis(out pipeAxis))
+      {
+        FileDiag("FLATSHOT_SPIKE skip support='" + supportName + "' reason=noConnPipeAxis");
+        return true;
+      }
+
+      Document orthoDoc = Application.DocumentManager.MdiActiveDocument;
+      if (orthoDoc == null)
+      {
+        FileDiag("FLATSHOT_SPIKE skip support='" + supportName + "' reason=activeDocNull");
+        return true;
+      }
+
+      Vector3d viewDir = pipeAxis.GetNormal();
+      Vector3d up = Math.Abs(viewDir.DotProduct(Vector3d.ZAxis)) < 0.9 ? Vector3d.ZAxis : Vector3d.XAxis;
+      FileDiag("FLATSHOT_SPIKE target support=" + supportName + " view=" + strViewName + " viewDir=" + this.FormatSpikeAxis(viewDir) + " up=" + this.FormatSpikeAxis(up));
+
+      var tempIds = new System.Collections.Generic.List<ObjectId>();
+      System.Collections.Generic.List<ObjectId> createdIds = null;
+      object oldTileMode = null;
+      bool tileModeChanged = false;
+      try
+      {
+        oldTileMode = Application.GetSystemVariable("TILEMODE");
+        Application.SetSystemVariable("TILEMODE", 1);
+        tileModeChanged = true;
+        FileDiag("FLATSHOT_SPIKE modelspace set oldTileMode=" + oldTileMode);
+
+        var commandBaseline = this.SnapshotModelSpaceIdsForFlatshot(orthoDoc);
+        int copied;
+        int solids;
+        try
+        {
+          this.CreateFlatshotSpikeSolids(orthoDoc, tempIds, out copied, out solids);
+        }
+        catch (Exception ex)
+        {
+          FileDiag("FLATSHOT_SPIKE copy/explode 예외: " + ex.GetType().Name + ": " + ex.Message);
+          return true;
+        }
+        FileDiag("FLATSHOT_SPIKE copied=" + copied + " exploded solids=" + solids);
+
+        try
+        {
+          this.SetFlatshotSpikeView(orthoDoc, viewDir, up);
+        }
+        catch (Exception ex)
+        {
+          FileDiag("FLATSHOT_SPIKE view 예외: " + ex.GetType().Name + ": " + ex.Message);
+        }
+
+        try
+        {
+          this.RunFlatshotSpikeCommand(orthoDoc);
+        }
+        catch (Exception ex)
+        {
+          FileDiag("FLATSHOT_SPIKE command 예외: " + ex.GetType().Name + ": " + ex.Message);
+        }
+
+        createdIds = this.FindFlatshotSpikeCreatedIds(orthoDoc, commandBaseline);
+        int lineCount;
+        int circleCount;
+        int arcCount;
+        int flattenLines;
+        bool blockCreated = this.CountFlatshotSpikeEntities(orthoDoc, createdIds, out lineCount, out circleCount, out arcCount, out flattenLines);
+        FileDiag("FLATSHOT_SPIKE block created=" + (blockCreated ? "T" : "F") + " entities Line=" + lineCount + " Circle=" + circleCount + " Arc=" + arcCount);
+        FileDiag("FLATSHOT_SPIKE flatten lines=" + flattenLines);
+      }
+      finally
+      {
+        int erased = this.CleanupFlatshotSpike(orthoDoc, tempIds, createdIds);
+        FileDiag("FLATSHOT_SPIKE cleanup erased=" + erased);
+        if (tileModeChanged)
+        {
+          try
+          {
+            Application.SetSystemVariable("TILEMODE", oldTileMode ?? 0);
+            FileDiag("FLATSHOT_SPIKE modelspace restored tileMode=" + (oldTileMode ?? 0));
+          }
+          catch (Exception ex)
+          {
+            FileDiag("FLATSHOT_SPIKE modelspace restore 예외: " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+      }
+      return true;
+    }
+
+    private System.Collections.Generic.HashSet<ObjectId> SnapshotModelSpaceIdsForFlatshot(Document doc)
+    {
+      var ids = new System.Collections.Generic.HashSet<ObjectId>();
+      if (doc == null)
+        return ids;
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+        BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+        foreach (ObjectId id in ms)
+          ids.Add(id);
+        tr.Commit();
+      }
+      return ids;
+    }
+
+    private void CreateFlatshotSpikeSolids(Document destDoc, System.Collections.Generic.List<ObjectId> tempIds, out int copied, out int solids)
+    {
+      copied = 0;
+      solids = 0;
+      Document srcDoc = this.FindOpenDocument(this.strCurrent3DDwgName);
+      if (destDoc == null || srcDoc == null)
+        throw new InvalidOperationException("source/destination doc missing");
+
+      ObjectId destModelSpaceId = this.GetFlatshotModelSpaceId(destDoc.Database);
+      ObjectIdCollection cloneSourceIds = new ObjectIdCollection();
+      using (Transaction srcTr = srcDoc.Database.TransactionManager.StartTransaction())
+      {
+        var sourceIds = new System.Collections.Generic.List<ObjectId>();
+        if (PlantOrthoView.SPInfo.Ids != null)
+          sourceIds.AddRange(PlantOrthoView.SPInfo.Ids);
+        if (PlantOrthoView.SPInfo.PipeList != null)
+          sourceIds.AddRange(PlantOrthoView.SPInfo.PipeList);
+
+        foreach (ObjectId sourceId in sourceIds)
+        {
+          try
+          {
+            Entity sourceEnt = srcTr.GetObject(sourceId, OpenMode.ForRead, false) as Entity;
+            if (sourceEnt == null || sourceEnt.IsErased)
+              continue;
+            cloneSourceIds.Add(sourceId);
+          }
+          catch (Exception ex)
+          {
+            FileDiag("FLATSHOT_SPIKE source collect 예외 id='" + sourceId + "': " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+        srcTr.Commit();
+      }
+
+      if (cloneSourceIds.Count == 0)
+        return;
+
+      IdMapping mapping = new IdMapping();
+      srcDoc.Database.WblockCloneObjects(cloneSourceIds, destModelSpaceId, mapping, DuplicateRecordCloning.Replace, false);
+
+      using (Transaction destTr = destDoc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layerId = this.EnsureFlatshotSpikeLayer(destTr, destDoc.Database);
+        BlockTable destBt = (BlockTable)destTr.GetObject(destDoc.Database.BlockTableId, OpenMode.ForRead);
+        BlockTableRecord destMs = (BlockTableRecord)destTr.GetObject(destBt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+        foreach (IdPair pair in mapping)
+        {
+          if (!pair.IsCloned || pair.Value.IsNull)
+            continue;
+          try
+          {
+            Entity clonedEnt = destTr.GetObject(pair.Value, OpenMode.ForWrite, false) as Entity;
+            if (clonedEnt == null || clonedEnt.IsErased)
+              continue;
+            copied++;
+            tempIds.Add(pair.Value);
+            if (clonedEnt is Solid3d || clonedEnt is Region || clonedEnt is Body)
+            {
+              clonedEnt.LayerId = layerId;
+              solids++;
+              continue;
+            }
+            this.AppendFlatshotExplodedSolids(clonedEnt, destMs, destTr, layerId, tempIds, ref solids);
+            if (!clonedEnt.IsErased)
+              clonedEnt.Erase();
+          }
+          catch (Exception ex)
+          {
+            FileDiag("FLATSHOT_SPIKE cloned explode 예외 id='" + pair.Value + "': " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+        destTr.Commit();
+      }
+    }
+
+    private ObjectId GetFlatshotModelSpaceId(Database db)
+    {
+      using (Transaction tr = db.TransactionManager.StartTransaction())
+      {
+        BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+        ObjectId id = bt[BlockTableRecord.ModelSpace];
+        tr.Commit();
+        return id;
+      }
+    }
+
+    private ObjectId EnsureFlatshotSpikeLayer(Transaction tr, Database db)
+    {
+      LayerTable lt = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+      if (lt.Has(SPIKE_FLATSHOT_LAYER))
+        return lt[SPIKE_FLATSHOT_LAYER];
+      lt.UpgradeOpen();
+      LayerTableRecord ltr = new LayerTableRecord();
+      ltr.Name = SPIKE_FLATSHOT_LAYER;
+      ltr.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex(Autodesk.AutoCAD.Colors.ColorMethod.ByAci, 2);
+      ObjectId id = lt.Add(ltr);
+      tr.AddNewlyCreatedDBObject(ltr, true);
+      return id;
+    }
+
+    private void AppendFlatshotExplodedSolids(Entity sourceClone, BlockTableRecord destMs, Transaction destTr, ObjectId layerId, System.Collections.Generic.List<ObjectId> tempIds, ref int solids)
+    {
+      DBObjectCollection exploded = new DBObjectCollection();
+      try
+      {
+        sourceClone.Explode(exploded);
+      }
+      catch (Exception ex)
+      {
+        FileDiag("FLATSHOT_SPIKE explode 예외 type=" + sourceClone.GetType().Name + ": " + ex.Message);
+      }
+
+      if (exploded.Count == 0 && (sourceClone is Solid3d || sourceClone is Region || sourceClone is Body))
+      {
+        sourceClone.LayerId = layerId;
+        if (sourceClone.ObjectId.IsNull)
+        {
+          ObjectId id = destMs.AppendEntity(sourceClone);
+          destTr.AddNewlyCreatedDBObject(sourceClone, true);
+          tempIds.Add(id);
+        }
+        solids++;
+        return;
+      }
+
+      foreach (DBObject obj in exploded)
+      {
+        Entity ent = obj as Entity;
+        if (ent == null)
+        {
+          obj.Dispose();
+          continue;
+        }
+        if (ent is Solid3d || ent is Region || ent is Body)
+        {
+          ent.LayerId = layerId;
+          ObjectId id = destMs.AppendEntity(ent);
+          destTr.AddNewlyCreatedDBObject(ent, true);
+          tempIds.Add(id);
+          solids++;
+        }
+        else
+        {
+          ent.Dispose();
+        }
+      }
+    }
+
+    private void SetFlatshotSpikeView(Document doc, Vector3d viewDir, Vector3d up)
+    {
+      if (doc == null)
+        return;
+      Editor editor = doc.Editor;
+      ViewTableRecord view = editor.GetCurrentView();
+      view.ViewDirection = viewDir;
+      view.ViewTwist = 0.0;
+      editor.SetCurrentView(view);
+      FileDiag("FLATSHOT_SPIKE view set viewDir=" + this.FormatSpikeAxis(viewDir) + " up=" + this.FormatSpikeAxis(up));
+    }
+
+    private void RunFlatshotSpikeCommand(Document doc)
+    {
+      if (doc == null || doc.Editor == null)
+        throw new InvalidOperationException("active editor null");
+      doc.Editor.Command(
+        "_.-FLATSHOT",
+        "_Insert",
+        "_ByBlock",
+        "_ByBlock",
+        "_No",
+        "_No",
+        "0,0,0",
+        1.0,
+        1.0,
+        0.0);
+    }
+
+    private System.Collections.Generic.List<ObjectId> FindFlatshotSpikeCreatedIds(Document doc, System.Collections.Generic.HashSet<ObjectId> baseline)
+    {
+      var ids = new System.Collections.Generic.List<ObjectId>();
+      if (doc == null)
+        return ids;
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+        BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+        foreach (ObjectId id in ms)
+        {
+          if (baseline != null && baseline.Contains(id))
+            continue;
+          Entity ent = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+          if (ent != null && string.Compare(ent.Layer, SPIKE_FLATSHOT_LAYER, true) != 0)
+            ids.Add(id);
+        }
+        tr.Commit();
+      }
+      return ids;
+    }
+
+    private bool CountFlatshotSpikeEntities(Document doc, System.Collections.Generic.List<ObjectId> createdIds, out int lineCount, out int circleCount, out int arcCount, out int flattenLines)
+    {
+      lineCount = 0;
+      circleCount = 0;
+      arcCount = 0;
+      flattenLines = 0;
+      bool blockCreated = false;
+      if (doc == null || createdIds == null)
+        return false;
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId flatLayerId = this.EnsureFlatLayerForFlatshot(tr, doc.Database);
+        BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+        BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+        foreach (ObjectId id in createdIds)
+        {
+          Entity ent = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+          BlockReference br = ent as BlockReference;
+          if (br == null)
+            continue;
+          blockCreated = true;
+          BlockTableRecord def = tr.GetObject(br.BlockTableRecord, OpenMode.ForRead) as BlockTableRecord;
+          if (def != null)
+          {
+            foreach (ObjectId childId in def)
+            {
+              Entity child = tr.GetObject(childId, OpenMode.ForRead, false) as Entity;
+              if (child is Line)
+                lineCount++;
+              else if (child is Circle)
+                circleCount++;
+              else if (child is Arc)
+                arcCount++;
+            }
+          }
+
+          DBObjectCollection exploded = new DBObjectCollection();
+          br.Explode(exploded);
+          foreach (DBObject obj in exploded)
+          {
+            Entity flatEnt = obj as Entity;
+            if (flatEnt == null)
+            {
+              obj.Dispose();
+              continue;
+            }
+            if (flatEnt is Line)
+              flattenLines++;
+            flatEnt.LayerId = flatLayerId;
+            ms.AppendEntity(flatEnt);
+            tr.AddNewlyCreatedDBObject(flatEnt, true);
+          }
+        }
+        tr.Commit();
+      }
+      return blockCreated;
+    }
+
+    private ObjectId EnsureFlatLayerForFlatshot(Transaction tr, Database db)
+    {
+      const string flatLayer = "PFS_ORTHO_FLATTEN";
+      LayerTable lt = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+      if (lt.Has(flatLayer))
+        return lt[flatLayer];
+      lt.UpgradeOpen();
+      LayerTableRecord ltr = new LayerTableRecord();
+      ltr.Name = flatLayer;
+      ltr.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex(Autodesk.AutoCAD.Colors.ColorMethod.ByAci, 1);
+      ObjectId id = lt.Add(ltr);
+      tr.AddNewlyCreatedDBObject(ltr, true);
+      return id;
+    }
+
+    private int CleanupFlatshotSpike(Document doc, System.Collections.Generic.List<ObjectId> tempIds, System.Collections.Generic.List<ObjectId> createdIds)
+    {
+      int erased = 0;
+      if (doc == null)
+        return erased;
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        Action<ObjectId> eraseOne = delegate(ObjectId id)
+        {
+          try
+          {
+            Entity ent = tr.GetObject(id, OpenMode.ForWrite, false) as Entity;
+            if (ent != null && !ent.IsErased)
+            {
+              ent.Erase();
+              erased++;
+            }
+          }
+          catch (Exception ex)
+          {
+            FileDiag("FLATSHOT_SPIKE cleanup 예외 id='" + id + "': " + ex.GetType().Name + ": " + ex.Message);
+          }
+        };
+        if (tempIds != null)
+          foreach (ObjectId id in tempIds)
+            eraseOne(id);
+        if (createdIds != null)
+          foreach (ObjectId id in createdIds)
+            eraseOne(id);
+        tr.Commit();
+      }
+      return erased;
+    }
     private void GenerateOrthos(
       StringCollection dwg3dFiles,
       string strViewName,
@@ -1219,6 +1911,11 @@ namespace PlantFlow_Support
         FileDiag("GenerateOrthos: FlattenDiagSnapshot 호출 직전");
         var _flattenBaseline = this.FlattenDiagSnapshot();
         FileDiag("GenerateOrthos: CreateOrUpdateOrthoView 호출 직전 (baseline=" + _flattenBaseline.Count + ")");
+        if (this.TryRunFlatshotSpike(strViewName, _flattenBaseline))
+        {
+          FileDiag("GenerateOrthos: FLATSHOT_SPIKE handled, PnP CreateOrUpdateOrthoView skip");
+          return;
+        }
         UIUtils.CreateOrUpdateOrthoView(dwgSheetDef, strViewName, this.orthoProjectpart, skipClipping, false, clipper, viewportRotation, this.m_FrozenDwgLayers, this.m_OffDwgLayers, this.Offset, this.Rotation);
         FileDiag("GenerateOrthos: CreateOrUpdateOrthoView 반환, FlattenDiagStage1 호출 직전");
         this.FlattenDiagStage1(viewportId, _flattenBaseline);

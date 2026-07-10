@@ -6,11 +6,12 @@ import { Input } from "../../design-system/ui/Input";
 import { SettingsCard } from "../../design-system/ui/SettingsCard";
 import { drawingApi, isDrawingBridgeAvailable, type DrawingSettings, type DrawingState } from "../api/drawingApi";
 
-const VIEWS = ["Main", "Top", "Bottom", "Front", "Back", "Left", "Right"] as const;
+const MAIN_VIEW = "Main";
+const MULTI_VIEWS = ["Top", "Bottom", "Front", "Back", "Left", "Right"] as const;
 
 export default function DrawingView() {
   const bridge = isDrawingBridgeAvailable();
-  const [selectedViews, setSelectedViews] = useState<string[]>(["Top"]);
+  const [selectedViews, setSelectedViews] = useState<string[]>([]);
   const [state, setState] = useState<DrawingState>({ supports: [], gridReady: false, captureDoc: "" });
   const [settings, setSettings] = useState<DrawingSettings>({ template: "", projectNo: "", revision: "" });
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -50,11 +51,8 @@ export default function DrawingView() {
 
   const onAdd = () => guard(async () => {
     try {
-      if (selectedViews.length === 0) {
-        flash("뷰를 1개 이상 선택하세요");
-        return;
-      }
-      const result = await drawingApi.addFromSelection(selectedViews);
+      const views = [MAIN_VIEW, ...selectedViews];
+      const result = await drawingApi.addFromSelection(views);
       setState(result.state);
       setChecked(new Set(result.state.supports.map((s) => s.name)));
       const a = result.added;
@@ -110,12 +108,9 @@ export default function DrawingView() {
   };
 
   const toggleView = (view: string) => {
-    setSelectedViews((prev) => {
-      if (prev.includes(view)) {
-        return prev.length > 1 ? prev.filter((v) => v !== view) : prev;
-      }
-      return [...prev, view];
-    });
+    setSelectedViews((prev) =>
+      prev.includes(view) ? prev.filter((v) => v !== view) : [...prev, view]
+    );
   };
 
   const allChecked = state.supports.length > 0 && state.supports.every((s) => checked.has(s.name));
@@ -132,7 +127,11 @@ export default function DrawingView() {
         <CardContent className="flex flex-col gap-3 p-4">
           <div className="flex items-center gap-2">
             <div className="flex flex-wrap items-center gap-1">
-              {VIEWS.map((v) => (
+              <label className="flex items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-2 py-1.5 text-sm text-blue-700">
+                <input type="checkbox" checked readOnly disabled />
+                Main
+              </label>
+              {MULTI_VIEWS.map((v) => (
                 <label key={v} className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm">
                   <input
                     type="checkbox"
@@ -144,7 +143,7 @@ export default function DrawingView() {
                 </label>
               ))}
             </div>
-            <Button disabled={busy || selectedViews.length === 0} onClick={onAdd}>
+            <Button disabled={busy} onClick={onAdd}>
               {busy ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Plus size={15} className="mr-2" />}
               Add (도면 선택)
             </Button>

@@ -802,10 +802,11 @@ namespace PlantFlow_Support
           Vector3d candidateUp;
           double maxUpDotP;
           bool hasSafeUp = this.TryFindSafeUpCandidate(viewDir, supportPipeAxes, out candidateUp, out maxUpDotP);
-          bool safe = supportPipeAxes.Count > 0 && maxDotP < 0.1 && hasSafeUp;
+          bool isVertical = Math.Abs(viewDir.DotProduct(Vector3d.ZAxis)) > 0.9; // B3: Main=입면 강제, 탑/바텀 배제.
+          bool safe = supportPipeAxes.Count > 0 && maxDotP < 0.1 && hasSafeUp && !isVertical;
           double exposeScore = 1.0 - Math.Abs(longestAxis.DotProduct(viewDir));
           string label = i == candidates.Length - 1 ? "current" + this.FormatAxisForLog(viewDir) : this.FormatAxisForLog(viewDir);
-          candidateLog.Append(label + ":" + maxDotP.ToString("0.###") + ":" + (safe ? "T" : "F") + ":" + exposeScore.ToString("0.###") + ":up=" + (hasSafeUp ? this.FormatAxisForLog(candidateUp) : "none") + " ");
+          candidateLog.Append(label + ":" + maxDotP.ToString("0.###") + ":" + (safe ? "T" : "F") + ":" + exposeScore.ToString("0.###") + ":up=" + (hasSafeUp ? this.FormatAxisForLog(candidateUp) : "none") + ":vert=" + (isVertical ? "T" : "F") + " ");
           if (safe && exposeScore > bestExpose)
           {
             bestExpose = exposeScore;

@@ -12,6 +12,7 @@ namespace PlantFlow_Support
   public partial class Commands
   {
     private static CustomPaletteSet palette;
+    private static System.Collections.Generic.HashSet<ObjectId> s_viewbaseBaseline;
     public static ObjectId ViewportId;
     public static string LayerName;
     public static int ItemNo;
@@ -122,6 +123,11 @@ namespace PlantFlow_Support
         editor?.WriteMessage("\n[PFS-DIAG] PFSORTHOPHASE2 예외: " + ex.GetType().Name + ": " + ex.Message);
         Commands.ContinueBatchAfterFailure("PFSORTHOPHASE2", ex);
       }
+      finally
+      {
+        try { orthoView.RestoreSpikePipesAfterPhase2(); }
+        catch (System.Exception rex) { PlantOrthoView.FileDiag("PFSORTHOPHASE2 spike-restore 예외: " + rex.GetType().Name + ": " + rex.Message); }
+      }
       PlantOrthoView.FileDiag("PFSORTHOPHASE2 종료");
     }
 
@@ -195,6 +201,331 @@ namespace PlantFlow_Support
     }
 
     public static dynamic OrthoView { get; set; }
+
+    [CommandMethod("PFSTESTFLATSHOT")]
+    public void TestFlatshotCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      PlantOrthoView.FileDiag("PFSTESTFLATSHOT enter doc='" + doc.Name + "' tilemode=" + Application.GetSystemVariable("TILEMODE"));
+
+      var before = new System.Collections.Generic.HashSet<ObjectId>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+        BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+        foreach (ObjectId id in ms)
+          before.Add(id);
+        tr.Commit();
+      }
+
+      try
+      {
+        ed.Command(
+          "_.-FLATSHOT",
+          "_Insert",
+          "_ByBlock",
+          "_ByBlock",
+          "_No",
+          "_No",
+          "0,0,0",
+          1.0,
+          1.0,
+          0.0);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSTESTFLATSHOT command 예외: " + ex.GetType().Name + ": " + ex.Message);
+        ed.WriteMessage("\nPFSTESTFLATSHOT command error: " + ex.GetType().Name + ": " + ex.Message);
+        return;
+      }
+
+      int line = 0;
+      int circle = 0;
+      int arc = 0;
+      bool blockCreated = false;
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+        BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+        foreach (ObjectId id in ms)
+        {
+          if (before.Contains(id))
+            continue;
+
+          BlockReference br = tr.GetObject(id, OpenMode.ForRead, false) as BlockReference;
+          if (br == null)
+            continue;
+
+          blockCreated = true;
+          BlockTableRecord btr = tr.GetObject(br.BlockTableRecord, OpenMode.ForRead) as BlockTableRecord;
+          if (btr == null)
+            continue;
+
+          foreach (ObjectId eid in btr)
+          {
+            Entity entity = tr.GetObject(eid, OpenMode.ForRead, false) as Entity;
+            if (entity is Line)
+              line++;
+            else if (entity is Circle)
+              circle++;
+            else if (entity is Arc)
+              arc++;
+          }
+        }
+        tr.Commit();
+      }
+
+      PlantOrthoView.FileDiag("PFSTESTFLATSHOT block created=" + (blockCreated ? "T" : "F") + " Line=" + line + " Circle=" + circle + " Arc=" + arc);
+      ed.WriteMessage("\nPFSTESTFLATSHOT block=" + (blockCreated ? "T" : "F") + " Line=" + line + " Circle=" + circle + " Arc=" + arc);
+    }
+    [CommandMethod("PFSTESTVIEWBASE")]
+    public void TestViewbaseCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      PlantOrthoView.FileDiag("PFSTESTVIEWBASE enter doc='" + doc.Name + "'");
+
+      s_viewbaseBaseline = new System.Collections.Generic.HashSet<ObjectId>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (!layoutBtrId.IsNull)
+          this.SnapshotBlockTableRecordIds(tr, layoutBtrId, s_viewbaseBaseline);
+        tr.Commit();
+      }
+
+      doc.SendStringToExecute("._VIEWBASE\n_M\n_E\nLayout1\n100,100\n\n\n", true, false, false);
+      doc.SendStringToExecute("PFSCOUNTVIEW\n", true, false, false);
+      PlantOrthoView.FileDiag("PFSTESTVIEWBASE posted VIEWBASE + PFSCOUNTVIEW");
+      ed.WriteMessage("\nPFSTESTVIEWBASE posted VIEWBASE + PFSCOUNTVIEW");
+    }
+
+    [CommandMethod("PFSCOUNTVIEW")]
+    public void CountViewCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      var baseline = s_viewbaseBaseline ?? new System.Collections.Generic.HashSet<ObjectId>();
+      int line = 0;
+      int circle = 0;
+      int arc = 0;
+      int viewrepLine = 0;
+      int viewrepCircle = 0;
+      int viewrepArc = 0;
+      var viewTypes = new System.Collections.Generic.List<string>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (layoutBtrId.IsNull)
+        {
+          PlantOrthoView.FileDiag("PFSCOUNTVIEW: Layout1 없음");
+          ed.WriteMessage("\nPFSCOUNTVIEW: Layout1 없음");
+          tr.Commit();
+          return;
+        }
+
+        BlockTableRecord layoutBtr = tr.GetObject(layoutBtrId, OpenMode.ForRead) as BlockTableRecord;
+        if (layoutBtr != null)
+        {
+          foreach (ObjectId id in layoutBtr)
+          {
+            if (baseline.Contains(id))
+              continue;
+
+            DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
+            if (obj == null)
+              continue;
+
+            viewTypes.Add(obj.GetType().Name);
+            Entity entity = obj as Entity;
+            if (entity == null)
+              continue;
+
+            if (entity.GetType().Name == "ViewBorder")
+            {
+              if (this.TryCountViewRepGeometry(tr, entity, ref viewrepLine, ref viewrepCircle, ref viewrepArc))
+                continue;
+            }
+
+            this.CountExplodedGeometry(tr, entity, ref line, ref circle, ref arc);
+          }
+        }
+        tr.Commit();
+      }
+
+      string types = viewTypes.Count == 0 ? "none" : string.Join(" ", viewTypes.ToArray()).Trim();
+      PlantOrthoView.FileDiag("PFSCOUNTVIEW newTypes=[" + types + "] explode Line=" + line + " Circle=" + circle + " Arc=" + arc + " viewrep Line=" + viewrepLine + " Circle=" + viewrepCircle + " Arc=" + viewrepArc);
+      ed.WriteMessage("\nPFSCOUNTVIEW types=[" + types + "] Line=" + line + " Circle=" + circle + " Arc=" + arc + " viewrep Line=" + viewrepLine + " Circle=" + viewrepCircle + " Arc=" + viewrepArc);
+    }
+
+    private bool TryCountViewRepGeometry(Transaction tr, Entity viewBorder, ref int line, ref int circle, ref int arc)
+    {
+      if (tr == null || viewBorder == null)
+        return false;
+
+      try
+      {
+        System.Reflection.PropertyInfo property = viewBorder.GetType().GetProperty("BlockId");
+        if (property == null)
+        {
+          PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep BlockId property 없음 type=" + viewBorder.GetType().FullName);
+          return false;
+        }
+
+        object value = property.GetValue(viewBorder, null);
+        if (!(value is ObjectId))
+        {
+          PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep BlockId type mismatch=" + (value == null ? "null" : value.GetType().FullName));
+          return false;
+        }
+
+        ObjectId blockId = (ObjectId)value;
+        if (blockId.IsNull)
+        {
+          PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep BlockId null");
+          return true;
+        }
+
+        DBObject blockObj = tr.GetObject(blockId, OpenMode.ForRead, false);
+        PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep BlockId resolves to " + (blockObj == null ? "null" : blockObj.GetType().FullName));
+
+        BlockReference br = blockObj as BlockReference;
+        if (br != null)
+        {
+          this.CountExplodedGeometry(tr, br, ref line, ref circle, ref arc);
+          try
+          {
+            Extents3d extents = br.GeometricExtents;
+            PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep(BRef) tf=" + br.BlockTransform + " extents=" + extents.MinPoint + "~" + extents.MaxPoint);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep extents 예외: " + ex.GetType().Name + ": " + ex.Message);
+          }
+          return true;
+        }
+
+        BlockTableRecord btr = blockObj as BlockTableRecord;
+        if (btr != null)
+        {
+          int members = 0;
+          foreach (ObjectId gid in btr)
+          {
+            Entity geometry = tr.GetObject(gid, OpenMode.ForRead, false) as Entity;
+            if (geometry == null)
+              continue;
+
+            this.CountExplodedGeometry(tr, geometry, ref line, ref circle, ref arc);
+            members++;
+          }
+          PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep(BTR) name=" + btr.Name + " members=" + members);
+          return true;
+        }
+
+        PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep BlockId 미지원 타입");
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private ObjectId GetLayoutBlockTableRecordId(Database db, Transaction tr, string layoutName)
+    {
+      if (db == null || tr == null || string.IsNullOrEmpty(layoutName))
+        return ObjectId.Null;
+
+      DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead) as DBDictionary;
+      if (layouts == null || !layouts.Contains(layoutName))
+        return ObjectId.Null;
+
+      Layout layout = tr.GetObject(layouts.GetAt(layoutName), OpenMode.ForRead) as Layout;
+      return layout == null ? ObjectId.Null : layout.BlockTableRecordId;
+    }
+
+    private void SnapshotBlockTableRecordIds(Transaction tr, ObjectId btrId, System.Collections.Generic.HashSet<ObjectId> ids)
+    {
+      if (tr == null || btrId.IsNull || ids == null)
+        return;
+
+      BlockTableRecord btr = tr.GetObject(btrId, OpenMode.ForRead) as BlockTableRecord;
+      if (btr == null)
+        return;
+
+      foreach (ObjectId id in btr)
+        ids.Add(id);
+    }
+
+    private void CountExplodedGeometry(Transaction tr, Entity entity, ref int line, ref int circle, ref int arc)
+    {
+      if (tr == null || entity == null)
+        return;
+
+      if (entity is Line)
+      {
+        line++;
+        return;
+      }
+      if (entity is Circle)
+      {
+        circle++;
+        return;
+      }
+      if (entity is Arc)
+      {
+        arc++;
+        return;
+      }
+
+      DBObjectCollection exploded = new DBObjectCollection();
+      try
+      {
+        entity.Explode(exploded);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSCOUNTVIEW explode 예외 type=" + entity.GetType().Name + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      if (exploded.Count > 0)
+      {
+        foreach (DBObject child in exploded)
+        {
+          Entity childEntity = child as Entity;
+          if (childEntity != null)
+            this.CountExplodedGeometry(tr, childEntity, ref line, ref circle, ref arc);
+          child.Dispose();
+        }
+        return;
+      }
+
+      BlockReference br = entity as BlockReference;
+      if (br == null || br.BlockTableRecord.IsNull)
+        return;
+
+      BlockTableRecord def = tr.GetObject(br.BlockTableRecord, OpenMode.ForRead) as BlockTableRecord;
+      if (def == null)
+        return;
+
+      foreach (ObjectId childId in def)
+      {
+        Entity childEntity = tr.GetObject(childId, OpenMode.ForRead, false) as Entity;
+        if (childEntity != null)
+          this.CountExplodedGeometry(tr, childEntity, ref line, ref circle, ref arc);
+      }
+    }
 
     [CommandMethod("PFS")]
     public void CmdPalette()
