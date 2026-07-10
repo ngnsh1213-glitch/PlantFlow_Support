@@ -398,6 +398,57 @@ namespace PlantFlow_Support
       this.RunVpointThenCurrent("0,0,1");
     }
 
+    [CommandMethod("PFSVBMAIN")]
+    public void VbMainCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      PromptPointResult p1 = ed.GetPoint("\n파이프 축 시작점 지정: ");
+      if (p1.Status != PromptStatus.OK)
+      {
+        PlantOrthoView.FileDiag("PFSVBMAIN: p1 취소");
+        return;
+      }
+
+      PromptPointOptions opt2 = new PromptPointOptions("\n파이프 축 끝점 지정: ");
+      opt2.UseBasePoint = true;
+      opt2.BasePoint = p1.Value;
+      PromptPointResult p2 = ed.GetPoint(opt2);
+      if (p2.Status != PromptStatus.OK)
+      {
+        PlantOrthoView.FileDiag("PFSVBMAIN: p2 취소");
+        return;
+      }
+
+      Vector3d axis = p2.Value - p1.Value;
+      if (axis.Length < 1e-6)
+      {
+        PlantOrthoView.FileDiag("PFSVBMAIN: 축 길이 0");
+        ed.WriteMessage("\n두 점이 동일");
+        return;
+      }
+
+      axis = axis.GetNormal();
+      string vp = axis.X.ToString("0.######") + "," + axis.Y.ToString("0.######") + "," + axis.Z.ToString("0.######");
+
+      s_viewbaseBaseline = new System.Collections.Generic.HashSet<ObjectId>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (!layoutBtrId.IsNull)
+          this.SnapshotBlockTableRecordIds(tr, layoutBtrId, s_viewbaseBaseline);
+        tr.Commit();
+      }
+
+      string cmd = "_.-VPOINT\n" + vp + "\n._VIEWBASE\n_M\n_E\nLayout1\n_O\n_Current\n100,100\n\n\n";
+      doc.SendStringToExecute(cmd, true, false, false);
+      PlantOrthoView.FileDiag("PFSVBMAIN axis=" + vp + " cmd=" + cmd.Replace("\n", "|"));
+      ed.WriteMessage("\nPFSVBMAIN axis=" + vp);
+    }
+
     [CommandMethod("PFSCOUNTVIEW")]
     public void CountViewCommand()
     {
