@@ -1,5 +1,6 @@
 # AGENTS — PlantFlow_Support (Codex 진입 규칙)
 
+> **[착수 전 필수] `pwd` 확인.** 작업 폴더가 `...\PlantFlow_Support`가 아니면(예: `PlantFlow_Ortho`) **즉시 중단**하고 "cwd 오배치: 현재 <경로>. PlantFlow_Support에서 다시 실행 필요"라고만 답한다. 규약 파일(`AGENTS.md`, `.plans/HANDOFF.md`)이 안 보이면 cwd 오배치를 의심한다.
 > Codex는 이 파일을 읽는다. 운영수칙은 `CLAUDE.md`와 동일하게 유지한다.
 > 둘 중 하나를 고치면 다른 하나도 함께 갱신한다.
 
