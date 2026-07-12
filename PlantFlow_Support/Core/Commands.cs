@@ -2534,6 +2534,7 @@ namespace PlantFlow_Support
         }
 
         Extents3d paperExt = source.GeometricExtents;
+        double dimSize = this.ComputeIsoDimensionSize();
         RotatedDimension dimH;
         RotatedDimension dimV;
         PSUtil.CreateHorizontalDimension(paperExt, Matrix3d.Identity, dimStyleId, paperExt.MaxPoint.Y, out dimH);
@@ -2541,26 +2542,78 @@ namespace PlantFlow_Support
         if (dimH != null)
         {
           dimH.DimensionStyle = dimStyleId;
+          this.ApplyIsoDimensionOverrides(dimH, dimSize, "dimH");
           dimH.DimensionText = this.FormatNumber(s_isoRealWidth);
           if (annotationLayerId != ObjectId.Null)
             dimH.LayerId = annotationLayerId;
           targetMs.AppendEntity(dimH);
           tr.AddNewlyCreatedDBObject(dimH, true);
+          this.LogIsoDimensionExtents(dimH, "dimH", dimSize);
         }
         if (dimV != null)
         {
           dimV.DimensionStyle = dimStyleId;
+          this.ApplyIsoDimensionOverrides(dimV, dimSize, "dimV");
           dimV.DimensionText = this.FormatNumber(s_isoRealHeight);
           if (annotationLayerId != ObjectId.Null)
             dimV.LayerId = annotationLayerId;
           targetMs.AppendEntity(dimV);
           tr.AddNewlyCreatedDBObject(dimV, true);
+          this.LogIsoDimensionExtents(dimV, "dimV", dimSize);
         }
         PlantOrthoView.FileDiag("PFSVBISOEXPORTED dim W=" + this.FormatNumber(s_isoRealWidth) + " V=" + this.FormatNumber(s_isoRealHeight) + " paperExt=" + paperExt.MinPoint + "~" + paperExt.MaxPoint + " blockRef=" + dimSourceId);
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSVBISOEXPORTED dim 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private double ComputeIsoDimensionSize()
+    {
+      double baseSize = System.Math.Max(System.Math.Abs(s_isoRealWidth), System.Math.Abs(s_isoRealHeight));
+      double h = baseSize > 1e-6 ? baseSize / 12.0 : 10.0;
+      if (h < 10.0)
+        h = 10.0;
+      if (h > 500.0)
+        h = 500.0;
+      return h;
+    }
+
+    private void ApplyIsoDimensionOverrides(RotatedDimension dim, double h, string label)
+    {
+      if (dim == null)
+        return;
+
+      try
+      {
+        dim.Dimtxt = h;
+        dim.Dimasz = h;
+        dim.Dimexe = h * 0.6;
+        dim.Dimexo = h * 0.3;
+        dim.Dimgap = h * 0.3;
+        dim.Dimtih = false;
+        dim.Dimtoh = false;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED " + label + " dim override 예외: " + ex.GetType().Name + ": " + ex.Message + " h=" + this.FormatNumber(h));
+      }
+    }
+
+    private void LogIsoDimensionExtents(RotatedDimension dim, string label, double h)
+    {
+      if (dim == null)
+        return;
+
+      try
+      {
+        Extents3d ext = dim.GeometricExtents;
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED " + label + " ext=" + ext.MinPoint + "~" + ext.MaxPoint + " h=" + this.FormatNumber(h));
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED " + label + " ext 예외: " + ex.GetType().Name + ": " + ex.Message + " h=" + this.FormatNumber(h));
       }
     }
 
