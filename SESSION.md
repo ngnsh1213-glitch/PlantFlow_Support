@@ -3,7 +3,11 @@
 _최종 갱신: 2026-07-12_
 
 ## 진행 중 트랙
-- **PFS 오쏘 격리(1서포트=1도면) VIEWBASE 커널 — ✅ B1g PASS (2026-07-12)**.
+- **PFS 오쏘 격리(1서포트=1도면) — ✅ B2b PASS = 전 파이프라인 완성 (2026-07-12)**.
+  - 선택셋 → 1st temp(Plant clone) → explode Solid3d → 2nd temp(순수 solid) → SendStringToExecute VIEWBASE → EXPORTLAYOUT 평면화 → 원본 clone-back(PFS_ISO_DETAIL 레이어). "1서포트 → 격리 2D 디테일 → 원본 도면" 결정적 동작.
+  - 커밋: e7ffa14(B1g), 7a7653d(B2a), cc6602e(B2b).
+  - 후속(별도 트랙): 스케일 보정(viewport 1:100→실크기), 배치 오프셋/멀티서포트, EXPORTLAYOUT open-prompt 억제(세션당 1회, 낮음), 방향제어(-VPOINT, Main=파이프축), 치수(평면화 2D 후처리 Main만).
+- (이전) **격리 VIEWBASE 커널 — ✅ B1g PASS (2026-07-12)**.
   - 목표 출력: 4뷰(DOWN/WEST=Main/SOUTH/ISO) + 치수는 Main에만 + BOM표 + 밸룬 + 위치콜아웃 + 타이틀블록 (caetech.vn 사양).
   - 설계철학: 뷰 = Pipe Axis 기준. Main = 서포트 길이방향(탑 제외), viewDir∥파이프 → 서포트 직사각형 + 파이프 원. 치수는 Main에만.
 
