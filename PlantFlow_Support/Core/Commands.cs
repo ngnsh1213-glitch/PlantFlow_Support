@@ -15,6 +15,15 @@ namespace PlantFlow_Support
     private static CustomPaletteSet palette;
     private static System.Collections.Generic.HashSet<ObjectId> s_viewbaseBaseline;
     private const string ExportLayoutPath = @"C:\TEMP\pfs_vb_export.dwg";
+    private static string LastIsoTempPath;
+    private static Document s_isoOpenPendingTempDoc;
+    private static Document s_isoOpenPendingOriginalDoc;
+    private static int s_isoOpenSecondIdleAttempts;
+    private static Document s_isoDoneSolidDoc;
+    private static Document s_isoDoneOriginalDoc;
+    private static int s_isoDoneBaseline;
+    private static Document s_isoClosePendingDoc;
+    private static Document s_isoClosePendingOriginalDoc;
     public static ObjectId ViewportId;
     public static string LayerName;
     public static int ItemNo;
@@ -645,6 +654,803 @@ namespace PlantFlow_Support
       doc.SendStringToExecute(cmd, true, false, false);
       PlantOrthoView.FileDiag("PFSVBSUPPORT s1=" + vp + " cmd=" + cmd.Replace("\n", "|"));
       ed.WriteMessage("\nPFSVBSUPPORT s1=" + vp);
+    }
+
+    // ---- Stage A 게이트 공용 헬퍼 ----
+    // 선택 획득 + Layout1 baseline 스냅샷. 실패 시 false.
+    private bool VbIsoPrepare(Document doc, Editor ed, string tag, out ObjectId[] ids)
+    {
+      ids = null;
+      PromptSelectionResult psr = ed.GetSelection();
+      if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
+      {
+        PlantOrthoView.FileDiag(tag + ": 선택 취소/빈 선택");
+        return false;
+      }
+      ids = psr.Value.GetObjectIds();
+      // 공간 상태 로그: TILEMODE 1=Model 탭, 0=Paper/Layout. 판정 오염 감지용.
+      short tileMode = (short)Application.GetSystemVariable("TILEMODE");
+      PlantOrthoView.FileDiag(tag + " space TILEMODE=" + tileMode + (tileMode == 1 ? " (Model)" : " (Paper/Layout)"));
+      s_viewbaseBaseline = new System.Collections.Generic.HashSet<ObjectId>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (!layoutBtrId.IsNull)
+          this.SnapshotBlockTableRecordIds(tr, layoutBtrId, s_viewbaseBaseline);
+        tr.Commit();
+      }
+      return true;
+    }
+
+    // Stage A-1: _.MODEL 없음 = 순수 pickfirst 소비 판정(사용자가 Model 탭 상태여야 함).
+    [CommandMethod("PFSVBISO")]
+    public void VbIsoCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+      Editor ed = doc.Editor;
+      ObjectId[] ids;
+      if (!this.VbIsoPrepare(doc, ed, "PFSVBISO", out ids))
+        return;
+      // PFSVBISO는 _.MODEL 미포함 → Model 탭 전제. Paper/Layout이면 판정 오염 경고(중단은 안 함, 판정 로그로 분리).
+      if ((short)Application.GetSystemVariable("TILEMODE") != 1)
+      {
+        PlantOrthoView.FileDiag("PFSVBISO 경고: Model 탭 아님(TILEMODE!=1) → pickfirst 판정 오염 가능. PFSVBISOM 사용 권장.");
+        ed.WriteMessage("\n[경고] Model 탭이 아님 → PFSVBISO 판정 오염 가능. Model 탭에서 재실행하거나 PFSVBISOM 사용.");
+      }
+
+      ed.SetImpliedSelection(ids);
+      // _.MODEL·_E 모두 제거: MODEL 전환 confound 없이 pickfirst 소비만 판정.
+      string cmd = "._VIEWBASE\n_M\nLayout1\n_O\n_Current\n100,100\n\n\n";
+      doc.SendStringToExecute(cmd, true, false, false);
+      PlantOrthoView.FileDiag("PFSVBISO ids=" + ids.Length + " modelSwitch=NO cmd=" + cmd.Replace("\n", "|"));
+      ed.WriteMessage("\nPFSVBISO posted (no _.MODEL, no _E) ids=" + ids.Length);
+    }
+
+    // Stage A-1M: _.MODEL 포함 = 모델 복귀 후 pickfirst 소비 판정. A-1과 대조해 confound 격리.
+    [CommandMethod("PFSVBISOM")]
+    public void VbIsoModelCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+      Editor ed = doc.Editor;
+      ObjectId[] ids;
+      if (!this.VbIsoPrepare(doc, ed, "PFSVBISOM", out ids))
+        return;
+
+      ed.SetImpliedSelection(ids);
+      string cmd = "_.MODEL\n._VIEWBASE\n_M\nLayout1\n_O\n_Current\n100,100\n\n\n";
+      doc.SendStringToExecute(cmd, true, false, false);
+      PlantOrthoView.FileDiag("PFSVBISOM ids=" + ids.Length + " modelSwitch=YES cmd=" + cmd.Replace("\n", "|"));
+      ed.WriteMessage("\nPFSVBISOM posted (_.MODEL, no _E) ids=" + ids.Length);
+    }
+
+    // Stage A-2: 명시 선택 경로. _S(Select objects) → _P(Previous). 런타임 의존(비확정).
+    [CommandMethod("PFSVBISOS")]
+    public void VbIsoSelectCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+      Editor ed = doc.Editor;
+      ObjectId[] ids;
+      if (!this.VbIsoPrepare(doc, ed, "PFSVBISOS", out ids))
+        return;
+
+      ed.SetImpliedSelection(ids);
+      string cmd = "_.MODEL\n._VIEWBASE\n_M\n_S\n_P\n\nLayout1\n_O\n_Current\n100,100\n\n\n";
+      doc.SendStringToExecute(cmd, true, false, false);
+      PlantOrthoView.FileDiag("PFSVBISOS ids=" + ids.Length + " modelSwitch=YES cmd=" + cmd.Replace("\n", "|"));
+      ed.WriteMessage("\nPFSVBISOS posted (_M _S _P) ids=" + ids.Length);
+    }
+
+    // Stage A-fix: 견고화 probe. §9(Gemini+Codex) 수렴 반영.
+    // Session+Idle 클린 컨텍스트 / _M 제거(model source 기본 Enter 수락, MOVE 붕괴 차단) /
+    // 트레일링 Enter 정리 / CMDNAMES 가드 / Idle서 SetImpliedSelection 재확정.
+    private static ObjectId[] s_vbIso2Ids;
+
+    [CommandMethod("PFSVBISO2", CommandFlags.Session)]
+    public void VbIso2Command()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+      Editor ed = doc.Editor;
+      ObjectId[] ids;
+      if (!this.VbIsoPrepare(doc, ed, "PFSVBISO2", out ids))
+        return;
+      ed.SetImpliedSelection(ids);
+      s_vbIso2Ids = ids;
+      Application.Idle += this.VbIso2OnIdle;
+      PlantOrthoView.FileDiag("PFSVBISO2 armed(Idle 대기) ids=" + ids.Length);
+      ed.WriteMessage("\nPFSVBISO2 armed(Idle) ids=" + ids.Length);
+    }
+
+    private void VbIso2OnIdle(object sender, System.EventArgs e)
+    {
+      Application.Idle -= this.VbIso2OnIdle; // 일회성 보장
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+      // 클린 컨텍스트 확인: 진행 중 명령 없어야 함.
+      object cmdNames = Application.GetSystemVariable("CMDNAMES");
+      string cmdStr = cmdNames == null ? "" : cmdNames.ToString();
+      short grips = (short)Application.GetSystemVariable("GRIPS");
+      short pickfirst = (short)Application.GetSystemVariable("PICKFIRST");
+      short tileMode = (short)Application.GetSystemVariable("TILEMODE");
+      PlantOrthoView.FileDiag("PFSVBISO2 Idle 발화 CMDNAMES='" + cmdStr + "' GRIPS=" + grips + " PICKFIRST=" + pickfirst + " TILEMODE=" + tileMode);
+      // CMDNAMES는 Idle 발화 시점에 자기 자신(PFSVBISO2, Session 명령)을 포함할 수 있음(정상).
+      // SendStringToExecute는 큐잉되어 PFSVBISO2 종료 후 실행되므로 자기 이름은 클린으로 간주.
+      // 외부 명령(MOVE 등)이 진행 중일 때만 desync 방지 차단.
+      if (!string.IsNullOrEmpty(cmdStr) && cmdStr.IndexOf("PFSVBISO2", System.StringComparison.OrdinalIgnoreCase) < 0)
+      {
+        PlantOrthoView.FileDiag("PFSVBISO2 중단: 외부 명령 진행 중(CMDNAMES='" + cmdStr + "') - desync 방지, 미실행");
+        return;
+      }
+      // Idle 사이 pickfirst 유실 대비 재확정(+Previous 등록).
+      if (s_vbIso2Ids != null && s_vbIso2Ids.Length > 0)
+        doc.Editor.SetImpliedSelection(s_vbIso2Ids);
+      // 스트림 = run1 검증형 복원. VIEWBASE가 Session+Idle로 안정 기동하므로 _M은 안전하게
+      // model-source 옵션으로 소비(MOVE 붕괴는 미기동 시에만 발생, 이제 해소). pickfirst 자동소비
+      // ("N found") → 선택셋만 투영. 트레일링 Enter는 run1 통과형 유지.
+      string cmd = "._VIEWBASE\n_M\nLayout1\n_O\n_Current\n100,100\n\n\n";
+      doc.SendStringToExecute(cmd, true, false, false);
+      PlantOrthoView.FileDiag("PFSVBISO2 posted(Idle) cmd=" + cmd.Replace("\n", "|"));
+    }
+
+    // Stage B1: ed.Command(동기)로 VIEWBASE _E 반복 결정성 프로브. SendStringToExecute 미사용.
+    // 현재 문서·전체모델 대상(격리 아직 아님). FILEDIA/CMDDIA=0 복구, viewrep 생성 카운트.
+    [CommandMethod("PFSVBCMD")]
+    public void VbCmdCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+      Editor ed = doc.Editor;
+
+      // baseline(Layout1) 스냅샷
+      var baseline = new System.Collections.Generic.HashSet<ObjectId>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (!layoutBtrId.IsNull)
+          this.SnapshotBlockTableRecordIds(tr, layoutBtrId, baseline);
+        tr.Commit();
+      }
+
+      object oldFiledia = Application.GetSystemVariable("FILEDIA");
+      object oldCmddia = Application.GetSystemVariable("CMDDIA");
+      short tileMode = (short)Application.GetSystemVariable("TILEMODE");
+      PlantOrthoView.FileDiag("PFSVBCMD enter TILEMODE=" + tileMode + " baseline=" + baseline.Count);
+      try
+      {
+        Application.SetSystemVariable("FILEDIA", 0);
+        Application.SetSystemVariable("CMDDIA", 0);
+        using (doc.LockDocument())
+        {
+          // ed.Command 동기: VIEWBASE _M(Model space) _E(Entire model) Layout1 _O(Orientation) _Current, 위치, 종료.
+          // 주의: VIEWBASE 프롬프트 시퀀스에 맞춰 인자 수 정확히. base view 배치 후 projected view는 빈 Enter로 eXit.
+          ed.Command("_.VIEWBASE", "_M", "_E", "Layout1", "_O", "_Current", new Point3d(100.0, 100.0, 0.0), "", "");
+        }
+        PlantOrthoView.FileDiag("PFSVBCMD ed.Command VIEWBASE 반환(동기 완주)");
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBCMD ed.Command 예외: " + ex.GetType().Name + ": " + ex.Message);
+        ed.WriteMessage("\nPFSVBCMD error: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        Application.SetSystemVariable("FILEDIA", oldFiledia);
+        Application.SetSystemVariable("CMDDIA", oldCmddia);
+      }
+
+      // 신규 엔티티 카운트(생성 확인)
+      int added = 0;
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (!layoutBtrId.IsNull)
+        {
+          BlockTableRecord btr = tr.GetObject(layoutBtrId, OpenMode.ForRead) as BlockTableRecord;
+          if (btr != null)
+            foreach (ObjectId id in btr)
+              if (!baseline.Contains(id))
+                added++;
+        }
+        tr.Commit();
+      }
+      PlantOrthoView.FileDiag("PFSVBCMD 신규 Layout1 엔티티=" + added);
+      ed.WriteMessage("\nPFSVBCMD done, new Layout1 entities=" + added);
+    }
+
+    [CommandMethod("PFSVBISOCLONE")]
+    public void VbIsoCloneCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+      Editor ed = doc.Editor;
+      PromptSelectionResult psr = ed.GetSelection();
+      if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE 선택 취소/빈 선택");
+        ed.WriteMessage("\nPFSVBISOCLONE: 선택 없음");
+        return;
+      }
+
+      ObjectId[] selectedIds = psr.Value.GetObjectIds();
+      ObjectIdCollection ids = new ObjectIdCollection();
+      foreach (ObjectId id in selectedIds)
+        ids.Add(id);
+      string tempDir = @"C:\Temp";
+      string tempPath = System.IO.Path.Combine(tempDir, "pfs_iso_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".dwg");
+      int cloned = 0;
+      int proxy = 0;
+      int noBounds = 0;
+
+      Database tempDb = null;
+      try
+      {
+        System.IO.Directory.CreateDirectory(tempDir);
+        tempDb = new Database(true, true);
+        ObjectId tempMsId;
+        using (Transaction tr = tempDb.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = tr.GetObject(tempDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          tempMsId = bt[BlockTableRecord.ModelSpace];
+          tr.Commit();
+        }
+
+        Database oldWorking = HostApplicationServices.WorkingDatabase;
+        try
+        {
+          HostApplicationServices.WorkingDatabase = tempDb;
+          IdMapping idMap = new IdMapping();
+          doc.Database.WblockCloneObjects(ids, tempMsId, idMap, DuplicateRecordCloning.Replace, false);
+        }
+        finally
+        {
+          HostApplicationServices.WorkingDatabase = oldWorking;
+        }
+
+        using (Transaction tr = tempDb.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = tr.GetObject(tempDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+          foreach (ObjectId id in ms)
+          {
+            cloned++;
+            DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
+            Entity ent = obj as Entity;
+            string className = id.ObjectClass == null ? "null" : id.ObjectClass.Name;
+            string typeName = obj == null ? "null" : obj.GetType().Name;
+            bool isProxy = className.IndexOf("Proxy", System.StringComparison.OrdinalIgnoreCase) >= 0 || typeName.IndexOf("Proxy", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            if (isProxy)
+              proxy++;
+            string bounds = "n/a";
+            if (ent != null)
+            {
+              try
+              {
+                Extents3d ext = ent.GeometricExtents;
+                bounds = ext.MinPoint + "~" + ext.MaxPoint;
+              }
+              catch (System.Exception ex)
+              {
+                noBounds++;
+                bounds = "ERR " + ex.GetType().Name + ": " + ex.Message;
+              }
+            }
+            else
+            {
+              noBounds++;
+            }
+            PlantOrthoView.FileDiag("PFSVBISOCLONE ent class=" + className + " type=" + typeName + " proxy=" + isProxy + " bounds=" + bounds);
+          }
+          tr.Commit();
+        }
+
+        tempDb.SaveAs(tempPath, DwgVersion.Current);
+        LastIsoTempPath = tempPath;
+        PlantOrthoView.FileDiag("PFSVBISOCLONE cloned=" + cloned + " proxy=" + proxy + " noBounds=" + noBounds + " saved=" + tempPath);
+        ed.WriteMessage("\nPFSVBISOCLONE cloned=" + cloned + " proxy=" + proxy + " noBounds=" + noBounds + " saved=" + tempPath);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE 예외: " + ex.GetType().Name + ": " + ex.Message);
+        ed.WriteMessage("\nPFSVBISOCLONE error: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        if (tempDb != null)
+          tempDb.Dispose();
+      }
+    }
+
+    [CommandMethod("PFSVBISOOPEN", CommandFlags.Session)]
+    public void VbIsoOpenCommand()
+    {
+      Document originalDoc = Application.DocumentManager.MdiActiveDocument;
+      Editor originalEditor = originalDoc == null ? null : originalDoc.Editor;
+      string path = LastIsoTempPath;
+      if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN temp path 없음 path=" + (path ?? "null"));
+        if (originalEditor != null)
+          originalEditor.WriteMessage("\nPFSVBISOOPEN: temp dwg 없음");
+        return;
+      }
+
+      Document tempDoc = null;
+      try
+      {
+        tempDoc = Application.DocumentManager.Open(path, false);
+        Application.DocumentManager.MdiActiveDocument = tempDoc;
+        bool active = object.ReferenceEquals(Application.DocumentManager.MdiActiveDocument, tempDoc);
+        PlantOrthoView.FileDiag("PFSVBISOOPEN opened path=" + path + " active=" + active);
+        if (!active)
+        {
+          s_isoOpenPendingTempDoc = tempDoc;
+          s_isoOpenPendingOriginalDoc = originalDoc;
+          Application.Idle -= this.VbIsoOpenOnIdle;
+          Application.Idle += this.VbIsoOpenOnIdle;
+          PlantOrthoView.FileDiag("PFSVBISOOPEN active=false, Idle 위임");
+          return;
+        }
+
+        this.RunIsoOpenViewbase(tempDoc, originalDoc, false);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN 예외: " + ex.GetType().Name + ": " + ex.Message);
+        if (originalEditor != null)
+          originalEditor.WriteMessage("\nPFSVBISOOPEN error: " + ex.GetType().Name + ": " + ex.Message);
+        if (tempDoc != null)
+          this.CloseIsoTempDocument(tempDoc, originalDoc);
+      }
+    }
+
+    private void VbIsoOpenOnIdle(object sender, System.EventArgs e)
+    {
+      Application.Idle -= this.VbIsoOpenOnIdle;
+      Document tempDoc = s_isoOpenPendingTempDoc;
+      Document originalDoc = s_isoOpenPendingOriginalDoc;
+      s_isoOpenPendingTempDoc = null;
+      s_isoOpenPendingOriginalDoc = null;
+      if (tempDoc == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN Idle 중단: tempDoc null");
+        return;
+      }
+
+      try
+      {
+        Application.DocumentManager.MdiActiveDocument = tempDoc;
+        bool active = object.ReferenceEquals(Application.DocumentManager.MdiActiveDocument, tempDoc);
+        PlantOrthoView.FileDiag("PFSVBISOOPEN Idle active=" + active);
+        if (!active)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOOPEN Idle 중단: tempDoc 활성화 실패");
+          this.CloseIsoTempDocument(tempDoc, originalDoc);
+          return;
+        }
+        this.RunIsoOpenViewbase(tempDoc, originalDoc, true);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN Idle 예외: " + ex.GetType().Name + ": " + ex.Message);
+        this.CloseIsoTempDocument(tempDoc, originalDoc);
+      }
+    }
+
+    private System.Collections.Generic.List<ObjectId> ExplodeModelSpaceToSolidIds(Document tempDoc)
+    {
+      var solidIds = new System.Collections.Generic.List<ObjectId>();
+      if (tempDoc == null)
+        return solidIds;
+
+      using (tempDoc.LockDocument())
+      using (Transaction tr = tempDoc.Database.TransactionManager.StartTransaction())
+      {
+        BlockTable bt = tr.GetObject(tempDoc.Database.BlockTableId, OpenMode.ForRead) as BlockTable;
+        if (bt == null || !bt.Has(BlockTableRecord.ModelSpace))
+        {
+          PlantOrthoView.FileDiag("PFSVBISOOPEN explode ModelSpace 없음");
+          tr.Commit();
+          return solidIds;
+        }
+
+        BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
+        if (ms == null)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOOPEN explode ModelSpace BTR null");
+          tr.Commit();
+          return solidIds;
+        }
+
+        var ids = new System.Collections.Generic.List<ObjectId>();
+        foreach (ObjectId id in ms)
+          ids.Add(id);
+
+        foreach (ObjectId id in ids)
+        {
+          Entity entity = null;
+          try
+          {
+            entity = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSVBISOOPEN explode open 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+            continue;
+          }
+
+          if (entity == null || entity.IsErased)
+            continue;
+
+          if (entity is Solid3d)
+          {
+            solidIds.Add(id);
+            continue;
+          }
+
+          this.AppendExplodedSolidIds(tr, ms, entity, solidIds);
+        }
+
+        tr.Commit();
+      }
+
+      PlantOrthoView.FileDiag("PFSVBISOOPEN explode solids=" + solidIds.Count);
+      return solidIds;
+    }
+
+    private void AppendExplodedSolidIds(Transaction tr, BlockTableRecord modelSpace, Entity source, System.Collections.Generic.List<ObjectId> solidIds)
+    {
+      if (tr == null || modelSpace == null || source == null || solidIds == null)
+        return;
+
+      DBObjectCollection exploded = new DBObjectCollection();
+      try
+      {
+        source.Explode(exploded);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN explode 예외 type=" + source.GetType().Name + ": " + ex.GetType().Name + ": " + ex.Message);
+        return;
+      }
+
+      if (exploded.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN explode skip type=" + source.GetType().Name + " produced=0");
+        return;
+      }
+
+      foreach (DBObject child in exploded)
+      {
+        Entity childEntity = child as Entity;
+        if (childEntity == null)
+        {
+          child.Dispose();
+          continue;
+        }
+
+        Solid3d solid = childEntity as Solid3d;
+        if (solid != null)
+        {
+          modelSpace.AppendEntity(solid);
+          tr.AddNewlyCreatedDBObject(solid, true);
+          solidIds.Add(solid.ObjectId);
+          continue;
+        }
+
+        this.AppendExplodedSolidIds(tr, modelSpace, childEntity, solidIds);
+        childEntity.Dispose();
+      }
+    }
+
+    private string CloneSolidsToSecondTemp(Database sourceDb, System.Collections.Generic.List<ObjectId> solidIds)
+    {
+      if (sourceDb == null || solidIds == null || solidIds.Count == 0)
+        throw new System.InvalidOperationException("solidIds 없음");
+
+      string tempDir = @"C:\Temp";
+      System.IO.Directory.CreateDirectory(tempDir);
+      string path2 = System.IO.Path.Combine(tempDir, "pfs_iso_solids_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".dwg");
+      Database tempDb2 = null;
+      try
+      {
+        tempDb2 = new Database(true, true);
+        ObjectId ms2Id;
+        using (Transaction tr = tempDb2.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = tr.GetObject(tempDb2.BlockTableId, OpenMode.ForRead) as BlockTable;
+          ms2Id = bt[BlockTableRecord.ModelSpace];
+          tr.Commit();
+        }
+
+        ObjectIdCollection ids = new ObjectIdCollection();
+        foreach (ObjectId id in solidIds)
+          ids.Add(id);
+
+        Database oldWorking = HostApplicationServices.WorkingDatabase;
+        try
+        {
+          HostApplicationServices.WorkingDatabase = tempDb2;
+          IdMapping idMap = new IdMapping();
+          sourceDb.WblockCloneObjects(ids, ms2Id, idMap, DuplicateRecordCloning.Replace, false);
+        }
+        finally
+        {
+          HostApplicationServices.WorkingDatabase = oldWorking;
+        }
+
+        tempDb2.SaveAs(path2, DwgVersion.Current);
+        PlantOrthoView.FileDiag("PFSVBISOOPEN clone solids=" + solidIds.Count + " saved=" + path2);
+        return path2;
+      }
+      finally
+      {
+        if (tempDb2 != null)
+          tempDb2.Dispose();
+      }
+    }
+
+    private void RunIsoOpenViewbase(Document tempDoc, Document originalDoc, bool fromIdle)
+    {
+      Editor ted = tempDoc.Editor;
+      bool active = object.ReferenceEquals(Application.DocumentManager.MdiActiveDocument, tempDoc);
+      string path2 = null;
+
+      try
+      {
+        System.Collections.Generic.List<ObjectId> solidIds = this.ExplodeModelSpaceToSolidIds(tempDoc);
+        if (solidIds.Count == 0)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOOPEN VIEWBASE 중단: explode solids=0 active=" + active + " fromIdle=" + fromIdle);
+          ted.WriteMessage("\nPFSVBISOOPEN stopped: explode solids=0");
+          throw new System.InvalidOperationException("explode solids=0");
+        }
+
+        path2 = this.CloneSolidsToSecondTemp(tempDoc.Database, solidIds);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN M3 준비 예외: " + ex.GetType().Name + ": " + ex.Message + " fromIdle=" + fromIdle);
+        ted.WriteMessage("\nPFSVBISOOPEN prepare error: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        this.CloseIsoTempDocument(tempDoc, originalDoc);
+      }
+
+      if (string.IsNullOrEmpty(path2) || !System.IO.File.Exists(path2))
+        return;
+
+      this.OpenSecondTempAndRunViewbase(path2, originalDoc, fromIdle);
+    }
+
+    private void OpenSecondTempAndRunViewbase(string path2, Document originalDoc, bool fromIdle)
+    {
+      Document solidDoc = null;
+      try
+      {
+        solidDoc = Application.DocumentManager.Open(path2, false);
+        Application.DocumentManager.MdiActiveDocument = solidDoc;
+        bool active = object.ReferenceEquals(Application.DocumentManager.MdiActiveDocument, solidDoc);
+        PlantOrthoView.FileDiag("PFSVBISOOPEN2 opened path=" + path2 + " active=" + active + " fromIdle=" + fromIdle + " -> Idle 위임");
+        s_isoOpenPendingTempDoc = solidDoc;
+        s_isoOpenPendingOriginalDoc = originalDoc;
+        s_isoOpenSecondIdleAttempts = 0;
+        Application.Idle -= this.VbIsoOpenSecondOnIdle;
+        Application.Idle += this.VbIsoOpenSecondOnIdle;
+        return;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN2 예외: " + ex.GetType().Name + ": " + ex.Message);
+        if (solidDoc != null)
+          this.CloseIsoTempDocument(solidDoc, originalDoc);
+      }
+    }
+    private void VbIsoOpenSecondOnIdle(object sender, System.EventArgs e)
+    {
+      Application.Idle -= this.VbIsoOpenSecondOnIdle;
+      Document solidDoc = s_isoOpenPendingTempDoc;
+      Document originalDoc = s_isoOpenPendingOriginalDoc;
+      s_isoOpenPendingTempDoc = null;
+      s_isoOpenPendingOriginalDoc = null;
+      if (solidDoc == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN2 Idle 중단: solidDoc null");
+        return;
+      }
+
+      try
+      {
+        Application.DocumentManager.MdiActiveDocument = solidDoc;
+        bool active = object.ReferenceEquals(Application.DocumentManager.MdiActiveDocument, solidDoc);
+        string cmdNames = (Application.GetSystemVariable("CMDNAMES") ?? "").ToString();
+        string ctab = (Application.GetSystemVariable("CTAB") ?? "").ToString();
+        short tileMode = (short)Application.GetSystemVariable("TILEMODE");
+        PlantOrthoView.FileDiag("PFSVBISOOPEN2 state CTAB=" + ctab + " TILEMODE=" + tileMode + " CMDNAMES='" + cmdNames + "' active=" + active + " attempt=" + s_isoOpenSecondIdleAttempts);
+        if (!active)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOOPEN2 Idle 중단: solidDoc 활성화 실패");
+          this.CloseIsoTempDocument(solidDoc, originalDoc);
+          return;
+        }
+        if (!string.IsNullOrEmpty(cmdNames))
+        {
+          s_isoOpenSecondIdleAttempts++;
+          if (s_isoOpenSecondIdleAttempts <= 5)
+          {
+            s_isoOpenPendingTempDoc = solidDoc;
+            s_isoOpenPendingOriginalDoc = originalDoc;
+            Application.Idle -= this.VbIsoOpenSecondOnIdle;
+            Application.Idle += this.VbIsoOpenSecondOnIdle;
+            PlantOrthoView.FileDiag("PFSVBISOOPEN2 Idle 재무장 CMDNAMES='" + cmdNames + "' attempt=" + s_isoOpenSecondIdleAttempts);
+            return;
+          }
+
+          PlantOrthoView.FileDiag("PFSVBISOOPEN2 Idle 중단: CMDNAMES 미해소 limit=5 last='" + cmdNames + "'");
+          this.CloseIsoTempDocument(solidDoc, originalDoc);
+          return;
+        }
+        s_isoOpenSecondIdleAttempts = 0;
+        this.RunViewbaseOnSolidTemp(solidDoc, originalDoc, true);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN2 Idle 예외: " + ex.GetType().Name + ": " + ex.Message);
+        this.CloseIsoTempDocument(solidDoc, originalDoc);
+      }
+    }
+
+    private void RunViewbaseOnSolidTemp(Document solidDoc, Document originalDoc, bool fromIdle)
+    {
+      Editor ted = solidDoc.Editor;
+      int baseline = 0;
+      bool active = object.ReferenceEquals(Application.DocumentManager.MdiActiveDocument, solidDoc);
+
+      try
+      {
+        ObjectId layoutBtrId;
+        using (Transaction tr = solidDoc.Database.TransactionManager.StartTransaction())
+        {
+          layoutBtrId = this.GetLayoutBlockTableRecordId(solidDoc.Database, tr, "Layout1");
+          if (layoutBtrId.IsNull)
+          {
+            PlantOrthoView.FileDiag("PFSVBISOOPEN2 Layout1 없음 active=" + active + " fromIdle=" + fromIdle);
+            tr.Commit();
+            throw new System.InvalidOperationException("Layout1 없음");
+          }
+          BlockTableRecord btr = tr.GetObject(layoutBtrId, OpenMode.ForRead) as BlockTableRecord;
+          if (btr != null)
+            foreach (ObjectId id in btr)
+              baseline++;
+          tr.Commit();
+        }
+
+        s_isoDoneSolidDoc = solidDoc;
+        s_isoDoneOriginalDoc = originalDoc;
+        s_isoDoneBaseline = baseline;
+        using (solidDoc.LockDocument())
+        {
+          ted.Regen();
+          PlantOrthoView.FileDiag("PFSVBISOOPEN2 Regen 완료 fromIdle=" + fromIdle);
+        }
+
+        string vb = "_.FILEDIA\n0\n_.CMDDIA\n0\n"
+          + "_.VIEWBASE\n_M\n_E\n\n100,100\n\n\n"
+          + "_.FILEDIA\n1\n_.CMDDIA\n1\n"
+          + "PFSVBISODONE\n";
+        solidDoc.SendStringToExecute(vb, true, false, false);
+        PlantOrthoView.FileDiag("PFSVBISOOPEN2 SendStringToExecute VIEWBASE queued baseline=" + baseline + " fromIdle=" + fromIdle + " cmd=" + vb.Replace("\n", "|"));
+        ted.WriteMessage("\nPFSVBISOOPEN2 VIEWBASE queued");
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN2 queue 예외: " + ex.GetType().Name + ": " + ex.Message + " fromIdle=" + fromIdle);
+        ted.WriteMessage("\nPFSVBISOOPEN2 queue error: " + ex.GetType().Name + ": " + ex.Message);
+        this.CloseIsoTempDocument(solidDoc, originalDoc);
+      }
+    }
+
+    [CommandMethod("PFSVBISODONE", CommandFlags.Session)]
+    public void VbIsoDoneCommand()
+    {
+      Document solidDoc = s_isoDoneSolidDoc;
+      Document originalDoc = s_isoDoneOriginalDoc;
+      int baseline = s_isoDoneBaseline;
+      s_isoDoneSolidDoc = null;
+      s_isoDoneOriginalDoc = null;
+      s_isoDoneBaseline = 0;
+
+      if (solidDoc == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISODONE 중단: solidDoc null");
+        return;
+      }
+
+      Editor ed = solidDoc.Editor;
+      try
+      {
+        Application.DocumentManager.MdiActiveDocument = solidDoc;
+        int added = 0;
+        using (Transaction tr = solidDoc.Database.TransactionManager.StartTransaction())
+        {
+          ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(solidDoc.Database, tr, "Layout1");
+          if (!layoutBtrId.IsNull)
+          {
+            BlockTableRecord btr = tr.GetObject(layoutBtrId, OpenMode.ForRead) as BlockTableRecord;
+            if (btr != null)
+              foreach (ObjectId id in btr)
+                added++;
+          }
+          tr.Commit();
+        }
+
+        int newEntities = added - baseline;
+        PlantOrthoView.FileDiag("PFSVBISODONE newEntities=" + newEntities + " baseline=" + baseline + " added=" + added + " (VIEWBASE 완료판정)");
+        ed.WriteMessage("\nPFSVBISODONE newEntities=" + newEntities);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISODONE count 예외: " + ex.GetType().Name + ": " + ex.Message);
+        ed.WriteMessage("\nPFSVBISODONE error: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        s_isoClosePendingDoc = solidDoc;
+        s_isoClosePendingOriginalDoc = originalDoc;
+        Application.Idle -= this.VbIsoDoneCloseOnIdle;
+        Application.Idle += this.VbIsoDoneCloseOnIdle;
+        PlantOrthoView.FileDiag("PFSVBISODONE close Idle 위임");
+      }
+    }
+
+    private void VbIsoDoneCloseOnIdle(object sender, System.EventArgs e)
+    {
+      Application.Idle -= this.VbIsoDoneCloseOnIdle;
+      Document solidDoc = s_isoClosePendingDoc;
+      Document originalDoc = s_isoClosePendingOriginalDoc;
+      s_isoClosePendingDoc = null;
+      s_isoClosePendingOriginalDoc = null;
+      if (solidDoc == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISODONE close 중단: solidDoc null");
+        return;
+      }
+
+      try
+      {
+        this.CloseIsoTempDocument(solidDoc, originalDoc);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISODONE close Idle 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void CloseIsoTempDocument(Document tempDoc, Document originalDoc)
+    {
+      bool discarded = false;
+      try
+      {
+        if (originalDoc != null && !object.ReferenceEquals(originalDoc, tempDoc))
+          Application.DocumentManager.MdiActiveDocument = originalDoc;
+        tempDoc.CloseAndDiscard();
+        discarded = true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOOPEN CloseAndDiscard 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      PlantOrthoView.FileDiag("PFSVBISOOPEN closed tempDoc discard=" + discarded);
     }
 
     [CommandMethod("PFSCOUNTVIEW")]
