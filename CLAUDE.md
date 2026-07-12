@@ -23,6 +23,18 @@
 3. 수정 직후 변경 전후를 다시 읽어 검증한다.
 4. **계측 우선**: 맹목 apply 금지. 로그·실측으로 확인 후 수정. 방어적 프로그래밍, 빈 catch 금지.
 
+## 3-A. 핸드오프 왕복 규약 (Claude ↔ Codex, 복사 왕복 제거)
+복사-붙여넣기 왕복을 없애기 위해 `.plans/` 두 파일로 주고받는다. **대화창에 지시/결과 전문을 붙여넣지 않는다.**
+
+| 파일 | 방향 | 규칙 |
+|---|---|---|
+| `.plans/HANDOFF.md` | Claude → Codex | Claude가 지시를 여기에 **덮어쓴다**. `status: ready`, `cycle` +1. 대화창엔 "HANDOFF cycle N 발행" 한 줄만. |
+| `.plans/REPORT.md` | Codex → Claude | Codex가 완료 후 결과를 여기에 **덮어쓰고** 코드를 커밋. 대화창엔 "REPORT cycle N 갱신" 한 줄만. |
+
+- 흐름: ①Claude가 `HANDOFF.md` 발행 → ②사용자가 Codex에 "`.plans/HANDOFF.md` 읽고 집도" 지시(§5 수동 위임 준수) → ③Codex가 집도·커밋 후 `REPORT.md` 기록 → ④사용자가 "REPORT 갱신됨" 통보 → ⑤Claude가 `REPORT.md` + `git log/diff`만 Read.
+- Claude·Codex 모두 결과 diff 전문을 본문에 싣지 않는다(커밋으로 대체) → 토큰 절약.
+- `HANDOFF.md`/`REPORT.md`는 git 추적(왕복 이력 보존). 계획서 상세는 `.plans/plan_*.md`.
+
 ## 4. 커밋·동기화 규칙
 - 파일 수정 후 커밋한다(attribution 금지, push는 요청 시 또는 세션 종료 시).
 - 커밋 전 `git status`로 민감 파일(비밀키·백업·대용량 DLL) 제외 확인.
