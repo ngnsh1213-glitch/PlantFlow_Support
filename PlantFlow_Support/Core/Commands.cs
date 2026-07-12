@@ -18,6 +18,12 @@ namespace PlantFlow_Support
     private static string LastIsoTempPath;
     private static Vector3d s_isoPipeAxis;
     private static bool s_isoPipeAxisValid;
+    private static double s_isoRealWidth;
+    private static double s_isoRealHeight;
+    private static bool s_isoRealSizeValid;
+    private static string s_isoPipeLineNo;
+    private static string s_isoBOP;
+    private static string s_isoSize;
     private static Document s_isoOpenPendingTempDoc;
     private static Document s_isoOpenPendingOriginalDoc;
     private static int s_isoOpenSecondIdleAttempts;
@@ -879,6 +885,12 @@ namespace PlantFlow_Support
         return;
       s_isoPipeAxisValid = false;
       s_isoPipeAxis = Vector3d.XAxis;
+      s_isoRealWidth = 0.0;
+      s_isoRealHeight = 0.0;
+      s_isoRealSizeValid = false;
+      s_isoPipeLineNo = string.Empty;
+      s_isoBOP = string.Empty;
+      s_isoSize = string.Empty;
       Editor ed = doc.Editor;
       PromptSelectionResult psr = ed.GetSelection();
       if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
@@ -893,6 +905,7 @@ namespace PlantFlow_Support
       s_isoPipeAxisValid = this.TryGetSelectionPipeAxis(doc.Database, selectedIds, out pipeAxis);
       s_isoPipeAxis = s_isoPipeAxisValid ? pipeAxis : Vector3d.XAxis;
       PlantOrthoView.FileDiag("PFSVBISOCLONE pipeAxis=" + this.FormatVectorForCommand(s_isoPipeAxis) + " valid=" + s_isoPipeAxisValid);
+      this.CaptureIsoSelectionMetrics(doc.Database, selectedIds);
 
       ObjectIdCollection ids = new ObjectIdCollection();
       foreach (ObjectId id in selectedIds)
@@ -1578,7 +1591,12 @@ namespace PlantFlow_Support
               else
               {
                 ObjectId msId = tbt[BlockTableRecord.ModelSpace];
+                BlockTableRecord targetMs = ttr.GetObject(msId, OpenMode.ForWrite) as BlockTableRecord;
                 ObjectId detailLayerId = this.EnsureIsoDetailLayer(originalDb, ttr);
+                ObjectId annotationLayerId;
+                ObjectId textStyleId;
+                ObjectId dimStyleId;
+                this.EnsureIsoAnnotationResources(originalDb, ttr, out annotationLayerId, out textStyleId, out dimStyleId);
                 Database oldWorking = HostApplicationServices.WorkingDatabase;
                 IdMapping idMap = new IdMapping();
                 try
@@ -1591,6 +1609,8 @@ namespace PlantFlow_Support
                   HostApplicationServices.WorkingDatabase = oldWorking;
                 }
 
+                ObjectId detailBlockRefId = ObjectId.Null;
+                ObjectId detailEntityId = ObjectId.Null;
                 foreach (IdPair pair in idMap)
                 {
                   if (!pair.IsPrimary || !pair.IsCloned)
@@ -1601,8 +1621,24 @@ namespace PlantFlow_Support
                     continue;
 
                   e.LayerId = detailLayerId;
+                  if (detailEntityId == ObjectId.Null)
+                    detailEntityId = pair.Value;
+                  if (detailBlockRefId == ObjectId.Null && e is BlockReference)
+                    detailBlockRefId = pair.Value;
                   cloned++;
                 }
+
+                this.LogIsoBlockInnerTypes(originalDb, ttr, detailBlockRefId);
+                if (targetMs != null && s_isoRealSizeValid)
+                {
+                  ObjectId dimSourceId = detailBlockRefId != ObjectId.Null ? detailBlockRefId : detailEntityId;
+                  this.AppendIsoBoundingDimensions(ttr, targetMs, dimSourceId, annotationLayerId, dimStyleId);
+                }
+                else
+                {
+                  PlantOrthoView.FileDiag("PFSVBISOEXPORTED dim skip realSizeValid=" + s_isoRealSizeValid + " targetMsNull=" + (targetMs == null));
+                }
+
                 ttr.Commit();
                 PlantOrthoView.FileDiag("PFSVBISOEXPORTED cloned2D=" + cloned + " -> 원본(PFS_ISO_DETAIL) path=" + exportPath);
               }
@@ -2195,6 +2231,341 @@ namespace PlantFlow_Support
       ed.WriteMessage("\nPFSPLACEEXPORT cloned=" + cloned + " source=" + source);
     }
 
+    private void CaptureIsoSelectionMetrics(Database db, ObjectId[] selectedIds)
+    {
+      if (db == null || selectedIds == null || selectedIds.Length == 0)
+        return;
+
+      Vector3d axis = s_isoPipeAxisValid ? s_isoPipeAxis.GetNormal() : Vector3d.XAxis;
+      Vector3d upSeed = System.Math.Abs(axis.DotProduct(Vector3d.ZAxis)) < 0.9 ? Vector3d.ZAxis : Vector3d.XAxis;
+      Vector3d up = upSeed - axis.MultiplyBy(upSeed.DotProduct(axis));
+      if (up.Length <= 1e-6)
+        up = Vector3d.YAxis - axis.MultiplyBy(Vector3d.YAxis.DotProduct(axis));
+      if (up.Length <= 1e-6)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE metric skip: up basis degenerate axis=" + this.FormatVectorForCommand(axis));
+        return;
+      }
+      up = up.GetNormal();
+      Vector3d right = up.CrossProduct(axis);
+      if (right.Length <= 1e-6)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE metric skip: right basis degenerate axis=" + this.FormatVectorForCommand(axis));
+        return;
+      }
+      right = right.GetNormal();
+
+      bool hasProjection = false;
+      double minR = 0.0;
+      double maxR = 0.0;
+      double minU = 0.0;
+      double maxU = 0.0;
+      ObjectId supportId = ObjectId.Null;
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          foreach (ObjectId id in selectedIds)
+          {
+            try
+            {
+              DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
+              Entity ent = obj as Entity;
+              if (ent == null)
+                continue;
+
+              string className = id.ObjectClass == null ? string.Empty : id.ObjectClass.Name;
+              string typeName = obj.GetType().Name;
+              if (className.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) < 0 && typeName.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) < 0)
+                continue;
+
+              if (supportId == ObjectId.Null)
+                supportId = id;
+              Extents3d ext = ent.GeometricExtents;
+              Point3d[] corners = this.GetExtentsCorners(ext);
+              foreach (Point3d corner in corners)
+              {
+                double r = corner.GetAsVector().DotProduct(right);
+                double u = corner.GetAsVector().DotProduct(up);
+                if (!hasProjection)
+                {
+                  minR = maxR = r;
+                  minU = maxU = u;
+                  hasProjection = true;
+                }
+                else
+                {
+                  if (r < minR) minR = r;
+                  if (r > maxR) maxR = r;
+                  if (u < minU) minU = u;
+                  if (u > maxU) maxU = u;
+                }
+              }
+            }
+            catch (System.Exception ex)
+            {
+              PlantOrthoView.FileDiag("PFSVBISOCLONE metric support skip id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+            }
+          }
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE metric scan 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      if (hasProjection)
+      {
+        s_isoRealWidth = System.Math.Abs(maxR - minR);
+        s_isoRealHeight = System.Math.Abs(maxU - minU);
+        s_isoRealSizeValid = s_isoRealWidth > 1e-6 && s_isoRealHeight > 1e-6;
+      }
+      else
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE metric support bounds 없음");
+      }
+
+      this.CaptureIsoSupportProperties(supportId);
+      PlantOrthoView.FileDiag("PFSVBISOCLONE PLN=" + s_isoPipeLineNo + " BOP=" + s_isoBOP + " size=" + s_isoSize + " realW=" + this.FormatNumber(s_isoRealWidth) + " realH=" + this.FormatNumber(s_isoRealHeight) + " basisRight=" + this.FormatVectorForCommand(right) + " basisUp=" + this.FormatVectorForCommand(up) + " valid=" + s_isoRealSizeValid);
+    }
+
+    private void CaptureIsoSupportProperties(ObjectId supportId)
+    {
+      if (supportId == ObjectId.Null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE props skip: supportId null");
+        return;
+      }
+
+      try
+      {
+        PSUtil ps = Commands.PSUtil;
+        if (ps == null)
+          ps = new PSUtil();
+        if (ps == null || ps.dl_manager == null)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE props skip: dl_manager null");
+          return;
+        }
+
+        System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection()
+        {
+          "SupportName",
+          "DesignStd",
+          "LineNumberTag",
+          "SupportDetail",
+          "BOP",
+          "Position Z",
+          "Size",
+          "ShortDescription"
+        };
+        System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(supportId, names, true);
+        if (props == null)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE props skip: GetProperties null");
+          return;
+        }
+
+        if (props.Count > 2) s_isoPipeLineNo = props[2];
+        if (props.Count > 4) s_isoBOP = this.RoundPropertyValue(props[4]);
+        if (props.Count > 6) s_isoSize = props[6];
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE props 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private Point3d[] GetExtentsCorners(Extents3d ext)
+    {
+      Point3d min = ext.MinPoint;
+      Point3d max = ext.MaxPoint;
+      return new Point3d[]
+      {
+        new Point3d(min.X, min.Y, min.Z),
+        new Point3d(max.X, min.Y, min.Z),
+        new Point3d(min.X, max.Y, min.Z),
+        new Point3d(max.X, max.Y, min.Z),
+        new Point3d(min.X, min.Y, max.Z),
+        new Point3d(max.X, min.Y, max.Z),
+        new Point3d(min.X, max.Y, max.Z),
+        new Point3d(max.X, max.Y, max.Z)
+      };
+    }
+
+    private string RoundPropertyValue(string value)
+    {
+      double parsed;
+      if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) || double.TryParse(value, out parsed))
+        return System.Math.Round(parsed).ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+      return value == null ? string.Empty : value;
+    }
+
+    private string FormatNumber(double value)
+    {
+      return System.Math.Abs(value).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private void EnsureIsoAnnotationResources(Database db, Transaction tr, out ObjectId layerId, out ObjectId textStyleId, out ObjectId dimStyleId)
+    {
+      layerId = ObjectId.Null;
+      textStyleId = ObjectId.Null;
+      dimStyleId = db == null ? ObjectId.Null : db.Dimstyle;
+      if (db == null || tr == null)
+        return;
+
+      LayerTable lt = tr.GetObject(db.LayerTableId, OpenMode.ForRead) as LayerTable;
+      const string layerName = "AUTO_DIM";
+      if (lt != null && lt.Has(layerName))
+      {
+        layerId = lt[layerName];
+      }
+      else if (lt != null)
+      {
+        lt.UpgradeOpen();
+        LayerTableRecord ltr = new LayerTableRecord();
+        ltr.Name = layerName;
+        ltr.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex(Autodesk.AutoCAD.Colors.ColorMethod.ByAci, 6);
+        layerId = lt.Add(ltr);
+        tr.AddNewlyCreatedDBObject(ltr, true);
+      }
+
+      TextStyleTable tst = tr.GetObject(db.TextStyleTableId, OpenMode.ForRead) as TextStyleTable;
+      const string textStyleName = "RMS_85";
+      if (tst != null && tst.Has(textStyleName))
+      {
+        textStyleId = tst[textStyleName];
+      }
+      else if (tst != null)
+      {
+        tst.UpgradeOpen();
+        TextStyleTableRecord tstr = new TextStyleTableRecord();
+        tstr.Name = textStyleName;
+        tstr.FileName = "romans.shx";
+        tstr.XScale = 0.85;
+        textStyleId = tst.Add(tstr);
+        tr.AddNewlyCreatedDBObject(tstr, true);
+      }
+
+      DimStyleTable dst = tr.GetObject(db.DimStyleTableId, OpenMode.ForRead) as DimStyleTable;
+      if (dst != null && dst.Has("STANDARD"))
+        dimStyleId = dst["STANDARD"];
+      else
+        dimStyleId = db.Dimstyle;
+    }
+
+    private void AppendIsoBoundingDimensions(Transaction tr, BlockTableRecord targetMs, ObjectId dimSourceId, ObjectId annotationLayerId, ObjectId dimStyleId)
+    {
+      if (tr == null || targetMs == null || dimSourceId == ObjectId.Null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED dim skip: source null");
+        return;
+      }
+
+      try
+      {
+        Entity source = tr.GetObject(dimSourceId, OpenMode.ForRead, false) as Entity;
+        if (source == null)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED dim skip: source entity null id=" + dimSourceId);
+          return;
+        }
+
+        Extents3d paperExt = source.GeometricExtents;
+        RotatedDimension dimH;
+        RotatedDimension dimV;
+        PSUtil.CreateHorizontalDimension(paperExt, Matrix3d.Identity, dimStyleId, paperExt.MaxPoint.Y, out dimH);
+        PSUtil.CreateVerticalDimension(paperExt, Matrix3d.Identity, dimStyleId, paperExt.MaxPoint.X, out dimV);
+        if (dimH != null)
+        {
+          dimH.DimensionText = this.FormatNumber(s_isoRealWidth);
+          if (annotationLayerId != ObjectId.Null)
+            dimH.LayerId = annotationLayerId;
+          targetMs.AppendEntity(dimH);
+          tr.AddNewlyCreatedDBObject(dimH, true);
+        }
+        if (dimV != null)
+        {
+          dimV.DimensionText = this.FormatNumber(s_isoRealHeight);
+          if (annotationLayerId != ObjectId.Null)
+            dimV.LayerId = annotationLayerId;
+          targetMs.AppendEntity(dimV);
+          tr.AddNewlyCreatedDBObject(dimV, true);
+        }
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED dim W=" + this.FormatNumber(s_isoRealWidth) + " V=" + this.FormatNumber(s_isoRealHeight) + " paperExt=" + paperExt.MinPoint + "~" + paperExt.MaxPoint + " blockRef=" + dimSourceId);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED dim 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void LogIsoBlockInnerTypes(Database db, Transaction tr, ObjectId blockRefId)
+    {
+      int line = 0;
+      int circle = 0;
+      int ellipse = 0;
+      int spline = 0;
+      int arc = 0;
+      int poly = 0;
+      if (db == null || tr == null || blockRefId == ObjectId.Null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED blockInner skip blockRef=" + blockRefId);
+        return;
+      }
+
+      try
+      {
+        BlockReference br = tr.GetObject(blockRefId, OpenMode.ForRead, false) as BlockReference;
+        if (br == null)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED blockInner skip: not BlockReference id=" + blockRefId);
+          return;
+        }
+        this.CountBlockRecordEntityTypes(tr, br.BlockTableRecord, ref line, ref circle, ref ellipse, ref spline, ref arc, ref poly, 0);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED blockInner 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      PlantOrthoView.FileDiag("PFSVBISOEXPORTED blockInner Line=" + line + " Circle=" + circle + " Ellipse=" + ellipse + " Spline=" + spline + " Arc=" + arc + " Poly=" + poly);
+    }
+
+    private void CountBlockRecordEntityTypes(Transaction tr, ObjectId btrId, ref int line, ref int circle, ref int ellipse, ref int spline, ref int arc, ref int poly, int depth)
+    {
+      if (tr == null || btrId == ObjectId.Null || depth > 8)
+        return;
+
+      BlockTableRecord btr = tr.GetObject(btrId, OpenMode.ForRead, false) as BlockTableRecord;
+      if (btr == null)
+        return;
+
+      foreach (ObjectId id in btr)
+      {
+        Entity ent = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+        if (ent == null)
+          continue;
+        if (ent is Line)
+          line++;
+        else if (ent is Circle)
+          circle++;
+        else if (ent is Ellipse)
+          ellipse++;
+        else if (ent is Spline)
+          spline++;
+        else if (ent is Arc)
+          arc++;
+        else if (ent is Polyline || ent is Polyline2d || ent is Polyline3d)
+          poly++;
+
+        BlockReference nested = ent as BlockReference;
+        if (nested != null)
+          this.CountBlockRecordEntityTypes(tr, nested.BlockTableRecord, ref line, ref circle, ref ellipse, ref spline, ref arc, ref poly, depth + 1);
+      }
+    }
     private bool TryGetSelectionPipeAxis(Database db, ObjectId[] selectedIds, out Vector3d axis)
     {
       axis = Vector3d.XAxis;
