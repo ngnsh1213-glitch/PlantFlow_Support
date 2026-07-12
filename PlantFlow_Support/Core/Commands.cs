@@ -1474,7 +1474,7 @@ namespace PlantFlow_Support
         if (string.IsNullOrEmpty(exportPath) || !System.IO.File.Exists(exportPath))
         {
           PlantOrthoView.FileDiag("PFSVBISOEXPORTED export 파일 없음 path=" + exportPath);
-          ed.WriteMessage("\nPFSVBISOEXPORTED export 파일 없음 path=" + exportPath);
+          this.WriteEditorMessageSafe(ed, "\nPFSVBISOEXPORTED export 파일 없음 path=" + exportPath, "PFSVBISOEXPORTED missing export");
           return;
         }
 
@@ -1485,6 +1485,8 @@ namespace PlantFlow_Support
         int poly = 0;
         int block = 0;
         int viewBorder = 0;
+        int cloned = 0;
+        ObjectIdCollection ids = new ObjectIdCollection();
         Database sideDb = null;
         try
         {
@@ -1504,6 +1506,7 @@ namespace PlantFlow_Support
                   if (entity == null)
                     continue;
 
+                  ids.Add(id);
                   total++;
                   string typeName = entity.GetType().Name;
                   if (typeName.IndexOf("ViewBorder", System.StringComparison.OrdinalIgnoreCase) >= 0 || typeName.IndexOf("AcDbViewBorder", System.StringComparison.OrdinalIgnoreCase) >= 0)
@@ -1523,20 +1526,74 @@ namespace PlantFlow_Support
             }
             tr.Commit();
           }
+
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED exported2D total=" + total + " Line=" + line + " Circle=" + circle + " Arc=" + arc + " Poly=" + poly + " Block=" + block + " viewBorder=" + viewBorder + " path=" + exportPath);
+          this.WriteEditorMessageSafe(ed, "\nPFSVBISOEXPORTED exported2D total=" + total + " Line=" + line + " Circle=" + circle + " Arc=" + arc + " Poly=" + poly + " Block=" + block + " viewBorder=" + viewBorder, "PFSVBISOEXPORTED exported2D");
+
+          if (ids.Count == 0)
+          {
+            PlantOrthoView.FileDiag("PFSVBISOEXPORTED clone-back skip: export ModelSpace empty path=" + exportPath);
+          }
+          else if (originalDoc == null)
+          {
+            PlantOrthoView.FileDiag("PFSVBISOEXPORTED clone-back skip: originalDoc null path=" + exportPath);
+          }
+          else
+          {
+            Database originalDb = originalDoc.Database;
+            using (DocumentLock dlk = originalDoc.LockDocument())
+            using (Transaction ttr = originalDb.TransactionManager.StartTransaction())
+            {
+              BlockTable tbt = ttr.GetObject(originalDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+              if (tbt == null || !tbt.Has(BlockTableRecord.ModelSpace))
+              {
+                PlantOrthoView.FileDiag("PFSVBISOEXPORTED clone-back skip: original ModelSpace 없음 path=" + exportPath);
+                ttr.Commit();
+              }
+              else
+              {
+                ObjectId msId = tbt[BlockTableRecord.ModelSpace];
+                ObjectId detailLayerId = this.EnsureIsoDetailLayer(originalDb, ttr);
+                Database oldWorking = HostApplicationServices.WorkingDatabase;
+                IdMapping idMap = new IdMapping();
+                try
+                {
+                  HostApplicationServices.WorkingDatabase = originalDb;
+                  sideDb.WblockCloneObjects(ids, msId, idMap, DuplicateRecordCloning.Ignore, false);
+                }
+                finally
+                {
+                  HostApplicationServices.WorkingDatabase = oldWorking;
+                }
+
+                foreach (IdPair pair in idMap)
+                {
+                  if (!pair.IsPrimary || !pair.IsCloned)
+                    continue;
+
+                  Entity e = ttr.GetObject(pair.Value, OpenMode.ForWrite, false) as Entity;
+                  if (e == null)
+                    continue;
+
+                  e.LayerId = detailLayerId;
+                  cloned++;
+                }
+                ttr.Commit();
+                PlantOrthoView.FileDiag("PFSVBISOEXPORTED cloned2D=" + cloned + " -> 원본(PFS_ISO_DETAIL) path=" + exportPath);
+              }
+            }
+          }
         }
         finally
         {
           if (sideDb != null)
             sideDb.Dispose();
         }
-
-        PlantOrthoView.FileDiag("PFSVBISOEXPORTED exported2D total=" + total + " Line=" + line + " Circle=" + circle + " Arc=" + arc + " Poly=" + poly + " Block=" + block + " viewBorder=" + viewBorder + " path=" + exportPath);
-        ed.WriteMessage("\nPFSVBISOEXPORTED exported2D total=" + total + " Line=" + line + " Circle=" + circle + " Arc=" + arc + " Poly=" + poly + " Block=" + block + " viewBorder=" + viewBorder);
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSVBISOEXPORTED 예외: " + ex.GetType().Name + ": " + ex.Message + " path=" + exportPath);
-        ed.WriteMessage("\nPFSVBISOEXPORTED error: " + ex.GetType().Name + ": " + ex.Message);
+        this.WriteEditorMessageSafe(ed, "\nPFSVBISOEXPORTED error: " + ex.GetType().Name + ": " + ex.Message, "PFSVBISOEXPORTED error");
       }
       finally
       {
@@ -2127,6 +2184,37 @@ namespace PlantFlow_Support
       ObjectId lid = lt.Add(ltr);
       tr.AddNewlyCreatedDBObject(ltr, true);
       return lid;
+    }
+
+    private ObjectId EnsureIsoDetailLayer(Database db, Transaction tr)
+    {
+      LayerTable lt = tr.GetObject(db.LayerTableId, OpenMode.ForRead) as LayerTable;
+      const string name = "PFS_ISO_DETAIL";
+      if (lt.Has(name))
+        return lt[name];
+
+      lt.UpgradeOpen();
+      LayerTableRecord ltr = new LayerTableRecord();
+      ltr.Name = name;
+      ltr.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex(Autodesk.AutoCAD.Colors.ColorMethod.ByAci, 3);
+      ObjectId lid = lt.Add(ltr);
+      tr.AddNewlyCreatedDBObject(ltr, true);
+      return lid;
+    }
+
+    private void WriteEditorMessageSafe(Editor ed, string message, string context)
+    {
+      if (ed == null)
+        return;
+
+      try
+      {
+        ed.WriteMessage(message);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag(context + " WriteMessage skip: " + ex.GetType().Name + ": " + ex.Message);
+      }
     }
 
     [CommandMethod("PFS")]
