@@ -22,6 +22,9 @@ namespace PlantFlow_Support
     private static Document s_isoDoneSolidDoc;
     private static Document s_isoDoneOriginalDoc;
     private static int s_isoDoneBaseline;
+    private static Document s_isoExportPendingSolidDoc;
+    private static Document s_isoExportPendingOriginalDoc;
+    private static string s_isoExportPath;
     private static Document s_isoClosePendingDoc;
     private static Document s_isoClosePendingOriginalDoc;
     public static ObjectId ViewportId;
@@ -1369,6 +1372,7 @@ namespace PlantFlow_Support
       s_isoDoneSolidDoc = null;
       s_isoDoneOriginalDoc = null;
       s_isoDoneBaseline = 0;
+      bool exportQueued = false;
 
       if (solidDoc == null)
       {
@@ -1397,11 +1401,142 @@ namespace PlantFlow_Support
         int newEntities = added - baseline;
         PlantOrthoView.FileDiag("PFSVBISODONE newEntities=" + newEntities + " baseline=" + baseline + " added=" + added + " (VIEWBASE 완료판정)");
         ed.WriteMessage("\nPFSVBISODONE newEntities=" + newEntities);
+
+        string directory = @"C:\Temp";
+        if (!System.IO.Directory.Exists(directory))
+          System.IO.Directory.CreateDirectory(directory);
+        string exportPath = System.IO.Path.Combine(directory, "pfs_iso_export_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", System.Globalization.CultureInfo.InvariantCulture) + ".dwg");
+        if (System.IO.File.Exists(exportPath))
+          System.IO.File.Delete(exportPath);
+
+        string ctab = "unknown";
+        try
+        {
+          object ctabValue = Application.GetSystemVariable("CTAB");
+          if (ctabValue != null)
+            ctab = ctabValue.ToString();
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSVBISODONE CTAB 조회 예외: " + ex.GetType().Name + ": " + ex.Message);
+        }
+
+        s_isoExportPendingSolidDoc = solidDoc;
+        s_isoExportPendingOriginalDoc = originalDoc;
+        s_isoExportPath = exportPath;
+        string exportCmd = "_.CTAB\nLayout1\n"
+          + "_.FILEDIA\n0\n_.CMDDIA\n0\n"
+          + "_.EXPORTLAYOUT\n" + exportPath + "\n"
+          + "_.FILEDIA\n1\n_.CMDDIA\n1\n"
+          + "PFSVBISOEXPORTED\n";
+        solidDoc.SendStringToExecute(exportCmd, true, false, false);
+        exportQueued = true;
+        PlantOrthoView.FileDiag("PFSVBISODONE newEntities=" + newEntities + " -> EXPORTLAYOUT queued path=" + exportPath + " ctab=" + ctab + " cmd=" + exportCmd.Replace("\n", "|"));
+        ed.WriteMessage("\nPFSVBISODONE EXPORTLAYOUT queued -> " + exportPath);
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("PFSVBISODONE count 예외: " + ex.GetType().Name + ": " + ex.Message);
-        ed.WriteMessage("\nPFSVBISODONE error: " + ex.GetType().Name + ": " + ex.Message);
+        PlantOrthoView.FileDiag("PFSVBISODONE export queue 예외: " + ex.GetType().Name + ": " + ex.Message);
+        ed.WriteMessage("\nPFSVBISODONE export queue error: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        if (!exportQueued)
+        {
+          s_isoClosePendingDoc = solidDoc;
+          s_isoClosePendingOriginalDoc = originalDoc;
+          Application.Idle -= this.VbIsoDoneCloseOnIdle;
+          Application.Idle += this.VbIsoDoneCloseOnIdle;
+          PlantOrthoView.FileDiag("PFSVBISODONE close Idle 위임(export queue 실패)");
+        }
+      }
+    }
+
+    [CommandMethod("PFSVBISOEXPORTED", CommandFlags.Session)]
+    public void VbIsoExportedCommand()
+    {
+      Document solidDoc = s_isoExportPendingSolidDoc;
+      Document originalDoc = s_isoExportPendingOriginalDoc;
+      string exportPath = s_isoExportPath;
+      s_isoExportPendingSolidDoc = null;
+      s_isoExportPendingOriginalDoc = null;
+      s_isoExportPath = null;
+
+      if (solidDoc == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED 중단: solidDoc null path=" + exportPath);
+        return;
+      }
+
+      Editor ed = solidDoc.Editor;
+      try
+      {
+        if (string.IsNullOrEmpty(exportPath) || !System.IO.File.Exists(exportPath))
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED export 파일 없음 path=" + exportPath);
+          ed.WriteMessage("\nPFSVBISOEXPORTED export 파일 없음 path=" + exportPath);
+          return;
+        }
+
+        int total = 0;
+        int line = 0;
+        int circle = 0;
+        int arc = 0;
+        int poly = 0;
+        int block = 0;
+        int viewBorder = 0;
+        Database sideDb = null;
+        try
+        {
+          sideDb = new Database(false, true);
+          sideDb.ReadDwgFile(exportPath, System.IO.FileShare.ReadWrite, true, null);
+          using (Transaction tr = sideDb.TransactionManager.StartTransaction())
+          {
+            BlockTable bt = tr.GetObject(sideDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+            if (bt != null && bt.Has(BlockTableRecord.ModelSpace))
+            {
+              BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+              if (ms != null)
+              {
+                foreach (ObjectId id in ms)
+                {
+                  Entity entity = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+                  if (entity == null)
+                    continue;
+
+                  total++;
+                  string typeName = entity.GetType().Name;
+                  if (typeName.IndexOf("ViewBorder", System.StringComparison.OrdinalIgnoreCase) >= 0 || typeName.IndexOf("AcDbViewBorder", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    viewBorder++;
+                  if (entity is Line)
+                    line++;
+                  else if (entity is Circle)
+                    circle++;
+                  else if (entity is Arc)
+                    arc++;
+                  else if (entity is Polyline || entity is Polyline2d || entity is Polyline3d)
+                    poly++;
+                  else if (entity is BlockReference)
+                    block++;
+                }
+              }
+            }
+            tr.Commit();
+          }
+        }
+        finally
+        {
+          if (sideDb != null)
+            sideDb.Dispose();
+        }
+
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED exported2D total=" + total + " Line=" + line + " Circle=" + circle + " Arc=" + arc + " Poly=" + poly + " Block=" + block + " viewBorder=" + viewBorder + " path=" + exportPath);
+        ed.WriteMessage("\nPFSVBISOEXPORTED exported2D total=" + total + " Line=" + line + " Circle=" + circle + " Arc=" + arc + " Poly=" + poly + " Block=" + block + " viewBorder=" + viewBorder);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED 예외: " + ex.GetType().Name + ": " + ex.Message + " path=" + exportPath);
+        ed.WriteMessage("\nPFSVBISOEXPORTED error: " + ex.GetType().Name + ": " + ex.Message);
       }
       finally
       {
@@ -1409,7 +1544,7 @@ namespace PlantFlow_Support
         s_isoClosePendingOriginalDoc = originalDoc;
         Application.Idle -= this.VbIsoDoneCloseOnIdle;
         Application.Idle += this.VbIsoDoneCloseOnIdle;
-        PlantOrthoView.FileDiag("PFSVBISODONE close Idle 위임");
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED close Idle 위임 path=" + exportPath);
       }
     }
 
