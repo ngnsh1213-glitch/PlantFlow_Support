@@ -18,6 +18,7 @@ namespace PlantFlow_Support
     private static string LastIsoTempPath;
     private static Vector3d s_isoPipeAxis;
     private static bool s_isoPipeAxisValid;
+    private static ObjectId s_isoPipeId;
     private static double s_isoRealWidth;
     private static double s_isoRealHeight;
     private static bool s_isoRealSizeValid;
@@ -885,6 +886,7 @@ namespace PlantFlow_Support
         return;
       s_isoPipeAxisValid = false;
       s_isoPipeAxis = Vector3d.XAxis;
+      s_isoPipeId = ObjectId.Null;
       s_isoRealWidth = 0.0;
       s_isoRealHeight = 0.0;
       s_isoRealSizeValid = false;
@@ -902,7 +904,9 @@ namespace PlantFlow_Support
 
       ObjectId[] selectedIds = psr.Value.GetObjectIds();
       Vector3d pipeAxis;
-      s_isoPipeAxisValid = this.TryGetSelectionPipeAxis(doc.Database, selectedIds, out pipeAxis);
+      ObjectId pipeId;
+      s_isoPipeAxisValid = this.TryGetSelectionPipeAxis(doc.Database, selectedIds, out pipeAxis, out pipeId);
+      s_isoPipeId = pipeId;
       s_isoPipeAxis = s_isoPipeAxisValid ? pipeAxis : Vector3d.XAxis;
       PlantOrthoView.FileDiag("PFSVBISOCLONE pipeAxis=" + this.FormatVectorForCommand(s_isoPipeAxis) + " valid=" + s_isoPipeAxisValid);
       this.CaptureIsoSelectionMetrics(doc.Database, selectedIds);
@@ -1632,7 +1636,16 @@ namespace PlantFlow_Support
                 if (targetMs != null && s_isoRealSizeValid)
                 {
                   ObjectId dimSourceId = detailBlockRefId != ObjectId.Null ? detailBlockRefId : detailEntityId;
-                  this.AppendIsoBoundingDimensions(ttr, targetMs, dimSourceId, annotationLayerId, dimStyleId);
+                  Database prevWdb = HostApplicationServices.WorkingDatabase;
+                  try
+                  {
+                    HostApplicationServices.WorkingDatabase = originalDb;
+                    this.AppendIsoBoundingDimensions(ttr, targetMs, dimSourceId, annotationLayerId, dimStyleId);
+                  }
+                  finally
+                  {
+                    HostApplicationServices.WorkingDatabase = prevWdb;
+                  }
                 }
                 else
                 {
@@ -2327,18 +2340,12 @@ namespace PlantFlow_Support
         PlantOrthoView.FileDiag("PFSVBISOCLONE metric support bounds 없음");
       }
 
-      this.CaptureIsoSupportProperties(supportId);
+      this.CaptureIsoSupportProperties(supportId, s_isoPipeId);
       PlantOrthoView.FileDiag("PFSVBISOCLONE PLN=" + s_isoPipeLineNo + " BOP=" + s_isoBOP + " size=" + s_isoSize + " realW=" + this.FormatNumber(s_isoRealWidth) + " realH=" + this.FormatNumber(s_isoRealHeight) + " basisRight=" + this.FormatVectorForCommand(right) + " basisUp=" + this.FormatVectorForCommand(up) + " valid=" + s_isoRealSizeValid);
     }
 
-    private void CaptureIsoSupportProperties(ObjectId supportId)
+    private void CaptureIsoSupportProperties(ObjectId supportId, ObjectId pipeId)
     {
-      if (supportId == ObjectId.Null)
-      {
-        PlantOrthoView.FileDiag("PFSVBISOCLONE props skip: supportId null");
-        return;
-      }
-
       try
       {
         PSUtil ps = Commands.PSUtil;
@@ -2350,31 +2357,84 @@ namespace PlantFlow_Support
           return;
         }
 
-        System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection()
+        if (supportId != ObjectId.Null)
         {
-          "SupportName",
-          "DesignStd",
-          "LineNumberTag",
-          "SupportDetail",
-          "BOP",
-          "Position Z",
-          "Size",
-          "ShortDescription"
-        };
-        System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(supportId, names, true);
-        if (props == null)
+          try
+          {
+            System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection()
+            {
+              "SupportName",
+              "DesignStd",
+              "LineNumberTag",
+              "SupportDetail",
+              "BOP",
+              "Position Z",
+              "Size",
+              "ShortDescription"
+            };
+            System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(supportId, names, true);
+            if (props == null)
+            {
+              PlantOrthoView.FileDiag("PFSVBISOCLONE props skip: GetProperties null");
+            }
+            else
+            {
+              if (props.Count > 2) s_isoPipeLineNo = props[2];
+              if (props.Count > 4) s_isoBOP = this.RoundPropertyValue(props[4]);
+              if (props.Count > 6) s_isoSize = props[6];
+            }
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSVBISOCLONE support props 예외: " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+        else
         {
-          PlantOrthoView.FileDiag("PFSVBISOCLONE props skip: GetProperties null");
-          return;
+          PlantOrthoView.FileDiag("PFSVBISOCLONE props skip: supportId null");
         }
 
-        if (props.Count > 2) s_isoPipeLineNo = props[2];
-        if (props.Count > 4) s_isoBOP = this.RoundPropertyValue(props[4]);
-        if (props.Count > 6) s_isoSize = props[6];
+        if (string.IsNullOrWhiteSpace(s_isoPipeLineNo))
+          this.CaptureIsoPipeLineNo(ps, pipeId);
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSVBISOCLONE props 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void CaptureIsoPipeLineNo(PSUtil ps, ObjectId pipeId)
+    {
+      if (pipeId == ObjectId.Null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE pipePLN skip: pipeId null");
+        return;
+      }
+      if (ps == null || ps.dl_manager == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE pipePLN skip: dl_manager null");
+        return;
+      }
+
+      string[] candidates = new string[] { "LineNumberTag", "LineNumber", "Line Number" };
+      foreach (string name in candidates)
+      {
+        try
+        {
+          System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection() { name };
+          System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(pipeId, names, true);
+          string value = props != null && props.Count > 0 ? props[0] : string.Empty;
+          PlantOrthoView.FileDiag("PFSVBISOCLONE pipePLN candidate " + name + "=" + value);
+          if (!string.IsNullOrWhiteSpace(value))
+          {
+            s_isoPipeLineNo = value;
+            return;
+          }
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE pipePLN candidate " + name + " 예외: " + ex.GetType().Name + ": " + ex.Message);
+        }
       }
     }
 
@@ -2480,6 +2540,7 @@ namespace PlantFlow_Support
         PSUtil.CreateVerticalDimension(paperExt, Matrix3d.Identity, dimStyleId, paperExt.MaxPoint.X, out dimV);
         if (dimH != null)
         {
+          dimH.DimensionStyle = dimStyleId;
           dimH.DimensionText = this.FormatNumber(s_isoRealWidth);
           if (annotationLayerId != ObjectId.Null)
             dimH.LayerId = annotationLayerId;
@@ -2488,6 +2549,7 @@ namespace PlantFlow_Support
         }
         if (dimV != null)
         {
+          dimV.DimensionStyle = dimStyleId;
           dimV.DimensionText = this.FormatNumber(s_isoRealHeight);
           if (annotationLayerId != ObjectId.Null)
             dimV.LayerId = annotationLayerId;
@@ -2566,9 +2628,11 @@ namespace PlantFlow_Support
           this.CountBlockRecordEntityTypes(tr, nested.BlockTableRecord, ref line, ref circle, ref ellipse, ref spline, ref arc, ref poly, depth + 1);
       }
     }
-    private bool TryGetSelectionPipeAxis(Database db, ObjectId[] selectedIds, out Vector3d axis)
+
+    private bool TryGetSelectionPipeAxis(Database db, ObjectId[] selectedIds, out Vector3d axis, out ObjectId pipeId)
     {
       axis = Vector3d.XAxis;
+      pipeId = ObjectId.Null;
       if (db == null || selectedIds == null || selectedIds.Length == 0)
         return false;
 
@@ -2618,6 +2682,7 @@ namespace PlantFlow_Support
                 continue;
 
               axis = rawAxis.GetNormal();
+              pipeId = id;
               bestLength = length;
               found = true;
             }
