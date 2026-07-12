@@ -16,6 +16,8 @@ namespace PlantFlow_Support
     private static System.Collections.Generic.HashSet<ObjectId> s_viewbaseBaseline;
     private const string ExportLayoutPath = @"C:\TEMP\pfs_vb_export.dwg";
     private static string LastIsoTempPath;
+    private static Vector3d s_isoPipeAxis;
+    private static bool s_isoPipeAxisValid;
     private static Document s_isoOpenPendingTempDoc;
     private static Document s_isoOpenPendingOriginalDoc;
     private static int s_isoOpenSecondIdleAttempts;
@@ -875,6 +877,8 @@ namespace PlantFlow_Support
       Document doc = Application.DocumentManager.MdiActiveDocument;
       if (doc == null)
         return;
+      s_isoPipeAxisValid = false;
+      s_isoPipeAxis = Vector3d.XAxis;
       Editor ed = doc.Editor;
       PromptSelectionResult psr = ed.GetSelection();
       if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
@@ -885,6 +889,11 @@ namespace PlantFlow_Support
       }
 
       ObjectId[] selectedIds = psr.Value.GetObjectIds();
+      Vector3d pipeAxis;
+      s_isoPipeAxisValid = this.TryGetSelectionPipeAxis(doc.Database, selectedIds, out pipeAxis);
+      s_isoPipeAxis = s_isoPipeAxisValid ? pipeAxis : Vector3d.XAxis;
+      PlantOrthoView.FileDiag("PFSVBISOCLONE pipeAxis=" + this.FormatVectorForCommand(s_isoPipeAxis) + " valid=" + s_isoPipeAxisValid);
+
       ObjectIdCollection ids = new ObjectIdCollection();
       foreach (ObjectId id in selectedIds)
         ids.Add(id);
@@ -1347,12 +1356,28 @@ namespace PlantFlow_Support
           PlantOrthoView.FileDiag("PFSVBISOOPEN2 Regen 완료 fromIdle=" + fromIdle);
         }
 
-        string vb = "_.FILEDIA\n0\n_.CMDDIA\n0\n"
-          + "_.VIEWBASE\n_M\n_E\n\n100,100\n\n\n"
-          + "_.FILEDIA\n1\n_.CMDDIA\n1\n"
-          + "PFSVBISODONE\n";
+        string vb;
+        string dirLog;
+        if (s_isoPipeAxisValid)
+        {
+          string vpoint = this.FormatVectorForCommand(s_isoPipeAxis);
+          vb = "_.FILEDIA\n0\n_.CMDDIA\n0\n"
+            + "_.-VPOINT\n" + vpoint + "\n"
+            + "_.VIEWBASE\n_M\n_E\nLayout1\n_O\n_Current\n100,100\n\n\n"
+            + "_.FILEDIA\n1\n_.CMDDIA\n1\n"
+            + "PFSVBISODONE\n";
+          dirLog = "pipeAxis vpoint=" + vpoint;
+        }
+        else
+        {
+          vb = "_.FILEDIA\n0\n_.CMDDIA\n0\n"
+            + "_.VIEWBASE\n_M\n_E\n\n100,100\n\n\n"
+            + "_.FILEDIA\n1\n_.CMDDIA\n1\n"
+            + "PFSVBISODONE\n";
+          dirLog = "default";
+        }
         solidDoc.SendStringToExecute(vb, true, false, false);
-        PlantOrthoView.FileDiag("PFSVBISOOPEN2 SendStringToExecute VIEWBASE queued baseline=" + baseline + " fromIdle=" + fromIdle + " cmd=" + vb.Replace("\n", "|"));
+        PlantOrthoView.FileDiag("PFSVBISOOPEN2 VIEWBASE dir=" + dirLog + " queued baseline=" + baseline + " fromIdle=" + fromIdle + " cmd=" + vb.Replace("\n", "|"));
         ted.WriteMessage("\nPFSVBISOOPEN2 VIEWBASE queued");
       }
       catch (System.Exception ex)
@@ -2168,6 +2193,84 @@ namespace PlantFlow_Support
 
       PlantOrthoView.FileDiag("PFSPLACEEXPORT cloned=" + cloned + " layer=PFS_ORTHO_FLATTEN source=" + source);
       ed.WriteMessage("\nPFSPLACEEXPORT cloned=" + cloned + " source=" + source);
+    }
+
+    private bool TryGetSelectionPipeAxis(Database db, ObjectId[] selectedIds, out Vector3d axis)
+    {
+      axis = Vector3d.XAxis;
+      if (db == null || selectedIds == null || selectedIds.Length == 0)
+        return false;
+
+      bool found = false;
+      double bestLength = 0.0;
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          foreach (ObjectId id in selectedIds)
+          {
+            try
+            {
+              DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
+              Part part = obj as Part;
+              if (part == null)
+                continue;
+
+              string className = id.ObjectClass == null ? string.Empty : id.ObjectClass.Name;
+              string typeName = obj.GetType().Name;
+              if (className.IndexOf("Pipe", System.StringComparison.OrdinalIgnoreCase) < 0 && typeName.IndexOf("Pipe", System.StringComparison.OrdinalIgnoreCase) < 0)
+                continue;
+
+              PortCollection ports = part.GetPorts((PortType)7);
+              if (ports == null || ports.Count < 2)
+                continue;
+
+              Point3d? first = null;
+              Point3d? second = null;
+              foreach (Port port in (PnP3dCollection)ports)
+              {
+                if (!first.HasValue)
+                {
+                  first = port.Position;
+                  continue;
+                }
+                second = port.Position;
+                break;
+              }
+
+              if (!first.HasValue || !second.HasValue)
+                continue;
+
+              Vector3d rawAxis = second.Value - first.Value;
+              double length = rawAxis.Length;
+              if (length <= 1e-6 || length <= bestLength)
+                continue;
+
+              axis = rawAxis.GetNormal();
+              bestLength = length;
+              found = true;
+            }
+            catch (System.Exception ex)
+            {
+              PlantOrthoView.FileDiag("PFSVBISOCLONE pipeAxis candidate 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+            }
+          }
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE pipeAxis scan 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+
+      return found;
+    }
+
+    private string FormatVectorForCommand(Vector3d vector)
+    {
+      System.Globalization.CultureInfo ic = System.Globalization.CultureInfo.InvariantCulture;
+      return vector.X.ToString("0.######", ic) + "," + vector.Y.ToString("0.######", ic) + "," + vector.Z.ToString("0.######", ic);
     }
 
     private ObjectId EnsureFlattenLayer(Database db, Transaction tr)
