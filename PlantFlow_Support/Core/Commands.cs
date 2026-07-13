@@ -1845,9 +1845,46 @@ namespace PlantFlow_Support
         ed.WriteMessage("\nPFSISOTBLPROBE done. Check FileDiag log.");
     }
 
+    private string ResolveIsoTemplatePath()
+    {
+      // 1) PSUtil.OrthoTemplate static (UI AddSupport/MTO 흐름서만 세팅) 2) Settings.tbTemplate(영구 저장) 3) 하드코딩 폴백
+      string fromStatic = PSUtil.OrthoTemplate;
+      if (!string.IsNullOrWhiteSpace(fromStatic) && System.IO.File.Exists(fromStatic))
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE template 해석 source=OrthoTemplate path=" + fromStatic);
+        return fromStatic;
+      }
+
+      string fromSettings = null;
+      try
+      {
+        object v = PlantFlow_Support.Properties.Settings.Default["tbTemplate"];
+        fromSettings = v as string;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE template Settings 조회 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      if (!string.IsNullOrWhiteSpace(fromSettings) && System.IO.File.Exists(fromSettings))
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE template 해석 source=Settings path=" + fromSettings);
+        return fromSettings;
+      }
+
+      const string hardcoded = @"C:\Temp\Template\Ortho_A1_Pipe Support.dwt";
+      if (System.IO.File.Exists(hardcoded))
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE template 해석 source=하드코딩 path=" + hardcoded);
+        return hardcoded;
+      }
+
+      PlantOrthoView.FileDiag("PFSISOTBLPROBE template 해석 실패 static=" + (fromStatic ?? "null") + " settings=" + (fromSettings ?? "null") + " hardcoded=" + hardcoded);
+      return null;
+    }
+
     private void ProbeIsoTemplate()
     {
-      string templatePath = PSUtil.OrthoTemplate;
+      string templatePath = this.ResolveIsoTemplatePath();
       if (string.IsNullOrWhiteSpace(templatePath) || !System.IO.File.Exists(templatePath))
       {
         PlantOrthoView.FileDiag("PFSISOTBLPROBE template 없음 path=" + (templatePath ?? "null"));
