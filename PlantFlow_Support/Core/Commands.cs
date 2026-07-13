@@ -985,6 +985,71 @@ namespace PlantFlow_Support
       }
     }
 
+    [CommandMethod("PFSNOTABBOXTEST", CommandFlags.Session)]
+    public void NotabBoxTestCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      Editor ed = doc != null ? doc.Editor : null;
+      Database tdb = null;
+      Database oldWorking = HostApplicationServices.WorkingDatabase;
+      try
+      {
+        string templatePath = this.ResolveIsoTemplatePath();
+        if (string.IsNullOrWhiteSpace(templatePath) || !System.IO.File.Exists(templatePath))
+        {
+          PlantOrthoView.FileDiag("PFSNOTABBOXTEST template 없음 path=" + (templatePath ?? string.Empty));
+          if (ed != null)
+            ed.WriteMessage("\nPFSNOTABBOXTEST: template 없음");
+          return;
+        }
+
+        tdb = new Database(false, true);
+        tdb.ReadDwgFile(templatePath, System.IO.FileShare.Read, true, null);
+        tdb.CloseInput(true);
+        HostApplicationServices.WorkingDatabase = tdb;
+
+        using (Transaction tr = tdb.TransactionManager.StartTransaction())
+        {
+          ObjectId msId = this.GetModelSpaceId(tdb, tr);
+          if (msId == ObjectId.Null)
+            throw new System.InvalidOperationException("template ModelSpace 없음");
+
+          BlockTableRecord ms = tr.GetObject(msId, OpenMode.ForWrite, false) as BlockTableRecord;
+          if (ms == null)
+            throw new System.InvalidOperationException("template ModelSpace open 실패");
+
+          Solid3d box = new Solid3d();
+          box.SetDatabaseDefaults(tdb);
+          box.CreateBox(300.0, 300.0, 300.0);
+          ms.AppendEntity(box);
+          tr.AddNewlyCreatedDBObject(box, true);
+          PlantOrthoView.FileDiag("PFSNOTABBOXTEST box appended, commit 직전");
+          tr.Commit();
+          PlantOrthoView.FileDiag("PFSNOTABBOXTEST commit 완료");
+        }
+
+        string tempDir = @"C:\Temp";
+        System.IO.Directory.CreateDirectory(tempDir);
+        string savedPath = System.IO.Path.Combine(tempDir, "notab_boxtest_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", System.Globalization.CultureInfo.InvariantCulture) + ".dwg");
+        tdb.SaveAs(savedPath, DwgVersion.Current);
+        PlantOrthoView.FileDiag("PFSNOTABBOXTEST saved path=" + savedPath);
+        if (ed != null)
+          ed.WriteMessage("\nPFSNOTABBOXTEST saved=" + savedPath);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABBOXTEST 예외: " + ex.GetType().Name + ": " + ex.Message);
+        if (ed != null)
+          ed.WriteMessage("\nPFSNOTABBOXTEST error: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        HostApplicationServices.WorkingDatabase = oldWorking;
+        if (tdb != null)
+          tdb.Dispose();
+      }
+    }
+
     private Database CloneSelectionToSideDatabase(Database originalDb, ObjectId[] selectedIds, string logPrefix)
     {
       if (originalDb == null)
