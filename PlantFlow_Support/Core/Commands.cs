@@ -2536,7 +2536,8 @@ namespace PlantFlow_Support
         Extents3d paperExt = source.GeometricExtents;
         Extents3d verticalExt = paperExt;
         Extents3d supportExt;
-        if (this.TryGetIsoSupportPaperExtents(tr, source as BlockReference, out supportExt))
+        double pipeCenterX = double.NaN;
+        if (this.TryGetIsoSupportPaperExtents(tr, source as BlockReference, out supportExt, out pipeCenterX))
         {
           verticalExt = supportExt;
         }
@@ -2560,6 +2561,47 @@ namespace PlantFlow_Support
           tr.AddNewlyCreatedDBObject(dimH, true);
           this.LogIsoDimensionExtents(dimH, "dimH", dimSize);
         }
+
+        double baseMinX = verticalExt.MinPoint.X;
+        double baseMaxX = verticalExt.MaxPoint.X;
+        double baseMaxY = verticalExt.MaxPoint.Y;
+        double baseWidth = baseMaxX - baseMinX;
+        if (!double.IsNaN(pipeCenterX) && pipeCenterX > baseMinX + 1e-6 && pipeCenterX < baseMaxX - 1e-6 && baseWidth > 1e-6)
+        {
+          double leftReal = s_isoRealWidth * (pipeCenterX - baseMinX) / baseWidth;
+          double rightReal = s_isoRealWidth - leftReal;
+          double dimLineY = baseMaxY + 50.0 + dimSize * 2.0;
+          RotatedDimension dimLeft = PSUtil.CreateHorizontalDimension(new Point3d(baseMinX, baseMaxY, 0.0), new Point3d(pipeCenterX, baseMaxY, 0.0), new Point3d(baseMinX, dimLineY, 0.0), Matrix3d.Identity, dimStyleId);
+          RotatedDimension dimRight = PSUtil.CreateHorizontalDimension(new Point3d(pipeCenterX, baseMaxY, 0.0), new Point3d(baseMaxX, baseMaxY, 0.0), new Point3d(pipeCenterX, dimLineY, 0.0), Matrix3d.Identity, dimStyleId);
+          if (dimLeft != null)
+          {
+            dimLeft.DimensionStyle = dimStyleId;
+            this.ApplyIsoDimensionOverrides(dimLeft, dimSize, "dimSplitL");
+            dimLeft.DimensionText = this.FormatNumber(leftReal);
+            if (annotationLayerId != ObjectId.Null)
+              dimLeft.LayerId = annotationLayerId;
+            targetMs.AppendEntity(dimLeft);
+            tr.AddNewlyCreatedDBObject(dimLeft, true);
+            this.LogIsoDimensionExtents(dimLeft, "dimSplitL", dimSize);
+          }
+          if (dimRight != null)
+          {
+            dimRight.DimensionStyle = dimStyleId;
+            this.ApplyIsoDimensionOverrides(dimRight, dimSize, "dimSplitR");
+            dimRight.DimensionText = this.FormatNumber(rightReal);
+            if (annotationLayerId != ObjectId.Null)
+              dimRight.LayerId = annotationLayerId;
+            targetMs.AppendEntity(dimRight);
+            tr.AddNewlyCreatedDBObject(dimRight, true);
+            this.LogIsoDimensionExtents(dimRight, "dimSplitR", dimSize);
+          }
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED dimSplit centerX=" + this.FormatNumber(pipeCenterX) + " baseMinX=" + this.FormatNumber(baseMinX) + " baseMaxX=" + this.FormatNumber(baseMaxX) + " left=" + this.FormatNumber(leftReal) + " right=" + this.FormatNumber(rightReal) + " total=" + this.FormatNumber(s_isoRealWidth));
+        }
+        else
+        {
+          string reason = double.IsNaN(pipeCenterX) ? "centerX=NaN" : (baseWidth <= 1e-6 ? "baseWidth<=0" : "centerX outside base");
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED dimSplit skip: " + reason + " centerX=" + (double.IsNaN(pipeCenterX) ? "NaN" : this.FormatNumber(pipeCenterX)) + " baseMinX=" + this.FormatNumber(baseMinX) + " baseMaxX=" + this.FormatNumber(baseMaxX));
+        }
         if (dimV != null)
         {
           dimV.DimensionStyle = dimStyleId;
@@ -2579,9 +2621,10 @@ namespace PlantFlow_Support
       }
     }
 
-    private bool TryGetIsoSupportPaperExtents(Transaction tr, BlockReference br, out Extents3d supportExt)
+    private bool TryGetIsoSupportPaperExtents(Transaction tr, BlockReference br, out Extents3d supportExt, out double pipeCenterX)
     {
       supportExt = new Extents3d();
+      pipeCenterX = double.NaN;
       if (br == null)
       {
         PlantOrthoView.FileDiag("PFSVBISOEXPORTED supportExt skip: source not BlockReference");
@@ -2616,7 +2659,7 @@ namespace PlantFlow_Support
           {
             double radius = this.GetTransformedCircleRadius(circle, transform);
             Point3d center = circle.Center.TransformBy(transform);
-            circles.Add(new IsoCircleCandidate(id, radius, center.Y));
+            circles.Add(new IsoCircleCandidate(id, radius, center.X, center.Y));
           }
         }
 
@@ -2625,16 +2668,19 @@ namespace PlantFlow_Support
         ObjectId excludedCircleId = ObjectId.Null;
         int matched = 0;
         double bestCenterY = double.MinValue;
+        double excludedCenterX = double.NaN;
         double maxRadius = -1.0;
         ObjectId maxCircleId = ObjectId.Null;
+        double maxCircleCenterX = double.NaN;
         foreach (IsoCircleCandidate candidate in circles)
         {
           bool match = hasExpected && expectedRadius > 1e-6 && System.Math.Abs(candidate.Radius - expectedRadius) / expectedRadius < 0.15;
-          PlantOrthoView.FileDiag("PFSVBISOEXPORTED pipeCircle R=" + this.FormatNumber(candidate.Radius) + " expR=" + (hasExpected ? this.FormatNumber(expectedRadius) : "n/a") + " match=" + match + " centerY=" + this.FormatNumber(candidate.CenterY));
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED pipeCircle R=" + this.FormatNumber(candidate.Radius) + " expR=" + (hasExpected ? this.FormatNumber(expectedRadius) : "n/a") + " match=" + match + " centerX=" + this.FormatNumber(candidate.CenterX) + " centerY=" + this.FormatNumber(candidate.CenterY));
           if (candidate.Radius > maxRadius)
           {
             maxRadius = candidate.Radius;
             maxCircleId = candidate.Id;
+            maxCircleCenterX = candidate.CenterX;
           }
           if (match)
           {
@@ -2643,6 +2689,7 @@ namespace PlantFlow_Support
             {
               bestCenterY = candidate.CenterY;
               excludedCircleId = candidate.Id;
+              excludedCenterX = candidate.CenterX;
             }
           }
         }
@@ -2650,8 +2697,10 @@ namespace PlantFlow_Support
         if (excludedCircleId == ObjectId.Null && maxCircleId != ObjectId.Null)
         {
           excludedCircleId = maxCircleId;
-          PlantOrthoView.FileDiag("PFSVBISOEXPORTED pipeCircle fallback=maxCircle R=" + this.FormatNumber(maxRadius));
+          excludedCenterX = maxCircleCenterX;
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED pipeCircle fallback=maxCircle R=" + this.FormatNumber(maxRadius) + " centerX=" + this.FormatNumber(excludedCenterX));
         }
+        pipeCenterX = excludedCenterX;
 
         bool hasSupport = false;
         Point3d min = Point3d.Origin;
@@ -2753,15 +2802,17 @@ namespace PlantFlow_Support
 
     private class IsoCircleCandidate
     {
-      public IsoCircleCandidate(ObjectId id, double radius, double centerY)
+      public IsoCircleCandidate(ObjectId id, double radius, double centerX, double centerY)
       {
         this.Id = id;
         this.Radius = radius;
+        this.CenterX = centerX;
         this.CenterY = centerY;
       }
 
       public ObjectId Id;
       public double Radius;
+      public double CenterX;
       public double CenterY;
     }
 
