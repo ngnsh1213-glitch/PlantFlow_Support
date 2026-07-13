@@ -2195,6 +2195,9 @@ namespace PlantFlow_Support
 
         Extents3d solidExt;
         int cloned;
+        ObjectId viewportId = ObjectId.Null;
+        bool skipViewport = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_VIEWPORT"), "1", System.StringComparison.OrdinalIgnoreCase);
+        bool viewportOk = false;
         using (Transaction tr = tagDb.TransactionManager.StartTransaction())
         {
           ObjectId msId = this.GetModelSpaceId(tagDb, tr);
@@ -2212,13 +2215,23 @@ namespace PlantFlow_Support
           if (cloned == 0)
             throw new System.InvalidOperationException("cloned solid/extents 없음");
 
-          bool viewportOk = this.CreateNotabDetailViewport(tr, tagDb, solidExt);
+          if (skipViewport)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport skip(env)");
+          }
+          else
+          {
+            viewportOk = this.CreateNotabDetailViewport(tr, tagDb, out viewportId);
+          }
           bool titleblockOk = this.UpdateIsoTitleBlockAttributes(tr, tagDb, tag);
           PlantOrthoView.FileDiag("PFSNOTABDETAIL template cloned=" + cloned + " viewport=" + (viewportOk ? "ok" : "skip") + " titleblock=" + (titleblockOk ? "ok" : "skip") + " ext=" + this.FormatExtents(solidExt));
           PlantOrthoView.FileDiag("PFSNOTABDETAIL commit 직전");
           tr.Commit();
           PlantOrthoView.FileDiag("PFSNOTABDETAIL commit 완료");
         }
+
+        if (!skipViewport && viewportId != ObjectId.Null)
+          this.ConfigureNotabDetailViewport(tagDb, viewportId, solidExt);
 
         string detailsDir = this.GetIsoDetailsDirectory();
         if (string.IsNullOrWhiteSpace(detailsDir))
@@ -2301,8 +2314,9 @@ namespace PlantFlow_Support
       return cloned;
     }
 
-    private bool CreateNotabDetailViewport(Transaction tr, Database db, Extents3d solidExt)
+    private bool CreateNotabDetailViewport(Transaction tr, Database db, out ObjectId viewportId)
     {
+      viewportId = ObjectId.Null;
       if (tr == null || db == null)
         return false;
 
@@ -2371,46 +2385,80 @@ namespace PlantFlow_Support
         double th = targetMaxY - targetMinY;
         double tcx = (targetMinX + targetMaxX) / 2.0;
         double tcy = (targetMinY + targetMaxY) / 2.0;
-        const double DetailViewScale = 0.5;
-
-        Point3d target = new Point3d(
-          (solidExt.MinPoint.X + solidExt.MaxPoint.X) / 2.0,
-          (solidExt.MinPoint.Y + solidExt.MaxPoint.Y) / 2.0,
-          (solidExt.MinPoint.Z + solidExt.MaxPoint.Z) / 2.0);
-        Vector3d viewDir = s_isoPipeAxisValid && s_isoPipeAxis.Length > 1e-6 ? s_isoPipeAxis.GetNormal() : Vector3d.XAxis;
-        Vector3d viewUp = s_isoPipeUp.Length > 1e-6 ? s_isoPipeUp.GetNormal() : Vector3d.ZAxis;
-        double twist = this.ComputeNotabViewportTwist(viewDir, viewUp);
 
         Viewport vp = new Viewport();
         layoutBtr.AppendEntity(vp);
         tr.AddNewlyCreatedDBObject(vp, true);
+        viewportId = vp.ObjectId;
         vp.CenterPoint = new Point3d(tcx, tcy, 0.0);
         vp.Width = tw;
         vp.Height = th;
-        vp.ViewTarget = target;
-        vp.ViewDirection = viewDir;
-        vp.ViewCenter = new Point2d(0.0, 0.0);
-        vp.TwistAngle = twist;
-        vp.CustomScale = DetailViewScale;
         vp.On = true;
-        bool skipHidden = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_HIDDEN"), "1", System.StringComparison.OrdinalIgnoreCase);
-        bool hiddenOk = false;
-        bool shadeOk = false;
-        if (skipHidden)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL hidden skip(env)");
-        }
-        else
-        {
-          hiddenOk = this.TryApplyHiddenVisualStyle(db, tr, vp);
-          shadeOk = this.TrySetViewportShadePlotHidden(vp);
-        }
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport viewDir=" + this.FormatVectorForCommand(viewDir) + " target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") twist=" + this.FormatNumber(twist) + " hidden=" + hiddenOk + " shadePlot=" + shadeOk + " scale=1:2 plotArea=(" + this.FormatNumber(lminx) + "," + this.FormatNumber(lminy) + ")~(" + this.FormatNumber(lmaxx) + "," + this.FormatNumber(lmaxy) + ") source=" + plotSource);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 1차 생성 완료 id=" + viewportId + " center=(" + this.FormatNumber(tcx) + "," + this.FormatNumber(tcy) + ") size=(" + this.FormatNumber(tw) + "," + this.FormatNumber(th) + ") plotArea=(" + this.FormatNumber(lminx) + "," + this.FormatNumber(lminy) + ")~(" + this.FormatNumber(lmaxx) + "," + this.FormatNumber(lmaxy) + ") source=" + plotSource);
         return true;
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return false;
+    }
+
+    private bool ConfigureNotabDetailViewport(Database db, ObjectId viewportId, Extents3d solidExt)
+    {
+      if (db == null || viewportId == ObjectId.Null)
+        return false;
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          Viewport vp = tr.GetObject(viewportId, OpenMode.ForWrite, false) as Viewport;
+          if (vp == null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 2차 skip: viewport null id=" + viewportId);
+            tr.Commit();
+            return false;
+          }
+
+          const double DetailViewScale = 0.5;
+          Point3d target = new Point3d(
+            (solidExt.MinPoint.X + solidExt.MaxPoint.X) / 2.0,
+            (solidExt.MinPoint.Y + solidExt.MaxPoint.Y) / 2.0,
+            (solidExt.MinPoint.Z + solidExt.MaxPoint.Z) / 2.0);
+          Vector3d viewDir = s_isoPipeAxisValid && s_isoPipeAxis.Length > 1e-6 ? s_isoPipeAxis.GetNormal() : Vector3d.XAxis;
+          Vector3d viewUp = s_isoPipeUp.Length > 1e-6 ? s_isoPipeUp.GetNormal() : Vector3d.ZAxis;
+          double twist = this.ComputeNotabViewportTwist(viewDir, viewUp);
+
+          vp.ViewTarget = target;
+          vp.ViewDirection = viewDir;
+          vp.ViewCenter = new Point2d(0.0, 0.0);
+          vp.TwistAngle = twist;
+          vp.CustomScale = DetailViewScale;
+          bool skipHidden = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_HIDDEN"), "1", System.StringComparison.OrdinalIgnoreCase);
+          bool hiddenOk = false;
+          bool shadeOk = false;
+          if (skipHidden)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL hidden skip(env)");
+          }
+          else
+          {
+            hiddenOk = this.TryApplyHiddenVisualStyle(db, tr, vp);
+            shadeOk = this.TrySetViewportShadePlotHidden(vp);
+          }
+
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport viewDir=" + this.FormatVectorForCommand(viewDir) + " target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") twist=" + this.FormatNumber(twist) + " hidden=" + hiddenOk + " shadePlot=" + shadeOk + " scale=1:2");
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 2차 view설정 직전");
+          tr.Commit();
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 2차 view설정 완료");
+          return true;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 2차 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
 
       return false;

@@ -3,47 +3,42 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 23
+- **cycle**: 24
 - **status**: ready
 - **issued_at**: 2026-07-14
-- **title**: 무탭 N2 크래시 진단+수정 — 비주얼스타일 exact "Hidden" + Commit/SaveAs 스테이지 로그
+- **title**: 무탭 N2 크래시 분리 — 뷰포트 생략 토글 + 2단계 뷰포트 폴백
 - **target**: PlantFlow_Support/Core/Commands.cs
 
 ## 착수 전
-- cwd `...\PlantFlow_Support`. 기존 PFSVBISO* 무수정. PFSNOTABDETAIL/N1 관련만.
+- cwd `...\PlantFlow_Support`. PFSNOTABDETAIL 관련만. 기존 PFSVBISO* 무수정.
 
-## 배경 (라이브 크래시 2회 재현)
-- `PFSNOTABDETAIL`이 `template cloned=2 viewport=ok titleblock=ok`(:2217)까지 로그 후 **AutoCAD 크래시**. `saved path=`(:2230) 미출력.
-  → 크래시 구간 = **tr.Commit()(:2218) 또는 tagDb.SaveAs(:2229)**.
-- ★단서: 로그 `Hidden visualStyle=3D Hidden`. 성공한 스파이크 C는 `visualStyle=Hidden`(다름). `TryApplyHiddenVisualStyle`이 `name.IndexOf("Hidden")>=0`로 **"3D Hidden"**을 먼저 매칭 → side-DB SaveAs/GS 크래시 의심.
+## 배경 (크래시 좁힘)
+- `PFSNOTABDETAIL`이 `commit 직전`까지 로그 후 **tr.Commit()에서 크래시**(commit 완료 미출력).
+- `PFS_NOTAB_SKIP_HIDDEN=1`(Hidden/ShadePlot skip)로도 **여전히 crash** → Hidden 무관.
+- N1(solid→plain DB 저장) 무탈, 스파이크 C(side-DB 뷰포트+SaveAs) 무탈. N2(템플릿DB+뷰포트+side-DB explode solid) commit만 crash.
+- → 남은 용의자: (a) 뷰포트(3D solid 참조, ViewDirection/On) commit, (b) solid-into-템플릿 commit.
 
-## 지시 (cycle 23)
+## 지시 (cycle 24)
 
-### Fix A — 비주얼스타일 정확히 "Hidden" 우선 (스파이크 C와 일치)
-- `TryApplyHiddenVisualStyle`(약 :2430) 매칭 로직 변경:
-  1. VS 딕셔너리에서 **이름이 정확히 "Hidden"(대소문자 무시)** 인 항목 우선 선택.
-  2. 없으면 "Hidden" 포함하되 "3D"를 포함하지 않는 항목.
-  3. 그래도 없으면 기존 폴백(포함 매칭). 선택된 이름 로그.
-- 목적: 크래시 유발 의심 "3D Hidden" 회피, 스파이크 C의 "Hidden"과 동작 일치.
+### Fix A — 뷰포트 생략 진단 토글
+- 환경변수 `PFS_NOTAB_SKIP_VIEWPORT=1`이면 `CreateNotabDetailViewport` 호출 자체를 **skip**(로그 `viewport skip(env)`), solids만 클론+타이틀블록+저장.
+- 목적: skip-viewport로 commit이 완주하면 → 뷰포트가 crash 원인. 여전히 crash면 → solid-into-template가 원인.
 
-### Fix B — Commit/SaveAs 스테이지 로그(크래시 지점 확정)
-- `CreateNotabDetailDrawing`(:2189~2231)에 로그 추가:
-  - tr.Commit() **직전** `PFSNOTABDETAIL commit 직전`
-  - tr.Commit() **직후** `PFSNOTABDETAIL commit 완료`
-  - SaveAs **직전** `PFSNOTABDETAIL saveAs 직전 path=..`
-  - SaveAs **직후**(기존 saved 로그 유지)
-- 목적: 다음 실행 시 크래시가 Commit인지 SaveAs인지 로그로 확정.
-
-### Fix C — 진단 토글(선택, env var로 재컴파일 없이 bisection)
-- 환경변수 `PFS_NOTAB_SKIP_HIDDEN`=1이면 `TryApplyHiddenVisualStyle`/`TrySetViewportShadePlotHidden` 호출 skip(뷰포트는 2D wireframe로 저장). 로그 `hidden skip(env)`.
-- 목적: 사용자가 env 세팅 후 재실행 → Hidden 없이도 크래시나는지로 "Hidden GS vs solid/SaveAs" 분리.
+### Fix B — 2단계 뷰포트(폴백 설계, 항상 적용)
+뷰포트를 **같은 트랜잭션에서 view 속성까지 세팅→commit**하는 현재 방식이 크래시 의심.
+아래로 재구성:
+1. **1차 트랜잭션**: 뷰포트 생성 = AppendEntity + `vp.Width/Height/CenterPoint`만 설정 + `vp.On=true`. **ViewDirection/ViewTarget/TwistAngle/CustomScale/VisualStyle/ShadePlot은 이때 설정하지 않음.** tr.Commit.
+   - solids WblockClone/레이어/타이틀블록도 이 트랜잭션 or 그 전에.
+2. **2차 트랜잭션**(신규): 방금 생성한 뷰포트 ObjectId를 ForWrite로 다시 열어 **ViewDirection/ViewTarget/TwistAngle/CustomScale + (env 미skip 시)VisualStyle/ShadePlot** 설정. tr.Commit.
+   - 근거: 새로 append된 뷰포트에 view 속성을 같은 트랜잭션서 설정 시 GS view 미초기화로 commit 크래시 가능. 별도 트랜잭션서 이미 DB에 존재하는 뷰포트에 설정하면 안전(관용구).
+- 각 단계 로그: `viewport 1차 생성 완료`, `viewport 2차 view설정 완료`.
 
 ## 규율
-- 기존 무수정. 빈 catch 금지, 예외 FileDiag. WorkingDatabase finally 복원 유지.
+- 기존 무수정. WorkingDatabase finally 복원. 빈 catch 금지, 예외 FileDiag.
 
 ## 빌드/완료
-- 수동 빌드 GREEN. 커밋(거부 시 Claude 대리). `.plans/REPORT.md` 결과.
+- 수동 빌드 GREEN. 커밋(거부 시 Claude 대리). `.plans/REPORT.md`.
 - 사용자 라이브 순서:
-  1. 그냥 `PFSNOTABDETAIL` → Fix A(exact Hidden)로 크래시 사라지는지 + commit/saveAs 로그 확인.
-  2. 여전히 크래시면: `set PFS_NOTAB_SKIP_HIDDEN=1`(또는 시스템 env) 후 Plant3D 재시작→재실행 → Hidden 없이 크래시 여부.
-  3. 로그(commit/saveAs 스테이지 + hidden 스타일명) 공유 → 다음 판정.
+  1. 그냥 `PFSNOTABDETAIL` → Fix B(2단계 뷰포트)로 crash 사라지는지 + `viewport 1차/2차` 로그.
+  2. 여전히 crash면: `PFS_NOTAB_SKIP_VIEWPORT=1` env 설정→Plant3D 재시작→재실행 → 뷰포트 없이 commit 완주하는지(= solid-into-template 원인 여부).
+  3. 로그 공유.
