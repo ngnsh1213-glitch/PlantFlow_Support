@@ -1832,6 +1832,437 @@ namespace PlantFlow_Support
       }
     }
 
+    [CommandMethod("PFSISOTBLPROBE")]
+    public void ProbeIsoTitleBlockCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      Editor ed = doc != null ? doc.Editor : null;
+      PlantOrthoView.FileDiag("PFSISOTBLPROBE start doc=" + (doc != null ? doc.Name : "null"));
+      this.ProbeIsoTemplate();
+      this.ProbeIsoSupportSelection(doc, ed);
+      this.ProbeIsoOutputDirectory(doc);
+      if (ed != null)
+        ed.WriteMessage("\nPFSISOTBLPROBE done. Check FileDiag log.");
+    }
+
+    private void ProbeIsoTemplate()
+    {
+      string templatePath = PSUtil.OrthoTemplate;
+      if (string.IsNullOrWhiteSpace(templatePath) || !System.IO.File.Exists(templatePath))
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE template 없음 path=" + (templatePath ?? "null"));
+        return;
+      }
+
+      Database tdb = null;
+      string openedBy = "direct";
+      string tempPath = null;
+      try
+      {
+        try
+        {
+          tdb = new Database(false, true);
+          tdb.ReadDwgFile(templatePath, System.IO.FileShare.Read, true, null);
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl direct open ok path=" + templatePath);
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl direct open 예외: " + ex.GetType().Name + ": " + ex.Message + " path=" + templatePath);
+          if (tdb != null)
+          {
+            tdb.Dispose();
+            tdb = null;
+          }
+
+          try
+          {
+            string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "pfs_isotblprobe");
+            System.IO.Directory.CreateDirectory(tempDir);
+            tempPath = System.IO.Path.Combine(tempDir, "template_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", System.Globalization.CultureInfo.InvariantCulture) + ".dwg");
+            System.IO.File.Copy(templatePath, tempPath, true);
+            tdb = new Database(false, true);
+            tdb.ReadDwgFile(tempPath, System.IO.FileShare.Read, true, null);
+            openedBy = "temp-copy";
+            PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl temp-copy open ok path=" + tempPath);
+          }
+          catch (System.Exception ex2)
+          {
+            PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl temp-copy open 예외: " + ex2.GetType().Name + ": " + ex2.Message + " source=" + templatePath + " temp=" + tempPath);
+            return;
+          }
+        }
+
+        if (tdb != null)
+          this.ProbeIsoTemplateDatabase(tdb, templatePath, openedBy);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl probe 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        if (tdb != null)
+          tdb.Dispose();
+        if (!string.IsNullOrEmpty(tempPath))
+        {
+          try
+          {
+            if (System.IO.File.Exists(tempPath))
+              System.IO.File.Delete(tempPath);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl temp delete 예외: " + ex.GetType().Name + ": " + ex.Message + " path=" + tempPath);
+          }
+        }
+      }
+    }
+
+    private void ProbeIsoTemplateDatabase(Database tdb, string templatePath, string openedBy)
+    {
+      using (Transaction tr = tdb.TransactionManager.StartTransaction())
+      {
+        DBDictionary layouts = tr.GetObject(tdb.LayoutDictionaryId, OpenMode.ForRead) as DBDictionary;
+        BlockTable bt = tr.GetObject(tdb.BlockTableId, OpenMode.ForRead) as BlockTable;
+        if (layouts != null)
+        {
+          foreach (DBDictionaryEntry entry in layouts)
+          {
+            try
+            {
+              Layout layout = tr.GetObject(entry.Value, OpenMode.ForRead, false) as Layout;
+              if (layout == null)
+                continue;
+              BlockTableRecord btr = tr.GetObject(layout.BlockTableRecordId, OpenMode.ForRead, false) as BlockTableRecord;
+              int entityCount = 0;
+              int viewportCount = 0;
+              if (btr != null)
+              {
+                foreach (ObjectId id in btr)
+                {
+                  entityCount++;
+                  if (tr.GetObject(id, OpenMode.ForRead, false) is Viewport)
+                    viewportCount++;
+                }
+              }
+              PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl layout name=" + layout.LayoutName + " btr=" + layout.BlockTableRecordId + " entities=" + entityCount + " viewports=" + viewportCount + " openedBy=" + openedBy);
+              this.ProbeIsoLayoutViewports(tr, btr, layout.LayoutName);
+              this.ProbeIsoTitleBlocks(tr, btr, layout.LayoutName);
+            }
+            catch (System.Exception ex)
+            {
+              PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl layout 예외 key=" + entry.Key + ": " + ex.GetType().Name + ": " + ex.Message);
+            }
+          }
+        }
+        else
+        {
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl layouts 없음 path=" + templatePath);
+        }
+
+        if (bt != null && bt.Has(BlockTableRecord.ModelSpace))
+        {
+          BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead, false) as BlockTableRecord;
+          int entityCount = 0;
+          int viewportCount = 0;
+          if (ms != null)
+          {
+            foreach (ObjectId id in ms)
+            {
+              entityCount++;
+              if (tr.GetObject(id, OpenMode.ForRead, false) is Viewport)
+                viewportCount++;
+            }
+          }
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl modelspace entities=" + entityCount + " viewports=" + viewportCount);
+          this.ProbeIsoTitleBlocks(tr, ms, "ModelSpace");
+        }
+
+        tr.Commit();
+      }
+    }
+
+    private void ProbeIsoLayoutViewports(Transaction tr, BlockTableRecord btr, string layoutName)
+    {
+      if (tr == null || btr == null)
+        return;
+      foreach (ObjectId id in btr)
+      {
+        try
+        {
+          Viewport vp = tr.GetObject(id, OpenMode.ForRead, false) as Viewport;
+          if (vp == null)
+            continue;
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl viewport layout=" + layoutName + " id=" + id + " number=" + vp.Number + " center=" + vp.CenterPoint + " viewCenter=" + vp.ViewCenter + " customScale=" + vp.CustomScale + " locked=" + vp.Locked);
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl viewport 예외 layout=" + layoutName + " id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+        }
+      }
+    }
+
+    private int ProbeIsoTitleBlocks(Transaction tr, BlockTableRecord btr, string ownerName)
+    {
+      if (tr == null || btr == null)
+        return 0;
+      int found = 0;
+      foreach (ObjectId id in btr)
+      {
+        try
+        {
+          BlockReference br = tr.GetObject(id, OpenMode.ForRead, false) as BlockReference;
+          if (br == null)
+            continue;
+          string blockName = this.GetBlockReferenceName(tr, br);
+          if (!string.Equals(blockName, "DRAWING_TITLE", System.StringComparison.OrdinalIgnoreCase))
+            continue;
+
+          found++;
+          System.Collections.Generic.List<string> tags = new System.Collections.Generic.List<string>();
+          foreach (ObjectId attId in br.AttributeCollection)
+          {
+            AttributeReference ar = tr.GetObject(attId, OpenMode.ForRead, false) as AttributeReference;
+            if (ar != null)
+              tags.Add(ar.Tag + "=" + ar.TextString);
+          }
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl titleBlock owner=" + ownerName + " id=" + id + " tags=" + string.Join(",", tags.ToArray()) + " hasPIPE_SUPPORT_DETAIL=" + tags.Exists(t => t.StartsWith("PIPE_SUPPORT_DETAIL=", System.StringComparison.OrdinalIgnoreCase)));
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl titleBlock 예외 owner=" + ownerName + " id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+        }
+      }
+      PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl titleBlock owner=" + ownerName + " count=" + found);
+      return found;
+    }
+
+    private string GetBlockReferenceName(Transaction tr, BlockReference br)
+    {
+      try
+      {
+        if (!string.IsNullOrEmpty(br.Name))
+          return br.Name;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl block name 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      try
+      {
+        BlockTableRecord btr = tr.GetObject(br.BlockTableRecord, OpenMode.ForRead, false) as BlockTableRecord;
+        return btr != null ? btr.Name : string.Empty;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE tmpl block btr name 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return string.Empty;
+      }
+    }
+
+    private void ProbeIsoSupportSelection(Document doc, Editor ed)
+    {
+      if (doc == null || ed == null)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE support skip: doc/editor null");
+        return;
+      }
+
+      PromptSelectionResult psr = ed.GetSelection();
+      if (psr.Status != PromptStatus.OK || psr.Value == null)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE support selection skip status=" + psr.Status);
+        return;
+      }
+
+      PSUtil ps = Commands.PSUtil;
+      if (ps == null)
+        ps = new PSUtil();
+      if (ps == null || ps.dl_manager == null)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE support skip: dl_manager null");
+        return;
+      }
+
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        foreach (SelectedObject selected in psr.Value)
+        {
+          if (selected == null || selected.ObjectId == ObjectId.Null)
+            continue;
+          try
+          {
+            Entity ent = tr.GetObject(selected.ObjectId, OpenMode.ForRead, false) as Entity;
+            if (ent == null)
+              continue;
+            string typeName = ent.GetType().Name;
+            string dxfName = ent.GetRXClass() != null ? ent.GetRXClass().DxfName : string.Empty;
+            bool isSupport = typeName.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) >= 0 || dxfName.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            PlantOrthoView.FileDiag("PFSISOTBLPROBE support entity id=" + selected.ObjectId + " type=" + typeName + " dxf=" + dxfName + " isSupport=" + isSupport);
+            if (!isSupport)
+              continue;
+            this.ProbeIsoSupportProperties(ps, selected.ObjectId);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSISOTBLPROBE support entity 예외 id=" + selected.ObjectId + ": " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+        tr.Commit();
+      }
+    }
+
+    private void ProbeIsoSupportProperties(PSUtil ps, ObjectId id)
+    {
+      bool loggedAny = false;
+      try
+      {
+        System.Reflection.MethodInfo mi = ps.dl_manager.GetType().GetMethod("GetAllProperties", new System.Type[] { typeof(ObjectId), typeof(bool) });
+        if (mi != null)
+        {
+          object result = mi.Invoke(ps.dl_manager, new object[] { id, true });
+          System.Collections.IEnumerable seq = result as System.Collections.IEnumerable;
+          if (seq != null && !(result is string))
+          {
+            foreach (object item in seq)
+            {
+              string name;
+              string value;
+              this.ExtractProbeProperty(item, out name, out value);
+              PlantOrthoView.FileDiag("PFSISOTBLPROBE support prop " + name + "=" + value);
+              loggedAny = true;
+            }
+          }
+          else if (result != null)
+          {
+            PlantOrthoView.FileDiag("PFSISOTBLPROBE support prop GetAllProperties=" + result);
+            loggedAny = true;
+          }
+        }
+        else
+        {
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE support prop GetAllProperties method 없음");
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE support prop GetAllProperties 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      string[] candidates = new string[] { "SupportName", "ShortDescription", "LineNumberTag", "Tag", "Number", "PnPTag", "SupportDetail" };
+      foreach (string name in candidates)
+      {
+        try
+        {
+          System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection() { name };
+          System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(id, names, true);
+          string value = props != null && props.Count > 0 ? props[0] : string.Empty;
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE support prop candidate " + name + "=" + value);
+          loggedAny = true;
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSISOTBLPROBE support prop candidate " + name + " 예외: " + ex.GetType().Name + ": " + ex.Message);
+        }
+      }
+
+      if (!loggedAny)
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE support prop 없음 id=" + id);
+    }
+
+    private void ExtractProbeProperty(object item, out string name, out string value)
+    {
+      name = item != null ? item.ToString() : "null";
+      value = string.Empty;
+      if (item == null)
+        return;
+
+      try
+      {
+        System.Collections.DictionaryEntry de = item is System.Collections.DictionaryEntry ? (System.Collections.DictionaryEntry)item : new System.Collections.DictionaryEntry(null, null);
+        if (de.Key != null || de.Value != null)
+        {
+          name = de.Key != null ? de.Key.ToString() : "null";
+          value = de.Value != null ? de.Value.ToString() : string.Empty;
+          return;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE support prop DictionaryEntry 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      try
+      {
+        object key = this.GetProbePropertyValue(item, "Key") ?? this.GetProbePropertyValue(item, "Name") ?? this.GetProbePropertyValue(item, "PropertyName") ?? this.GetProbePropertyValue(item, "DisplayName");
+        object val = this.GetProbePropertyValue(item, "Value") ?? this.GetProbePropertyValue(item, "Text") ?? this.GetProbePropertyValue(item, "StringValue");
+        if (key != null)
+          name = key.ToString();
+        if (val != null)
+          value = val.ToString();
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE support prop reflection 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private object GetProbePropertyValue(object item, string propertyName)
+    {
+      if (item == null || string.IsNullOrEmpty(propertyName))
+        return null;
+      System.Reflection.PropertyInfo pi = item.GetType().GetProperty(propertyName);
+      return pi != null ? pi.GetValue(item, null) : null;
+    }
+
+    private void ProbeIsoOutputDirectory(Document doc)
+    {
+      string projectDir = string.Empty;
+      try
+      {
+        Autodesk.ProcessPower.ProjectManager.Project piping = Autodesk.ProcessPower.PlantInstance.PlantApplication.CurrentProject.ProjectParts["Piping"] as Autodesk.ProcessPower.ProjectManager.Project;
+        if (piping != null)
+          projectDir = piping.ProjectDwgDirectory;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE dir project ProjectDwgDirectory 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      string docDir = string.Empty;
+      try
+      {
+        if (doc != null && doc.Database != null && !string.IsNullOrWhiteSpace(doc.Database.Filename))
+          docDir = System.IO.Path.GetDirectoryName(doc.Database.Filename);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE dir active doc folder 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      string baseDir = !string.IsNullOrWhiteSpace(projectDir) ? projectDir : docDir;
+      string detailsDir = !string.IsNullOrWhiteSpace(baseDir) ? System.IO.Path.Combine(baseDir, "Details") : string.Empty;
+      PlantOrthoView.FileDiag("PFSISOTBLPROBE dir project=" + projectDir + " doc=" + docDir + " details=" + detailsDir);
+      if (string.IsNullOrWhiteSpace(detailsDir))
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE dir details skip: base dir empty");
+        return;
+      }
+
+      try
+      {
+        bool exists = System.IO.Directory.Exists(detailsDir);
+        string probeFile = System.IO.Path.Combine(exists ? detailsDir : baseDir, ".pfs_write_probe_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", System.Globalization.CultureInfo.InvariantCulture) + ".tmp");
+        System.IO.File.WriteAllText(probeFile, "probe");
+        System.IO.File.Delete(probeFile);
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE dir details exists=" + exists + " writable=True path=" + detailsDir);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSISOTBLPROBE dir details writable=False 예외: " + ex.GetType().Name + ": " + ex.Message + " path=" + detailsDir);
+      }
+    }
     [CommandMethod("PFSCOUNTVIEW")]
     public void CountViewCommand()
     {
