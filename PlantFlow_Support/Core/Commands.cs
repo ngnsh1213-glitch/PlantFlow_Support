@@ -1601,6 +1601,7 @@ namespace PlantFlow_Support
                 ObjectId textStyleId;
                 ObjectId dimStyleId;
                 this.EnsureIsoAnnotationResources(originalDb, ttr, out annotationLayerId, out textStyleId, out dimStyleId);
+                this.PurgePriorIsoDetail(ttr, targetMs, detailLayerId, annotationLayerId);
                 Database oldWorking = HostApplicationServices.WorkingDatabase;
                 IdMapping idMap = new IdMapping();
                 try
@@ -1702,13 +1703,69 @@ namespace PlantFlow_Support
       }
     }
 
+    private void PurgePriorIsoDetail(Transaction tr, BlockTableRecord targetMs, ObjectId detailLayerId, ObjectId annotationLayerId)
+    {
+      if (tr == null || targetMs == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED priorDetail purge skip: target null");
+        return;
+      }
+
+      int erased = 0;
+      System.Collections.Generic.List<ObjectId> eraseIds = new System.Collections.Generic.List<ObjectId>();
+      foreach (ObjectId id in targetMs)
+      {
+        try
+        {
+          Entity ent = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+          if (ent == null)
+            continue;
+          if ((detailLayerId != ObjectId.Null && ent.LayerId == detailLayerId) || (annotationLayerId != ObjectId.Null && ent.LayerId == annotationLayerId))
+            eraseIds.Add(id);
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED priorDetail purge scan skip id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+        }
+      }
+
+      foreach (ObjectId id in eraseIds)
+      {
+        try
+        {
+          Entity ent = tr.GetObject(id, OpenMode.ForWrite, false) as Entity;
+          if (ent == null || ent.IsErased)
+            continue;
+          ent.Erase();
+          erased++;
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED priorDetail purge erase skip id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+        }
+      }
+
+      PlantOrthoView.FileDiag("PFSVBISOEXPORTED priorDetail purge erased=" + erased);
+    }
+
     private void CloseIsoTempDocument(Document tempDoc, Document originalDoc)
     {
       bool discarded = false;
       try
       {
         if (originalDoc != null && !object.ReferenceEquals(originalDoc, tempDoc))
+        {
           Application.DocumentManager.MdiActiveDocument = originalDoc;
+          try
+          {
+            originalDoc.SendStringToExecute("._REGEN\n", true, false, false);
+            PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube REGEN 큐잉 doc=" + originalDoc.Name);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube REGEN 예외: " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
         tempDoc.CloseAndDiscard();
         discarded = true;
       }
