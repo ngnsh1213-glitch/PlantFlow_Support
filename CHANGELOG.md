@@ -4,7 +4,12 @@
 
 ## [Unreleased]
 ### Added
+- 격리 Main 뷰 가로 치수 파이프중심 분할(B4d, f6c99fa): 파이프 원 중심 X 기준 좌/우(예 100/200) + 전체(300). `IsoCircleCandidate.CenterX`·`pipeCenterX` 노출 — 2026-07-13
+- 격리 재실행 중복 detail 제거(B4e-A, cf44403): clone-back 직전 기존 `PFS_ISO_DETAIL`/`AUTO_DIM` 삭제(`PurgePriorIsoDetail`) → 태그당 최신 1개만 — 2026-07-13
 - 프로젝트 문서 규칙 도입: `CLAUDE.md`, `AGENTS.md`, `SESSION.md`, `TODO.md`, `CHANGELOG.md` (Claude/Codex 공용 상태 관리). PFO에서 PFS를 별도 프로젝트로 분리 — 2026-07-11
+
+### Known Issues
+- 격리 파이프라인 후 뷰큐브 미표시(B4e-B REGEN 불충분, 뷰 전환 시 복귀). 후속 보류 — 2026-07-13
 - PFS 오쏘 B1c-Main: 서포트 선택→S1 길이방향 Main 뷰 (PFSVBSUPPORT, 46d87da)
 - PFS 오쏘 B1b: Main+Top+ISO 다중 뷰 번들 생성 (PFSVBMULTI, e465ecb)
 

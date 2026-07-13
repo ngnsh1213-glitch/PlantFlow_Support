@@ -1,15 +1,17 @@
 # SESSION — 현재 작업 상태
 
-_최종 갱신: 2026-07-13 (세션 이관)_
+_최종 갱신: 2026-07-13 (B4d+B4e 라이브 PASS)_
 
 ## 진행 중 트랙
-- **PFS 오쏘 격리(1서포트=1도면) — B4c 집도 완료·라이브 대기 (2026-07-13)**.
-  - ✅ 완료: B1g(VIEWBASE 커널)·B2(EXPORTLAYOUT+clone-back)·B3a(방향 Main)·B4a(치수 가시화 폭300/높이75).
-  - **B4c(직전 집도, 커밋 f02ee1b, Claude 정적 PASS)**: 세로 치수를 서포트만 재도록(파이프 Circle 제외). `TryGetIsoSupportPaperExtents`=블록 내부 8corner×BlockTransform, 파이프원 반경매칭(±15%)+최상단 우선, 최대원 fallback. → **★대기: 사용자 수동 빌드/라이브 테스트.**
-  - 데이터: PLN(라인넘버) 서포트·파이프 모두 미부여(빈값), BOP=423 정상.
-  - 커밋 체인: e7ffa14(B1g)·7a7653d(B2a)·cc6602e(B2b)·cbe738c(B3a)·4d314b2(B4a-fix)·b636f83(B4a-fix2)·f02ee1b(B4c).
-  - 상세: `<appDataDir>\scratch\plan_pfs_isolation_b4c_20260713.md`, 핸드오프 `.plans/HANDOFF_B4c.md`(RESULT done).
-- (병렬, 다른 챗) **핫 리로드 스파이크** — `.plans/HANDOFF.md` cycle 6, `tools/HotReload/`(제품 무접촉). ★csproj 기본 glob이 tools 흡수→메인 빌드 CS0579 깨짐 → **PlantFlow_Support.csproj에 `<Compile Remove="tools\**"/>` 추가 필요**(미반영이면 빌드 실패).
+- **PFS 오쏘 격리(1서포트=1도면) — B4d(가로 분할 치수)·B4e(중복제거) 라이브 PASS (2026-07-13)**.
+  - ✅ 완료: B1g(VIEWBASE 커널)·B2(EXPORTLAYOUT+clone-back)·B3a(방향 Main)·B4a(치수 폭300/높이75)·B4c(세로 치수 서포트만)·**B4d·B4e**.
+  - **B4d(커밋 f6c99fa, 라이브 PASS)**: 가로 치수를 파이프 원 중심 X 기준 좌/우 분할(예 100/200) + 전체(300) 유지. `IsoCircleCandidate.CenterX` 추가, `TryGetIsoSupportPaperExtents`가 `pipeCenterX` 노출. 라벨=`s_isoRealWidth` 비례 안분.
+  - **B4e(커밋 cf44403, 라이브 PASS)**: (A) 재실행 시 기존 `PFS_ISO_DETAIL`/`AUTO_DIM` 레이어 객체 삭제(`PurgePriorIsoDetail`) → 최신 1개만. 라이브 `priorDetail purge erased=N` 확인, 중복 100 해소. (B) 원본 재활성 후 `REGEN` 큐잉.
+  - **★미해결(나중): 뷰큐브 미표시** — B4e의 REGEN으론 부족(뷰 전환해야 표시). 다른 방식 필요(뷰/시점 리셋 등). 사용자 지시로 후순위 보류.
+  - 잔여 노이즈(무해): `LogIsoDimensionExtents` `eInvalidExtents h=25` 로깅만 실패(치수 생성엔 영향 없음).
+  - 데이터: PLN 미부여(빈값), BOP=423, size=80, realW=300/realH=75.
+  - 상세: `plan_pfs_iso_b4d_dimsplit_20260713.md`, `plan_pfs_iso_b4e_dedup_viewcube_20260713.md`. 핸드오프 `.plans/HANDOFF.md`(cycle 9)·`HANDOFF_B4d.md`·`HANDOFF_B4e.md`(RESULT done).
+- (종료) **핫 리로드 스파이크** — 리포 밖 `C:\Lisp\HotReload`로 이관 완료(커밋 4447a17). HANDOFF.md는 B4e(cycle 9)로 회수됨. 더 이상 사용 안 함.
 - (이전) **격리 방향 제어 — ✅ B3a PASS (2026-07-12)**.
   - 파이프라인: 선택셋 → 1st temp(Plant clone) → explode Solid3d → 2nd temp(순수 solid) → **-VPOINT(파이프축)** → SendStringToExecute VIEWBASE `_O _Current` → EXPORTLAYOUT 평면화 → 원본 clone-back(PFS_ISO_DETAIL 레이어).
   - **방향 제어(B3a)**: -VPOINT(파이프축)+VIEWBASE `_O _Current`로 Main뷰(파이프=원+서포트=직사각형) 생성. X/Y/수직Z 전 축 + 다중 타입 육안 확정. "축방향 응시=Main" 보편 적용.
@@ -27,12 +29,11 @@ _최종 갱신: 2026-07-13 (세션 이관)_
 - 상세: `plan_pfs_isolation_20260711.md`(§4-A~P), 메모리 `pfs-wblockclone-preserves-plant-geometry`.
 
 ## 대기 중 액션
-- 없음 (B2 착수 대기).
+- 없음. B4d+B4e 라이브 PASS로 종결.
 
 ## 다음 결정 분기
-- **B2**: 2nd temp VIEWBASE Layout → EXPORTLAYOUT → 2D를 원본 target으로 clone-back(PFSPLACEEXPORT 재활용).
-- **방향 제어**: Main뷰=파이프축 → VIEWBASE 전 `-VPOINT` 세팅(설계 [MODEL→-VPOINT→VIEWBASE]). 현재는 기본 방향.
-- **base/projected 정제**: newEntities=4(base+projected 자동) → 사양 뷰 구성 조정.
+- **뷰큐브 미표시(보류)**: REGEN 불충분 확인. 후속 소분기에서 뷰/시점 리셋 등 다른 방식 검토.
+- **후보 트랙**: (a) 별도 도면 분리(태그당 최신 1개 — B4e 정합) (b) BOP MLeader(B4b) (c) 스케일/배치 (d) eInvalidExtents 로깅 노이즈 정리.
 
 ## 관련 파일·경로
 - 잔여 백로그: `TODO.md`
