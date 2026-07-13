@@ -1,13 +1,15 @@
 # SESSION — 현재 작업 상태
 
-_최종 갱신: 2026-07-12_
+_최종 갱신: 2026-07-13 (세션 이관)_
 
 ## 진행 중 트랙
-- **PFS 오쏘 격리(1서포트=1도면) — ✅ B4a 완료 = Main 치수 가시화까지 (2026-07-13)**.
-  - 파이프라인에 **바운딩 치수**(폭·높이, 실 mm) 추가: PFSVBISOEXPORTED가 clone-back 2D 블록 extents로 H/V RotatedDimension 생성, 텍스트=원본 3D 실측(basis dot projection), 크기 h=max(W,H)/12 오버라이드로 가시화. AUTO_DIM 레이어. 커밋 4d314b2(eKeyNotFound=WorkingDatabase)·b636f83(크기).
+- **PFS 오쏘 격리(1서포트=1도면) — B4c 집도 완료·라이브 대기 (2026-07-13)**.
+  - ✅ 완료: B1g(VIEWBASE 커널)·B2(EXPORTLAYOUT+clone-back)·B3a(방향 Main)·B4a(치수 가시화 폭300/높이75).
+  - **B4c(직전 집도, 커밋 f02ee1b, Claude 정적 PASS)**: 세로 치수를 서포트만 재도록(파이프 Circle 제외). `TryGetIsoSupportPaperExtents`=블록 내부 8corner×BlockTransform, 파이프원 반경매칭(±15%)+최상단 우선, 최대원 fallback. → **★대기: 사용자 수동 빌드/라이브 테스트.**
   - 데이터: PLN(라인넘버) 서포트·파이프 모두 미부여(빈값), BOP=423 정상.
-  - 다음: B4c(세로 치수 의미 정련—블록 전체 164 vs 서포트 75 라벨 불일치), B4b(BOP MLeader—파이프 원 2D 검출 Circle=1 확인됨), 스케일/배치.
-  - 상세: `<appDataDir>\scratch\plan_pfs_isolation_b4dim_20260712.md`.
+  - 커밋 체인: e7ffa14(B1g)·7a7653d(B2a)·cc6602e(B2b)·cbe738c(B3a)·4d314b2(B4a-fix)·b636f83(B4a-fix2)·f02ee1b(B4c).
+  - 상세: `<appDataDir>\scratch\plan_pfs_isolation_b4c_20260713.md`, 핸드오프 `.plans/HANDOFF_B4c.md`(RESULT done).
+- (병렬, 다른 챗) **핫 리로드 스파이크** — `.plans/HANDOFF.md` cycle 6, `tools/HotReload/`(제품 무접촉). ★csproj 기본 glob이 tools 흡수→메인 빌드 CS0579 깨짐 → **PlantFlow_Support.csproj에 `<Compile Remove="tools\**"/>` 추가 필요**(미반영이면 빌드 실패).
 - (이전) **격리 방향 제어 — ✅ B3a PASS (2026-07-12)**.
   - 파이프라인: 선택셋 → 1st temp(Plant clone) → explode Solid3d → 2nd temp(순수 solid) → **-VPOINT(파이프축)** → SendStringToExecute VIEWBASE `_O _Current` → EXPORTLAYOUT 평면화 → 원본 clone-back(PFS_ISO_DETAIL 레이어).
   - **방향 제어(B3a)**: -VPOINT(파이프축)+VIEWBASE `_O _Current`로 Main뷰(파이프=원+서포트=직사각형) 생성. X/Y/수직Z 전 축 + 다중 타입 육안 확정. "축방향 응시=Main" 보편 적용.
