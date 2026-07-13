@@ -1903,17 +1903,22 @@ namespace PlantFlow_Support
 
       try
       {
-        Entity source = tr.GetObject(dimSourceId, OpenMode.ForRead, false) as Entity;
-        if (source == null)
-          return false;
+        Extents3d detailExt;
+        if (!this.TryGetIsoModelSpaceExtents(tr, db, out detailExt))
+        {
+          Entity source = tr.GetObject(dimSourceId, OpenMode.ForRead, false) as Entity;
+          if (source == null)
+            return false;
 
-        Extents3d ext = source.GeometricExtents;
-        double detailW = ext.MaxPoint.X - ext.MinPoint.X;
-        double detailH = ext.MaxPoint.Y - ext.MinPoint.Y;
+          detailExt = source.GeometricExtents;
+        }
+
+        double detailW = detailExt.MaxPoint.X - detailExt.MinPoint.X;
+        double detailH = detailExt.MaxPoint.Y - detailExt.MinPoint.Y;
         if (detailW <= 1e-9 || detailH <= 1e-9)
           return false;
-        double dcx = (ext.MinPoint.X + ext.MaxPoint.X) / 2.0;
-        double dcy = (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0;
+        double dcx = (detailExt.MinPoint.X + detailExt.MaxPoint.X) / 2.0;
+        double dcy = (detailExt.MinPoint.Y + detailExt.MaxPoint.Y) / 2.0;
 
         ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(db, tr, "Title Block");
         if (layoutBtrId == ObjectId.Null)
@@ -1978,8 +1983,7 @@ namespace PlantFlow_Support
         double th = targetMaxY - targetMinY;
         double tcx = (targetMinX + targetMaxX) / 2.0;
         double tcy = (targetMinY + targetMaxY) / 2.0;
-        double aspect = th > 1e-9 ? tw / th : 1.3333;
-        double viewHeight = ((detailW / aspect) > detailH ? (detailW / aspect) : detailH) * 1.15;
+        const double DetailViewScale = 0.5;
 
         Viewport nvp = new Viewport();
         layoutBtr.AppendEntity(nvp);
@@ -1988,9 +1992,9 @@ namespace PlantFlow_Support
         nvp.Width = tw;
         nvp.Height = th;
         nvp.ViewCenter = new Point2d(dcx, dcy);
-        nvp.ViewHeight = viewHeight;
+        nvp.CustomScale = DetailViewScale;
         nvp.On = true;
-        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg newViewport center=(" + this.FormatNumber(tcx) + "," + this.FormatNumber(tcy) + ") size=(" + this.FormatNumber(tw) + "," + this.FormatNumber(th) + ") viewCenter=(" + this.FormatNumber(dcx) + "," + this.FormatNumber(dcy) + ") viewHeight=" + this.FormatNumber(viewHeight) + " plotArea=(" + this.FormatNumber(lminx) + "," + this.FormatNumber(lminy) + ")~(" + this.FormatNumber(lmaxx) + "," + this.FormatNumber(lmaxy) + ") source=" + plotSource);
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg newViewport center=(" + this.FormatNumber(tcx) + "," + this.FormatNumber(tcy) + ") size=(" + this.FormatNumber(tw) + "," + this.FormatNumber(th) + ") viewCenter=(" + this.FormatNumber(dcx) + "," + this.FormatNumber(dcy) + ") customScale=1:2 detailExt=(" + this.FormatNumber(detailExt.MinPoint.X) + "," + this.FormatNumber(detailExt.MinPoint.Y) + ")~(" + this.FormatNumber(detailExt.MaxPoint.X) + "," + this.FormatNumber(detailExt.MaxPoint.Y) + ") plotArea=(" + this.FormatNumber(lminx) + "," + this.FormatNumber(lminy) + ")~(" + this.FormatNumber(lmaxx) + "," + this.FormatNumber(lmaxy) + ") source=" + plotSource);
         return true;
       }
       catch (System.Exception ex)
@@ -1999,6 +2003,57 @@ namespace PlantFlow_Support
       }
 
       return false;
+    }
+
+    private bool TryGetIsoModelSpaceExtents(Transaction tr, Database db, out Extents3d extents)
+    {
+      extents = new Extents3d();
+      if (tr == null || db == null)
+        return false;
+
+      bool has = false;
+      try
+      {
+        BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+        if (bt == null || !bt.Has(BlockTableRecord.ModelSpace))
+          return false;
+
+        BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+        if (ms == null)
+          return false;
+
+        foreach (ObjectId id in ms)
+        {
+          try
+          {
+            Entity entity = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+            if (entity == null)
+              continue;
+
+            Extents3d entityExt = entity.GeometricExtents;
+            if (!has)
+            {
+              extents = entityExt;
+              has = true;
+            }
+            else
+            {
+              extents.AddExtents(entityExt);
+            }
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg detailExt entity skip id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg detailExt 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+
+      return has;
     }
 
     private bool UpdateIsoTitleBlockAttributes(Transaction tr, Database db, string supportTag)
