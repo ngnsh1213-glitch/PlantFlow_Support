@@ -2534,11 +2534,21 @@ namespace PlantFlow_Support
         }
 
         Extents3d paperExt = source.GeometricExtents;
+        Extents3d verticalExt = paperExt;
+        Extents3d supportExt;
+        if (this.TryGetIsoSupportPaperExtents(tr, source as BlockReference, out supportExt))
+        {
+          verticalExt = supportExt;
+        }
+        else
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED supportExt fallback=paperExt " + paperExt.MinPoint + "~" + paperExt.MaxPoint);
+        }
         double dimSize = this.ComputeIsoDimensionSize();
         RotatedDimension dimH;
         RotatedDimension dimV;
         PSUtil.CreateHorizontalDimension(paperExt, Matrix3d.Identity, dimStyleId, paperExt.MaxPoint.Y, out dimH);
-        PSUtil.CreateVerticalDimension(paperExt, Matrix3d.Identity, dimStyleId, paperExt.MaxPoint.X, out dimV);
+        PSUtil.CreateVerticalDimension(verticalExt, Matrix3d.Identity, dimStyleId, verticalExt.MaxPoint.X, out dimV);
         if (dimH != null)
         {
           dimH.DimensionStyle = dimStyleId;
@@ -2567,6 +2577,192 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSVBISOEXPORTED dim 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
+    }
+
+    private bool TryGetIsoSupportPaperExtents(Transaction tr, BlockReference br, out Extents3d supportExt)
+    {
+      supportExt = new Extents3d();
+      if (br == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED supportExt skip: source not BlockReference");
+        return false;
+      }
+
+      try
+      {
+        if (tr == null)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED supportExt skip: transaction null");
+          return false;
+        }
+
+        BlockTableRecord btr = tr.GetObject(br.BlockTableRecord, OpenMode.ForRead, false) as BlockTableRecord;
+        if (btr == null)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED supportExt skip: block definition null br=" + br.ObjectId);
+          return false;
+        }
+
+        Matrix3d transform = br.BlockTransform;
+        System.Collections.Generic.List<IsoCircleCandidate> circles = new System.Collections.Generic.List<IsoCircleCandidate>();
+        foreach (ObjectId id in btr)
+        {
+          Entity ent = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+          if (ent == null)
+            continue;
+
+          Circle circle = ent as Circle;
+          if (circle != null)
+          {
+            double radius = this.GetTransformedCircleRadius(circle, transform);
+            Point3d center = circle.Center.TransformBy(transform);
+            circles.Add(new IsoCircleCandidate(id, radius, center.Y));
+          }
+        }
+
+        double expectedRadius;
+        bool hasExpected = this.TryGetExpectedIsoPipeRadius(out expectedRadius);
+        ObjectId excludedCircleId = ObjectId.Null;
+        int matched = 0;
+        double bestCenterY = double.MinValue;
+        double maxRadius = -1.0;
+        ObjectId maxCircleId = ObjectId.Null;
+        foreach (IsoCircleCandidate candidate in circles)
+        {
+          bool match = hasExpected && expectedRadius > 1e-6 && System.Math.Abs(candidate.Radius - expectedRadius) / expectedRadius < 0.15;
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED pipeCircle R=" + this.FormatNumber(candidate.Radius) + " expR=" + (hasExpected ? this.FormatNumber(expectedRadius) : "n/a") + " match=" + match + " centerY=" + this.FormatNumber(candidate.CenterY));
+          if (candidate.Radius > maxRadius)
+          {
+            maxRadius = candidate.Radius;
+            maxCircleId = candidate.Id;
+          }
+          if (match)
+          {
+            matched++;
+            if (candidate.CenterY > bestCenterY)
+            {
+              bestCenterY = candidate.CenterY;
+              excludedCircleId = candidate.Id;
+            }
+          }
+        }
+
+        if (excludedCircleId == ObjectId.Null && maxCircleId != ObjectId.Null)
+        {
+          excludedCircleId = maxCircleId;
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED pipeCircle fallback=maxCircle R=" + this.FormatNumber(maxRadius));
+        }
+
+        bool hasSupport = false;
+        Point3d min = Point3d.Origin;
+        Point3d max = Point3d.Origin;
+        int excludedCircles = 0;
+        int includedEntities = 0;
+        foreach (ObjectId id in btr)
+        {
+          Entity ent = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+          if (ent == null)
+            continue;
+          if (id == excludedCircleId)
+          {
+            excludedCircles++;
+            continue;
+          }
+
+          try
+          {
+            Extents3d entExt = ent.GeometricExtents;
+            Point3d[] corners = this.GetExtentsCorners(entExt);
+            foreach (Point3d corner in corners)
+              this.AccumulatePoint(corner.TransformBy(transform), ref hasSupport, ref min, ref max);
+            includedEntities++;
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSVBISOEXPORTED supportExt entity skip id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+
+        if (!hasSupport || includedEntities == 0 || System.Math.Abs(max.X - min.X) <= 1e-6 || System.Math.Abs(max.Y - min.Y) <= 1e-6)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED supportExt degenerate included=" + includedEntities + " excludedCircles=" + excludedCircles + " matched=" + matched);
+          return false;
+        }
+
+        supportExt = new Extents3d(min, max);
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED supportExt=" + supportExt.MinPoint + "~" + supportExt.MaxPoint + " excludedCircles=" + excludedCircles + " matched=" + matched);
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED supportExt 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private bool TryGetExpectedIsoPipeRadius(out double radius)
+    {
+      radius = 0.0;
+      try
+      {
+        if (string.IsNullOrWhiteSpace(s_isoSize))
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED pipeCircle expR skip: size empty");
+          return false;
+        }
+
+        string digits = System.Text.RegularExpressions.Regex.Replace(s_isoSize, "[^0-9]", string.Empty);
+        int nominal;
+        if (string.IsNullOrWhiteSpace(digits) || !int.TryParse(digits, out nominal))
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED pipeCircle expR skip: parse size=" + s_isoSize);
+          return false;
+        }
+
+        radius = PSUtil.PipeSize(nominal) / 2.0;
+        return radius > 1e-6;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED pipeCircle expR 예외: " + ex.GetType().Name + ": " + ex.Message + " size=" + s_isoSize);
+        return false;
+      }
+    }
+
+    private double GetTransformedCircleRadius(Circle circle, Matrix3d transform)
+    {
+      Point3d center = circle.Center.TransformBy(transform);
+      Point3d edge = (circle.Center + Vector3d.XAxis.MultiplyBy(circle.Radius)).TransformBy(transform);
+      double radius = center.DistanceTo(edge);
+      return radius > 1e-6 ? radius : circle.Radius;
+    }
+
+    private void AccumulatePoint(Point3d point, ref bool hasPoint, ref Point3d min, ref Point3d max)
+    {
+      if (!hasPoint)
+      {
+        min = point;
+        max = point;
+        hasPoint = true;
+        return;
+      }
+
+      min = new Point3d(System.Math.Min(min.X, point.X), System.Math.Min(min.Y, point.Y), System.Math.Min(min.Z, point.Z));
+      max = new Point3d(System.Math.Max(max.X, point.X), System.Math.Max(max.Y, point.Y), System.Math.Max(max.Z, point.Z));
+    }
+
+    private class IsoCircleCandidate
+    {
+      public IsoCircleCandidate(ObjectId id, double radius, double centerY)
+      {
+        this.Id = id;
+        this.Radius = radius;
+        this.CenterY = centerY;
+      }
+
+      public ObjectId Id;
+      public double Radius;
+      public double CenterY;
     }
 
     private double ComputeIsoDimensionSize()
