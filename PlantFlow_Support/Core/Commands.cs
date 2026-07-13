@@ -1927,7 +1927,7 @@ namespace PlantFlow_Support
         foreach (ObjectId id in layoutBtr)
         {
           Viewport vp = tr.GetObject(id, OpenMode.ForWrite, false) as Viewport;
-          if (vp == null || vp.Number <= 1)
+          if (vp == null || vp.Number == 1)
             continue;
 
           double aspect = vp.Height > 1e-9 ? vp.Width / vp.Height : 1.41421356237;
@@ -1935,6 +1935,7 @@ namespace PlantFlow_Support
           vp.ViewCenter = new Point2d((ext.MinPoint.X + ext.MaxPoint.X) / 2.0, (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0);
           vp.ViewHeight = viewHeight;
           vp.On = true;
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg viewport fit number=" + vp.Number + " viewHeight=" + viewHeight);
           return true;
         }
       }
