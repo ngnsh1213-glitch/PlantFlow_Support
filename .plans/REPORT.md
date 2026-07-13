@@ -1,46 +1,44 @@
 # REPORT — Codex → Claude
 
-- cycle: 24
-- status: done_uncommitted
-- commit: not_created (git commit requires explicit approval/review)
+- cycle: 25
+- status: done
+- commit: created (current HEAD)
 - target: `PlantFlow_Support/Core/Commands.cs`
 - build: not_run (빌드 수동 원칙)
 
 ## 변경 요약
-- 환경변수 `PFS_NOTAB_SKIP_VIEWPORT=1` 진단 토글 추가.
-  - 토글 ON이면 `CreateNotabDetailViewport` 호출을 건너뛰고 `PFSNOTABDETAIL viewport skip(env)` 로그 기록.
-  - solids clone + titleblock + SaveAs만 수행하므로, commit 크래시가 viewport 원인인지 solid-into-template 원인인지 분리 가능.
-- `PFSNOTABDETAIL` viewport 생성을 2단계로 분리.
-  - 1차 트랜잭션: viewport append 후 `CenterPoint/Width/Height/On`만 설정하고 commit.
-  - 2차 트랜잭션: 생성된 viewport를 다시 열어 `ViewTarget/ViewDirection/ViewCenter/TwistAngle/CustomScale`과 Hidden/ShowPlot 설정.
-- 단계 로그 추가.
-  - `PFSNOTABDETAIL viewport 1차 생성 완료 ...`
-  - `PFSNOTABDETAIL viewport 2차 view설정 직전`
-  - `PFSNOTABDETAIL viewport 2차 view설정 완료`
+- `CreateNotabDetailDrawing`의 템플릿 로드 직후 `tagDb.CloseInput(true)`를 추가해 DWG 입력 스트림을 해제.
+- N2 템플릿 DB 이송 경로에서 `sourceDb.WblockCloneObjects(...)`를 제거.
+- 신규 `CopyCleanNotabSolids(...)`를 추가해 source DB의 `Solid3d`를 읽고 target DB 모델공간에 새 `Solid3d`로 `CopyFrom` 생성.
+  - target DB 트랜잭션과 source DB 트랜잭션을 분리.
+  - 각 solid 실패는 `FileDiag` 후 skip, 전체 중단 없음.
+  - 성공 로그: `PFSNOTABDETAIL cleanSolid copied=N ext=...`
+- 신규 `TryStripCleanSolidMetadata(...)`로 clean solid의 ExtensionDictionary/xdata 제거를 시도.
+  - `ReleaseExtensionDictionary`는 AutoCAD API 버전 차이를 피하려고 reflection으로만 호출.
+  - 실패/미지원은 `FileDiag`로 남김.
+- 기존 `PFS_NOTAB_SKIP_HIDDEN`, `PFS_NOTAB_SKIP_VIEWPORT`, 2단계 viewport 진단 경로는 유지.
 
 ## 산출 파일
 - 수정: `PlantFlow_Support/Core/Commands.cs`
-- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_notab_n2_viewport2phase`
+- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_notab_clean_copyfrom`
 
 ## 검증
-- `git diff --check -- PlantFlow_Support/Core/Commands.cs`: PASS
-- `rg PFS_NOTAB_SKIP_VIEWPORT/viewport 1차/viewport 2차/CreateNotabDetailViewport/ConfigureNotabDetailViewport`: PASS
+- `git diff --check -- PlantFlow_Support/Core/Commands.cs`: PASS (CRLF 경고만 출력)
+- `rg CopyCleanNotabSolids/cleanSolid copied/tagDb.CloseInput`: PASS
+- `rg sourceDb.WblockCloneObjects(ids, msId...)`: N2 대상 경로 제거 확인. 다른 기존 경로는 보존.
 - 빈 catch 없음.
-- 기존 `PFSVBISO*` 체인 직접 수정 없음. `PFSNOTABDETAIL` 관련 함수만 수정.
 - 빌드/Plant3D 실행 검증은 지시대로 수행하지 않음.
 
 ## 커밋 상태
-- 코드 변경과 REPORT 갱신은 완료됐으나 커밋은 수행하지 않음.
-- 커밋 시 `PlantFlow_Support/Core/Commands.cs`와 `.plans/REPORT.md`만 stage 대상.
+- 커밋 완료: `Fix notab clean solid transfer`
+- stage 대상은 `PlantFlow_Support/Core/Commands.cs`, `.plans/REPORT.md`만 포함.
 
 ## 라이브 검증
 1. 수동 빌드 후 `PFSNOTABDETAIL` 재실행.
 2. 기대 로그:
-   - `viewport 1차 생성 완료`
-   - `commit 직전`
-   - `commit 완료`
-   - `viewport 2차 view설정 완료`
-   - `saveAs 직전`
-   - `saved path=...`
-3. 여전히 크래시하면 `PFS_NOTAB_SKIP_VIEWPORT=1` 설정 후 Plant3D 재시작, 재실행.
-4. skip viewport에서도 `commit 완료` 전 크래시이면 solid-into-template commit 원인으로 분기.
+   - `PFSNOTABDETAIL cleanSolid copied=N ext=...`
+   - `PFSNOTABDETAIL commit 직전`
+   - `PFSNOTABDETAIL commit 완료`
+   - `PFSNOTABDETAIL saved path=...`
+3. 크래시가 사라지면 Plant 잔재 solid 정화 이송 원인 확정.
+4. 계속 크래시하면 `cleanSolid copied` 이후 어느 단계 로그에서 멈추는지로 다음 분기.

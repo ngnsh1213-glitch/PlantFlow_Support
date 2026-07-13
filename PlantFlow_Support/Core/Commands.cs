@@ -2190,6 +2190,7 @@ namespace PlantFlow_Support
       {
         tagDb = new Database(false, true);
         tagDb.ReadDwgFile(templatePath, System.IO.FileShare.Read, true, null);
+        tagDb.CloseInput(true);
         HostApplicationServices.WorkingDatabase = tagDb;
         this.TrySetTagDatabaseFacetres(tagDb, 10.0);
 
@@ -2205,13 +2206,7 @@ namespace PlantFlow_Support
             throw new System.InvalidOperationException("template ModelSpace 없음");
 
           ObjectId detailLayerId = this.EnsureIsoDetailLayer(tagDb, tr);
-          IdMapping idMap = new IdMapping();
-          ObjectIdCollection ids = new ObjectIdCollection();
-          foreach (ObjectId id in solidIds)
-            ids.Add(id);
-          sourceDb.WblockCloneObjects(ids, msId, idMap, DuplicateRecordCloning.Ignore, false);
-
-          cloned = this.PrepareClonedNotabSolids(tr, idMap, detailLayerId, out solidExt);
+          cloned = this.CopyCleanNotabSolids(sourceDb, solidIds, tagDb, tr, msId, detailLayerId, out solidExt);
           if (cloned == 0)
             throw new System.InvalidOperationException("cloned solid/extents 없음");
 
@@ -2262,6 +2257,96 @@ namespace PlantFlow_Support
       if (bt == null || !bt.Has(BlockTableRecord.ModelSpace))
         return ObjectId.Null;
       return bt[BlockTableRecord.ModelSpace];
+    }
+
+    private int CopyCleanNotabSolids(Database sourceDb, System.Collections.Generic.List<ObjectId> solidIds, Database targetDb, Transaction targetTr, ObjectId targetMsId, ObjectId layerId, out Extents3d solidExt)
+    {
+      solidExt = new Extents3d();
+      bool hasExt = false;
+      int copied = 0;
+      if (sourceDb == null || solidIds == null || targetDb == null || targetTr == null || targetMsId == ObjectId.Null)
+        return 0;
+
+      BlockTableRecord targetMs = targetTr.GetObject(targetMsId, OpenMode.ForWrite, false) as BlockTableRecord;
+      if (targetMs == null)
+        return 0;
+
+      using (Transaction sourceTr = sourceDb.TransactionManager.StartTransaction())
+      {
+        foreach (ObjectId solidId in solidIds)
+        {
+          try
+          {
+            Solid3d src = sourceTr.GetObject(solidId, OpenMode.ForRead, false) as Solid3d;
+            if (src == null)
+            {
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid skip nonSolid id=" + solidId);
+              continue;
+            }
+
+            Solid3d clean = new Solid3d();
+            clean.SetDatabaseDefaults(targetDb);
+            clean.CopyFrom(src);
+            targetMs.AppendEntity(clean);
+            targetTr.AddNewlyCreatedDBObject(clean, true);
+            if (layerId != ObjectId.Null)
+              clean.LayerId = layerId;
+            this.TryStripCleanSolidMetadata(clean);
+
+            Extents3d ext = clean.GeometricExtents;
+            if (!hasExt)
+            {
+              solidExt = ext;
+              hasExt = true;
+            }
+            else
+            {
+              solidExt.AddExtents(ext);
+            }
+            copied++;
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid skip id=" + solidId + ": " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+        sourceTr.Commit();
+      }
+
+      PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid copied=" + copied + " ext=" + (hasExt ? this.FormatExtents(solidExt) : "none"));
+      return hasExt ? copied : 0;
+    }
+
+    private void TryStripCleanSolidMetadata(Solid3d solid)
+    {
+      if (solid == null)
+        return;
+
+      try
+      {
+        if (!solid.ExtensionDictionary.IsNull)
+        {
+          System.Reflection.MethodInfo releaseMethod = solid.GetType().GetMethod("ReleaseExtensionDictionary", System.Type.EmptyTypes);
+          if (releaseMethod != null)
+            releaseMethod.Invoke(solid, null);
+          else
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid dict remains: ReleaseExtensionDictionary 없음");
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid dict strip skip: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      try
+      {
+        if (solid.XData != null)
+          solid.XData = null;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid xdata strip skip: " + ex.GetType().Name + ": " + ex.Message);
+      }
     }
 
     private int PrepareClonedNotabSolids(Transaction tr, IdMapping idMap, ObjectId layerId, out Extents3d solidExt)
