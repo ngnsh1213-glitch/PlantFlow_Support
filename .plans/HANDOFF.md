@@ -3,55 +3,41 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 9
+- **cycle**: 21
 - **status**: ready
 - **issued_at**: 2026-07-13
-- **title**: PFS 격리 B4e — 중복 detail 제거 + 뷰큐브 redraw
-- **plan**: C:\Users\HT노승환\.gemini\antigravity\scratch\plan_pfs_iso_b4e_dedup_viewcube_20260713.md
-- **target**: PlantFlow_Support/Core/Commands.cs
+- **title**: 무탭 엔진 Phase N1 — side-DB 재귀 explode → Solid3d (검증 커맨드)
+- **plan**: C:\Users\HT노승환\.gemini\antigravity\scratch\plan_pfs_notab_engine_20260713.md
+- **target**: PlantFlow_Support/Core/Commands.cs (신규 커맨드/헬퍼 추가 · 기존 파이프라인 무수정)
 
 ## 착수 전
-- cwd가 `...\PlantFlow_Support`인지 확인(AGENTS.md 가드).
+- cwd `...\PlantFlow_Support` 확인.
+- ★기존 `PFSVBISOCLONE/OPEN/DONE/EXPORTED` 체인 **절대 수정 금지**(병렬 신규만 추가).
 
-## 지시 (B4e cycle 9)
+## 배경
+- 스파이크 D 실증: side-DB(문서 없음)에서 Plant `entity.Explode()` 작동. Pipe→Solid3d, Support→중첩 BlockReference(재귀 필요). cross-DB append=eWrongDatabase→WblockClone 이송.
+- 목표: 문서 열지 않고 선택 Plant 객체→순수 Solid3d 추출을 제품 코드에서 실증(무탭 엔진 1단).
 
-두 결함 동시 수정. 대상 `PlantFlow_Support/Core/Commands.cs` 만.
+## 지시 (cycle 21) — 신규 검증 커맨드 `PFSNOTABN1`
+`[CommandMethod("PFSNOTABN1", CommandFlags.Session)]` 추가.
 
-### 배경
-- B4d(f6c99fa)로 가로 분할 치수(100/200/300)는 값 정확. 그러나:
-  1. 클론백이 기존 PFS_ISO_DETAIL을 안 지우고 매번 덧붙여 재실행 시 겹침("100" 이중).
-  2. 파이프라인 후 뷰큐브 미표시(설정 OFF 아님 — redraw 누락. 비주얼스타일 변경하면 복귀).
-- 사용자 결정: 재실행 시 **기존 detail 삭제 후 최신 1개만**(태그당 최신 도면 1개).
+1. `ed.GetSelection()`으로 서포트+파이프 선택(기존 CLONE과 동일 UX).
+2. 선택셋을 **side-DB로 clone**: `Database srcDb = new Database(true,true);` + `originalDb.WblockCloneObjects(ids, srcMsId, map, Ignore, false)` (기존 CLONE 방식 참고, 단 문서 열지 않음).
+   - 또는 기존 1차 clone 산출 방식 재사용하되 **문서 오픈 없이** srcDb 확보.
+3. **재귀 explode 헬퍼** `CollectSolidsRecursive(Transaction tr, Entity ent, List<ObjectId> solidIds, int depth)`:
+   - `ent.Explode(coll)` 시도(try/catch, eNotApplicable 등 로깅).
+   - coll 각 DBObject: Solid3d면 solidIds에 추가(또는 임시 owner에 append 후 id수집); BlockReference/기타 복합이면 재귀(depth+1, 상한 예: 6); Point 등은 skip.
+   - Plant 객체(AcPpDb3d*)는 srcDb 트랜잭션 내에서 explode(스파이크 D처럼).
+4. 수집된 Solid3d들을 **결과 side-DB로 WblockClone**(eWrongDatabase 회피) → `C:\Temp\notab_n1_solids_*.dwg` 저장.
+5. 로그(`PFSVBISOEXPORTED`류 FileDiag 또는 신규 prefix `PFSNOTABN1`): 입력 엔티티 타입, explode 성공/예외, depth별 산출, 최종 Solid3d 수/extents, 저장 경로.
 
-### Fix A — 기존 PFS_ISO_DETAIL/AUTO_DIM 제거
-- 위치: `PFSVBISOEXPORTED`(:1497) 클론백 블록. `EnsureIsoAnnotationResources`(:1603) 호출 직후, `sideDb.WblockCloneObjects(...)`(:1609) **직전**.
-- 레이어명: detail=`PFS_ISO_DETAIL`(detailLayerId, :1599), 치수=`AUTO_DIM`(annotationLayerId, :1603).
-- 구현: `targetMs`(ModelSpace, 이미 ForWrite:1598) 순회.
-  - 먼저 삭제 대상 ObjectId를 리스트로 수집(순회 중 Erase 회피): 각 id를 ForRead로 열어 `ent.LayerId == detailLayerId || ent.LayerId == annotationLayerId`면 리스트에 add.
-  - 순회 후 리스트의 각 id를 ForWrite로 열어 `ent.Erase()`.
-  - per-entity try/catch + FileDiag, null skip. 반드시 WblockClone 전에 수행.
-  - 로그: `PlantOrthoView.FileDiag("PFSVBISOEXPORTED priorDetail purge erased=" + n)`.
+## 검증 기준
+- 기존 `pfs_iso_solids_*.dwg`(문서-open explode 산출)와 **Solid3d 수/extents 일치**하면 N1 성공(문서 없이 동일 결과).
+- 특히 Support의 중첩 BlockRef를 재귀로 파고들어 **서포트 solid까지** 추출되는지(스파이크 D는 1단만 했음).
 
-### Fix B — 뷰큐브 redraw
-- 위치: `CloseIsoTempDocument(Document tempDoc, Document originalDoc)`(:1705). originalDoc 재활성(:1711) 후.
-- 구현: originalDoc 활성화 성공 후
-  ```
-  try {
-    if (originalDoc != null)
-      originalDoc.SendStringToExecute("._REGEN\n", true, false, false);
-  } catch (System.Exception ex) {
-    PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube REGEN 예외: " + ex.GetType().Name + ": " + ex.Message);
-  }
-  ```
-- 로그: `PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube REGEN 큐잉 doc=" + originalDoc.Name)`.
+## 규율
+- 기존 파이프라인 무수정. cross-DB=WblockClone. 빈 catch 금지, 예외 FileDiag. 비파괴(원본 읽기만).
 
-### 규율
-- PFS_ISO_DETAIL/AUTO_DIM 레이어 한정 삭제만 허용. 다른 레이어 불가침.
-- 빈 catch 금지, 예외 FileDiag. B4d 분할/세로 치수 로직 불변.
-
-### 빌드
-- 수동 빌드 GREEN 확인.
-
-## 완료 보고
-- 커밋 후 `.plans/REPORT.md`에 결과 기록 + 커밋.
-- 라이브 확인: 같은 서포트 2회 실행 → 치수/detail 1세트만 + `priorDetail purge erased=..`, 파이프라인 후 뷰큐브 즉시 표시.
+## 빌드/완료
+- 수동 빌드 GREEN. `.plans/REPORT.md`에 결과. 커밋.
+- 사용자: `PFSNOTABN1` 실행(서포트+파이프 선택) → 로그로 Solid3d 추출 수/extents 확인 → N2(Hidden 뷰포트) 진행.

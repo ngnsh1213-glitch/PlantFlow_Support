@@ -883,6 +883,354 @@ namespace PlantFlow_Support
       ed.WriteMessage("\nPFSVBCMD done, new Layout1 entities=" + added);
     }
 
+    [CommandMethod("PFSNOTABN1", CommandFlags.Session)]
+    public void NotabN1Command()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      PromptSelectionResult psr = ed.GetSelection();
+      if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABN1 선택 취소/빈 선택");
+        ed.WriteMessage("\nPFSNOTABN1: 선택 없음");
+        return;
+      }
+
+      ObjectId[] selectedIds = psr.Value.GetObjectIds();
+      Database sourceDb = null;
+      try
+      {
+        sourceDb = this.CloneSelectionToSideDatabase(doc.Database, selectedIds, "PFSNOTABN1");
+        System.Collections.Generic.List<ObjectId> solidIds = this.CollectNotabN1SolidIds(sourceDb);
+        string savedPath = this.CloneNotabN1SolidsToResult(sourceDb, solidIds);
+        string extLog = this.GetSolidExtentsLog(sourceDb, solidIds);
+        PlantOrthoView.FileDiag("PFSNOTABN1 done selected=" + selectedIds.Length + " solids=" + solidIds.Count + " ext=" + extLog + " saved=" + savedPath);
+        ed.WriteMessage("\nPFSNOTABN1 solids=" + solidIds.Count + " saved=" + savedPath);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABN1 예외: " + ex.GetType().Name + ": " + ex.Message);
+        ed.WriteMessage("\nPFSNOTABN1 error: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        if (sourceDb != null)
+          sourceDb.Dispose();
+      }
+    }
+
+    private Database CloneSelectionToSideDatabase(Database originalDb, ObjectId[] selectedIds, string logPrefix)
+    {
+      if (originalDb == null)
+        throw new System.ArgumentNullException("originalDb");
+      if (selectedIds == null || selectedIds.Length == 0)
+        throw new System.ArgumentException("selectedIds 없음", "selectedIds");
+
+      Database sideDb = null;
+      try
+      {
+        sideDb = new Database(true, true);
+        ObjectId sideMsId;
+        using (Transaction tr = sideDb.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = tr.GetObject(sideDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          sideMsId = bt[BlockTableRecord.ModelSpace];
+          tr.Commit();
+        }
+
+        ObjectIdCollection ids = new ObjectIdCollection();
+        foreach (ObjectId id in selectedIds)
+          ids.Add(id);
+
+        Database oldWorking = HostApplicationServices.WorkingDatabase;
+        try
+        {
+          HostApplicationServices.WorkingDatabase = sideDb;
+          IdMapping idMap = new IdMapping();
+          originalDb.WblockCloneObjects(ids, sideMsId, idMap, DuplicateRecordCloning.Replace, false);
+        }
+        finally
+        {
+          HostApplicationServices.WorkingDatabase = oldWorking;
+        }
+
+        int cloned = 0;
+        using (Transaction tr = sideDb.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = tr.GetObject(sideDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+          foreach (ObjectId id in ms)
+          {
+            cloned++;
+            DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
+            Entity ent = obj as Entity;
+            string className = id.ObjectClass == null ? "null" : id.ObjectClass.Name;
+            string typeName = obj == null ? "null" : obj.GetType().Name;
+            string bounds = this.GetEntityExtentsLog(ent);
+            PlantOrthoView.FileDiag(logPrefix + " input id=" + id + " class=" + className + " type=" + typeName + " bounds=" + bounds);
+          }
+          tr.Commit();
+        }
+
+        PlantOrthoView.FileDiag(logPrefix + " sideClone selected=" + selectedIds.Length + " cloned=" + cloned);
+        return sideDb;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag(logPrefix + " sideClone 예외: " + ex.GetType().Name + ": " + ex.Message);
+        if (sideDb != null)
+          sideDb.Dispose();
+        throw;
+      }
+    }
+
+    private System.Collections.Generic.List<ObjectId> CollectNotabN1SolidIds(Database sourceDb)
+    {
+      var solidIds = new System.Collections.Generic.List<ObjectId>();
+      if (sourceDb == null)
+        return solidIds;
+
+      using (Transaction tr = sourceDb.TransactionManager.StartTransaction())
+      {
+        BlockTable bt = tr.GetObject(sourceDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+        BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
+        var ids = new System.Collections.Generic.List<ObjectId>();
+        foreach (ObjectId id in ms)
+          ids.Add(id);
+
+        foreach (ObjectId id in ids)
+        {
+          Entity ent = null;
+          try
+          {
+            ent = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABN1 open 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+            continue;
+          }
+
+          if (ent == null || ent.IsErased)
+            continue;
+
+          this.CollectSolidsRecursive(tr, ms, ent, solidIds, 0);
+        }
+        tr.Commit();
+      }
+
+      PlantOrthoView.FileDiag("PFSNOTABN1 collect solids=" + solidIds.Count);
+      return solidIds;
+    }
+
+    private void CollectSolidsRecursive(Transaction tr, BlockTableRecord modelSpace, Entity ent, System.Collections.Generic.List<ObjectId> solidIds, int depth)
+    {
+      if (tr == null || modelSpace == null || ent == null || solidIds == null)
+        return;
+      if (depth > 6)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABN1 recurse depthLimit type=" + ent.GetType().Name + " depth=" + depth);
+        return;
+      }
+
+      Solid3d existingSolid = ent as Solid3d;
+      if (existingSolid != null)
+      {
+        if (existingSolid.ObjectId.IsNull)
+        {
+          modelSpace.AppendEntity(existingSolid);
+          tr.AddNewlyCreatedDBObject(existingSolid, true);
+        }
+        if (!solidIds.Contains(existingSolid.ObjectId))
+          solidIds.Add(existingSolid.ObjectId);
+        PlantOrthoView.FileDiag("PFSNOTABN1 solid depth=" + depth + " id=" + existingSolid.ObjectId + " ext=" + this.GetEntityExtentsLog(existingSolid));
+        return;
+      }
+
+      DBObjectCollection exploded = new DBObjectCollection();
+      try
+      {
+        ent.Explode(exploded);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABN1 explode 예외 depth=" + depth + " type=" + ent.GetType().Name + ": " + ex.GetType().Name + ": " + ex.Message);
+        return;
+      }
+
+      PlantOrthoView.FileDiag("PFSNOTABN1 explode depth=" + depth + " type=" + ent.GetType().Name + " produced=" + exploded.Count);
+      if (exploded.Count == 0)
+        return;
+
+      foreach (DBObject child in exploded)
+      {
+        Entity childEntity = child as Entity;
+        if (childEntity == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABN1 child skip depth=" + depth + " type=" + (child == null ? "null" : child.GetType().Name));
+          if (child != null)
+            child.Dispose();
+          continue;
+        }
+
+        try
+        {
+          this.CollectSolidsRecursive(tr, modelSpace, childEntity, solidIds, depth + 1);
+        }
+        finally
+        {
+          if (childEntity.ObjectId.IsNull)
+            childEntity.Dispose();
+        }
+      }
+    }
+
+    private string CloneNotabN1SolidsToResult(Database sourceDb, System.Collections.Generic.List<ObjectId> solidIds)
+    {
+      if (sourceDb == null)
+        throw new System.ArgumentNullException("sourceDb");
+      if (solidIds == null || solidIds.Count == 0)
+        throw new System.InvalidOperationException("solidIds 없음");
+
+      string tempDir = @"C:\Temp";
+      System.IO.Directory.CreateDirectory(tempDir);
+      string path = System.IO.Path.Combine(tempDir, "notab_n1_solids_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".dwg");
+      Database resultDb = null;
+      try
+      {
+        resultDb = new Database(true, true);
+        ObjectId resultMsId;
+        using (Transaction tr = resultDb.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = tr.GetObject(resultDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          resultMsId = bt[BlockTableRecord.ModelSpace];
+          tr.Commit();
+        }
+
+        ObjectIdCollection ids = new ObjectIdCollection();
+        foreach (ObjectId id in solidIds)
+          ids.Add(id);
+
+        Database oldWorking = HostApplicationServices.WorkingDatabase;
+        try
+        {
+          HostApplicationServices.WorkingDatabase = resultDb;
+          IdMapping idMap = new IdMapping();
+          sourceDb.WblockCloneObjects(ids, resultMsId, idMap, DuplicateRecordCloning.Replace, false);
+        }
+        finally
+        {
+          HostApplicationServices.WorkingDatabase = oldWorking;
+        }
+
+        string resultExt = this.GetModelSpaceSolidExtentsLog(resultDb);
+        resultDb.SaveAs(path, DwgVersion.Current);
+        PlantOrthoView.FileDiag("PFSNOTABN1 result solids=" + solidIds.Count + " ext=" + resultExt + " saved=" + path);
+        return path;
+      }
+      finally
+      {
+        if (resultDb != null)
+          resultDb.Dispose();
+      }
+    }
+
+    private string GetModelSpaceSolidExtentsLog(Database db)
+    {
+      if (db == null)
+        return "db=null";
+
+      int solids = 0;
+      Extents3d? ext = null;
+      using (Transaction tr = db.TransactionManager.StartTransaction())
+      {
+        BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+        BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+        foreach (ObjectId id in ms)
+        {
+          Solid3d solid = tr.GetObject(id, OpenMode.ForRead, false) as Solid3d;
+          if (solid == null)
+            continue;
+          solids++;
+          this.AddExtents(ref ext, solid.GeometricExtents);
+        }
+        tr.Commit();
+      }
+
+      return "solids=" + solids + " ext=" + this.FormatExtents(ext);
+    }
+
+    private string GetSolidExtentsLog(Database db, System.Collections.Generic.List<ObjectId> solidIds)
+    {
+      if (db == null || solidIds == null || solidIds.Count == 0)
+        return "empty";
+
+      Extents3d? ext = null;
+      int ok = 0;
+      using (Transaction tr = db.TransactionManager.StartTransaction())
+      {
+        foreach (ObjectId id in solidIds)
+        {
+          try
+          {
+            Solid3d solid = tr.GetObject(id, OpenMode.ForRead, false) as Solid3d;
+            if (solid == null)
+              continue;
+            ok++;
+            this.AddExtents(ref ext, solid.GeometricExtents);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABN1 ext 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+        tr.Commit();
+      }
+
+      return "solids=" + ok + " ext=" + this.FormatExtents(ext);
+    }
+
+    private string GetEntityExtentsLog(Entity ent)
+    {
+      if (ent == null)
+        return "entity=null";
+      try
+      {
+        return this.FormatExtents(ent.GeometricExtents);
+      }
+      catch (System.Exception ex)
+      {
+        return "ERR " + ex.GetType().Name + ": " + ex.Message;
+      }
+    }
+
+    private void AddExtents(ref Extents3d? target, Extents3d source)
+    {
+      if (!target.HasValue)
+      {
+        target = source;
+        return;
+      }
+
+      Extents3d ext = target.Value;
+      ext.AddExtents(source);
+      target = ext;
+    }
+
+    private string FormatExtents(Extents3d? ext)
+    {
+      if (!ext.HasValue)
+        return "none";
+      return this.FormatExtents(ext.Value);
+    }
+
+    private string FormatExtents(Extents3d ext)
+    {
+      return "(" + this.FormatNumber(ext.MinPoint.X) + "," + this.FormatNumber(ext.MinPoint.Y) + "," + this.FormatNumber(ext.MinPoint.Z) + ")~(" + this.FormatNumber(ext.MaxPoint.X) + "," + this.FormatNumber(ext.MaxPoint.Y) + "," + this.FormatNumber(ext.MaxPoint.Z) + ")";
+    }
     [CommandMethod("PFSVBISOCLONE")]
     public void VbIsoCloneCommand()
     {
