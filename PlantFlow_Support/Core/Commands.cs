@@ -1912,6 +1912,8 @@ namespace PlantFlow_Support
         double detailH = ext.MaxPoint.Y - ext.MinPoint.Y;
         if (detailW <= 1e-9 || detailH <= 1e-9)
           return false;
+        double dcx = (ext.MinPoint.X + ext.MaxPoint.X) / 2.0;
+        double dcy = (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0;
 
         ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(db, tr, "Title Block");
         if (layoutBtrId == ObjectId.Null)
@@ -1920,24 +1922,51 @@ namespace PlantFlow_Support
           return false;
         }
 
-        BlockTableRecord layoutBtr = tr.GetObject(layoutBtrId, OpenMode.ForRead) as BlockTableRecord;
+        BlockTableRecord layoutBtr = tr.GetObject(layoutBtrId, OpenMode.ForWrite) as BlockTableRecord;
         if (layoutBtr == null)
           return false;
 
+        double cx = 420.5;
+        double cy = 297.0;
+        double sw = 841.0;
+        double sh = 594.0;
         foreach (ObjectId id in layoutBtr)
         {
-          Viewport vp = tr.GetObject(id, OpenMode.ForWrite, false) as Viewport;
-          if (vp == null || vp.Number == 1)
+          Viewport vp = tr.GetObject(id, OpenMode.ForRead, false) as Viewport;
+          if (vp == null)
             continue;
 
-          double aspect = vp.Height > 1e-9 ? vp.Width / vp.Height : 1.41421356237;
-          double viewHeight = ((detailW / aspect) > detailH ? (detailW / aspect) : detailH) * 1.2;
-          vp.ViewCenter = new Point2d((ext.MinPoint.X + ext.MaxPoint.X) / 2.0, (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0);
-          vp.ViewHeight = viewHeight;
-          vp.On = true;
-          PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg viewport fit number=" + vp.Number + " viewHeight=" + viewHeight);
-          return true;
+          cx = vp.CenterPoint.X;
+          cy = vp.CenterPoint.Y;
+          if (vp.Width > 1e-9)
+            sw = vp.Width;
+          if (vp.Height > 1e-9)
+            sh = vp.Height;
+          break;
         }
+
+        const double TargetWidthRatio = 0.60;
+        const double TargetHeightRatio = 0.78;
+        const double TargetCenterXOffset = 0.14;
+        const double TargetCenterYOffset = 0.03;
+        double tw = sw * TargetWidthRatio;
+        double th = sh * TargetHeightRatio;
+        double tcx = cx - sw * TargetCenterXOffset;
+        double tcy = cy + sh * TargetCenterYOffset;
+        double aspect = th > 1e-9 ? tw / th : 1.3333;
+        double viewHeight = ((detailW / aspect) > detailH ? (detailW / aspect) : detailH) * 1.15;
+
+        Viewport nvp = new Viewport();
+        layoutBtr.AppendEntity(nvp);
+        tr.AddNewlyCreatedDBObject(nvp, true);
+        nvp.CenterPoint = new Point3d(tcx, tcy, 0.0);
+        nvp.Width = tw;
+        nvp.Height = th;
+        nvp.ViewCenter = new Point2d(dcx, dcy);
+        nvp.ViewHeight = viewHeight;
+        nvp.On = true;
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg newViewport center=(" + this.FormatNumber(tcx) + "," + this.FormatNumber(tcy) + ") size=(" + this.FormatNumber(tw) + "," + this.FormatNumber(th) + ") viewCenter=(" + this.FormatNumber(dcx) + "," + this.FormatNumber(dcy) + ") viewHeight=" + this.FormatNumber(viewHeight) + " sheet=(" + this.FormatNumber(sw) + "," + this.FormatNumber(sh) + ")");
+        return true;
       }
       catch (System.Exception ex)
       {
