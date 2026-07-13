@@ -3,7 +3,12 @@
 _최종 갱신: 2026-07-12_
 
 ## 진행 중 트랙
-- **PFS 오쏘 격리(1서포트=1도면) — ✅ B3a PASS = 방향 제어까지 완성 (2026-07-12)**.
+- **PFS 오쏘 격리(1서포트=1도면) — ✅ B4a 완료 = Main 치수 가시화까지 (2026-07-13)**.
+  - 파이프라인에 **바운딩 치수**(폭·높이, 실 mm) 추가: PFSVBISOEXPORTED가 clone-back 2D 블록 extents로 H/V RotatedDimension 생성, 텍스트=원본 3D 실측(basis dot projection), 크기 h=max(W,H)/12 오버라이드로 가시화. AUTO_DIM 레이어. 커밋 4d314b2(eKeyNotFound=WorkingDatabase)·b636f83(크기).
+  - 데이터: PLN(라인넘버) 서포트·파이프 모두 미부여(빈값), BOP=423 정상.
+  - 다음: B4c(세로 치수 의미 정련—블록 전체 164 vs 서포트 75 라벨 불일치), B4b(BOP MLeader—파이프 원 2D 검출 Circle=1 확인됨), 스케일/배치.
+  - 상세: `<appDataDir>\scratch\plan_pfs_isolation_b4dim_20260712.md`.
+- (이전) **격리 방향 제어 — ✅ B3a PASS (2026-07-12)**.
   - 파이프라인: 선택셋 → 1st temp(Plant clone) → explode Solid3d → 2nd temp(순수 solid) → **-VPOINT(파이프축)** → SendStringToExecute VIEWBASE `_O _Current` → EXPORTLAYOUT 평면화 → 원본 clone-back(PFS_ISO_DETAIL 레이어).
   - **방향 제어(B3a)**: -VPOINT(파이프축)+VIEWBASE `_O _Current`로 Main뷰(파이프=원+서포트=직사각형) 생성. X/Y/수직Z 전 축 + 다중 타입 육안 확정. "축방향 응시=Main" 보편 적용.
   - 커밋: e7ffa14(B1g), 7a7653d(B2a), cc6602e(B2b), cbe738c(B3a).
