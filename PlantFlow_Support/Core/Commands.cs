@@ -17,6 +17,7 @@ namespace PlantFlow_Support
     private const string ExportLayoutPath = @"C:\TEMP\pfs_vb_export.dwg";
     private static string LastIsoTempPath;
     private static Vector3d s_isoPipeAxis;
+    private static Vector3d s_isoPipeUp;
     private static bool s_isoPipeAxisValid;
     private static ObjectId s_isoPipeId;
     private static double s_isoRealWidth;
@@ -922,6 +923,68 @@ namespace PlantFlow_Support
       }
     }
 
+    [CommandMethod("PFSNOTABDETAIL", CommandFlags.Session)]
+    public void NotabDetailCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      s_isoPipeAxisValid = false;
+      s_isoPipeAxis = Vector3d.XAxis;
+      s_isoPipeUp = Vector3d.ZAxis;
+      s_isoPipeId = ObjectId.Null;
+      s_isoRealWidth = 0.0;
+      s_isoRealHeight = 0.0;
+      s_isoRealSizeValid = false;
+      s_isoPipeLineNo = string.Empty;
+      s_isoBOP = string.Empty;
+      s_isoSize = string.Empty;
+      s_isoSupportTag = string.Empty;
+      s_isoDesignStd = string.Empty;
+      s_isoShortDesc = string.Empty;
+
+      Editor ed = doc.Editor;
+      PromptSelectionResult psr = ed.GetSelection();
+      if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL 선택 취소/빈 선택");
+        ed.WriteMessage("\nPFSNOTABDETAIL: 선택 없음");
+        return;
+      }
+
+      ObjectId[] selectedIds = psr.Value.GetObjectIds();
+      Vector3d pipeAxis;
+      ObjectId pipeId;
+      s_isoPipeAxisValid = this.TryGetSelectionPipeAxis(doc.Database, selectedIds, out pipeAxis, out pipeId);
+      s_isoPipeId = pipeId;
+      s_isoPipeAxis = s_isoPipeAxisValid ? pipeAxis : Vector3d.XAxis;
+      this.CaptureIsoSelectionMetrics(doc.Database, selectedIds);
+
+      Database sourceDb = null;
+      try
+      {
+        sourceDb = this.CloneSelectionToSideDatabase(doc.Database, selectedIds, "PFSNOTABDETAIL");
+        System.Collections.Generic.List<ObjectId> solidIds = this.CollectNotabN1SolidIds(sourceDb);
+        if (solidIds.Count == 0)
+          throw new System.InvalidOperationException("solidIds 없음");
+
+        string savedPath = this.CreateNotabDetailDrawing(sourceDb, solidIds);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL done selected=" + selectedIds.Length + " solids=" + solidIds.Count + " axis=" + this.FormatVectorForCommand(s_isoPipeAxis) + " up=" + this.FormatVectorForCommand(s_isoPipeUp) + " saved=" + savedPath);
+        ed.WriteMessage("\nPFSNOTABDETAIL saved=" + savedPath);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL 예외: " + ex.GetType().Name + ": " + ex.Message);
+        ed.WriteMessage("\nPFSNOTABDETAIL error: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        if (sourceDb != null)
+          sourceDb.Dispose();
+      }
+    }
+
     private Database CloneSelectionToSideDatabase(Database originalDb, ObjectId[] selectedIds, string logPrefix)
     {
       if (originalDb == null)
@@ -1239,6 +1302,7 @@ namespace PlantFlow_Support
         return;
       s_isoPipeAxisValid = false;
       s_isoPipeAxis = Vector3d.XAxis;
+      s_isoPipeUp = Vector3d.ZAxis;
       s_isoPipeId = ObjectId.Null;
       s_isoRealWidth = 0.0;
       s_isoRealHeight = 0.0;
@@ -2099,6 +2163,369 @@ namespace PlantFlow_Support
 
       PlantOrthoView.FileDiag("PFSVBISOEXPORTED cloned2D=" + cloned + " -> 원본(PFS_ISO_DETAIL) path=" + exportPath);
       return cloned > 0;
+    }
+
+    private string CreateNotabDetailDrawing(Database sourceDb, System.Collections.Generic.List<ObjectId> solidIds)
+    {
+      if (sourceDb == null)
+        throw new System.ArgumentNullException("sourceDb");
+      if (solidIds == null || solidIds.Count == 0)
+        throw new System.InvalidOperationException("solidIds 없음");
+
+      string templatePath = this.ResolveIsoTemplatePath();
+      if (string.IsNullOrWhiteSpace(templatePath) || !System.IO.File.Exists(templatePath))
+        throw new System.IO.FileNotFoundException("template 없음", templatePath ?? string.Empty);
+
+      string tag = s_isoSupportTag;
+      if (string.IsNullOrWhiteSpace(tag) && !string.IsNullOrWhiteSpace(s_isoShortDesc))
+        tag = s_isoShortDesc + "_" + System.DateTime.Now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+      if (string.IsNullOrWhiteSpace(tag))
+        tag = "SUPPORT_" + System.DateTime.Now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+      string safeTag = this.SanitizeIsoFileName(tag);
+
+      Database tagDb = null;
+      Database oldWorking = HostApplicationServices.WorkingDatabase;
+      string savedPath = null;
+      try
+      {
+        tagDb = new Database(false, true);
+        tagDb.ReadDwgFile(templatePath, System.IO.FileShare.Read, true, null);
+        HostApplicationServices.WorkingDatabase = tagDb;
+        this.TrySetTagDatabaseFacetres(tagDb, 10.0);
+
+        Extents3d solidExt;
+        int cloned;
+        using (Transaction tr = tagDb.TransactionManager.StartTransaction())
+        {
+          ObjectId msId = this.GetModelSpaceId(tagDb, tr);
+          if (msId == ObjectId.Null)
+            throw new System.InvalidOperationException("template ModelSpace 없음");
+
+          ObjectId detailLayerId = this.EnsureIsoDetailLayer(tagDb, tr);
+          IdMapping idMap = new IdMapping();
+          ObjectIdCollection ids = new ObjectIdCollection();
+          foreach (ObjectId id in solidIds)
+            ids.Add(id);
+          sourceDb.WblockCloneObjects(ids, msId, idMap, DuplicateRecordCloning.Ignore, false);
+
+          cloned = this.PrepareClonedNotabSolids(tr, idMap, detailLayerId, out solidExt);
+          if (cloned == 0)
+            throw new System.InvalidOperationException("cloned solid/extents 없음");
+
+          bool viewportOk = this.CreateNotabDetailViewport(tr, tagDb, solidExt);
+          bool titleblockOk = this.UpdateIsoTitleBlockAttributes(tr, tagDb, tag);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL template cloned=" + cloned + " viewport=" + (viewportOk ? "ok" : "skip") + " titleblock=" + (titleblockOk ? "ok" : "skip") + " ext=" + this.FormatExtents(solidExt));
+          tr.Commit();
+        }
+
+        string detailsDir = this.GetIsoDetailsDirectory();
+        if (string.IsNullOrWhiteSpace(detailsDir))
+          throw new System.InvalidOperationException("Details dir 없음");
+
+        System.IO.Directory.CreateDirectory(detailsDir);
+        savedPath = System.IO.Path.Combine(detailsDir, safeTag + "_notab.dwg");
+        if (System.IO.File.Exists(savedPath))
+          System.IO.File.Delete(savedPath);
+        tagDb.SaveAs(savedPath, DwgVersion.Current);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
+        return savedPath;
+      }
+      finally
+      {
+        HostApplicationServices.WorkingDatabase = oldWorking;
+        if (tagDb != null)
+          tagDb.Dispose();
+      }
+    }
+
+    private ObjectId GetModelSpaceId(Database db, Transaction tr)
+    {
+      if (db == null || tr == null)
+        return ObjectId.Null;
+      BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+      if (bt == null || !bt.Has(BlockTableRecord.ModelSpace))
+        return ObjectId.Null;
+      return bt[BlockTableRecord.ModelSpace];
+    }
+
+    private int PrepareClonedNotabSolids(Transaction tr, IdMapping idMap, ObjectId layerId, out Extents3d solidExt)
+    {
+      solidExt = new Extents3d();
+      bool hasExt = false;
+      int cloned = 0;
+      if (tr == null || idMap == null)
+        return 0;
+
+      foreach (IdPair pair in idMap)
+      {
+        if (!pair.IsPrimary || !pair.IsCloned)
+          continue;
+
+        Entity e = tr.GetObject(pair.Value, OpenMode.ForWrite, false) as Entity;
+        if (e == null)
+          continue;
+        if (layerId != ObjectId.Null)
+          e.LayerId = layerId;
+        Solid3d solid = e as Solid3d;
+        if (solid == null)
+          continue;
+
+        cloned++;
+        try
+        {
+          Extents3d ext = solid.GeometricExtents;
+          if (!hasExt)
+          {
+            solidExt = ext;
+            hasExt = true;
+          }
+          else
+          {
+            solidExt.AddExtents(ext);
+          }
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL solid ext skip id=" + pair.Value + ": " + ex.GetType().Name + ": " + ex.Message);
+        }
+      }
+
+      if (!hasExt)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL solid ext 없음 cloned=" + cloned);
+        return 0;
+      }
+      return cloned;
+    }
+
+    private bool CreateNotabDetailViewport(Transaction tr, Database db, Extents3d solidExt)
+    {
+      if (tr == null || db == null)
+        return false;
+
+      try
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(db, tr, "Title Block");
+        if (layoutBtrId == ObjectId.Null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport skip: Title Block layout 없음");
+          return false;
+        }
+
+        BlockTableRecord layoutBtr = tr.GetObject(layoutBtrId, OpenMode.ForWrite) as BlockTableRecord;
+        if (layoutBtr == null)
+          return false;
+
+        double lminx = 0.0;
+        double lminy = 0.0;
+        double lmaxx = 841.0;
+        double lmaxy = 594.0;
+        string plotSource = "fallbackA1";
+        try
+        {
+          Layout lay = tr.GetObject(layoutBtr.LayoutId, OpenMode.ForRead, false) as Layout;
+          if (lay != null)
+          {
+            Extents2d limits = lay.Limits;
+            double lwProbe = limits.MaxPoint.X - limits.MinPoint.X;
+            double lhProbe = limits.MaxPoint.Y - limits.MinPoint.Y;
+            if (lwProbe > 1e-6 && lhProbe > 1e-6)
+            {
+              lminx = limits.MinPoint.X;
+              lminy = limits.MinPoint.Y;
+              lmaxx = limits.MaxPoint.X;
+              lmaxy = limits.MaxPoint.Y;
+              plotSource = "Limits";
+            }
+          }
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL plotArea Limits 예외: " + ex.GetType().Name + ": " + ex.Message);
+        }
+
+        double lw = lmaxx - lminx;
+        double lh = lmaxy - lminy;
+        if (lw <= 1e-6 || lh <= 1e-6)
+        {
+          lminx = 0.0;
+          lminy = 0.0;
+          lmaxx = 841.0;
+          lmaxy = 594.0;
+          lw = 841.0;
+          lh = 594.0;
+          plotSource = "fallbackA1";
+        }
+
+        const double RightInset = 0.14;
+        const double BottomInset = 0.10;
+        const double Margin = 0.03;
+        double targetMinX = lminx + lw * Margin;
+        double targetMaxX = lmaxx - lw * RightInset;
+        double targetMinY = lminy + lh * BottomInset;
+        double targetMaxY = lmaxy - lh * Margin;
+        double tw = targetMaxX - targetMinX;
+        double th = targetMaxY - targetMinY;
+        double tcx = (targetMinX + targetMaxX) / 2.0;
+        double tcy = (targetMinY + targetMaxY) / 2.0;
+        const double DetailViewScale = 0.5;
+
+        Point3d target = new Point3d(
+          (solidExt.MinPoint.X + solidExt.MaxPoint.X) / 2.0,
+          (solidExt.MinPoint.Y + solidExt.MaxPoint.Y) / 2.0,
+          (solidExt.MinPoint.Z + solidExt.MaxPoint.Z) / 2.0);
+        Vector3d viewDir = s_isoPipeAxisValid && s_isoPipeAxis.Length > 1e-6 ? s_isoPipeAxis.GetNormal() : Vector3d.XAxis;
+        Vector3d viewUp = s_isoPipeUp.Length > 1e-6 ? s_isoPipeUp.GetNormal() : Vector3d.ZAxis;
+        double twist = this.ComputeNotabViewportTwist(viewDir, viewUp);
+
+        Viewport vp = new Viewport();
+        layoutBtr.AppendEntity(vp);
+        tr.AddNewlyCreatedDBObject(vp, true);
+        vp.CenterPoint = new Point3d(tcx, tcy, 0.0);
+        vp.Width = tw;
+        vp.Height = th;
+        vp.ViewTarget = target;
+        vp.ViewDirection = viewDir;
+        vp.ViewCenter = new Point2d(0.0, 0.0);
+        vp.TwistAngle = twist;
+        vp.CustomScale = DetailViewScale;
+        vp.On = true;
+        bool hiddenOk = this.TryApplyHiddenVisualStyle(db, tr, vp);
+        bool shadeOk = this.TrySetViewportShadePlotHidden(vp);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport viewDir=" + this.FormatVectorForCommand(viewDir) + " target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") twist=" + this.FormatNumber(twist) + " hidden=" + hiddenOk + " shadePlot=" + shadeOk + " scale=1:2 plotArea=(" + this.FormatNumber(lminx) + "," + this.FormatNumber(lminy) + ")~(" + this.FormatNumber(lmaxx) + "," + this.FormatNumber(lmaxy) + ") source=" + plotSource);
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return false;
+    }
+
+    private double ComputeNotabViewportTwist(Vector3d viewDir, Vector3d desiredUp)
+    {
+      try
+      {
+        Vector3d dir = viewDir.Length > 1e-6 ? viewDir.GetNormal() : Vector3d.XAxis;
+        Vector3d baseUp = Vector3d.ZAxis - dir.MultiplyBy(Vector3d.ZAxis.DotProduct(dir));
+        if (baseUp.Length <= 1e-6)
+          baseUp = Vector3d.YAxis - dir.MultiplyBy(Vector3d.YAxis.DotProduct(dir));
+        Vector3d up = desiredUp - dir.MultiplyBy(desiredUp.DotProduct(dir));
+        if (up.Length <= 1e-6)
+          up = baseUp;
+        if (baseUp.Length <= 1e-6 || up.Length <= 1e-6)
+          return 0.0;
+
+        baseUp = baseUp.GetNormal();
+        up = up.GetNormal();
+        double sin = baseUp.CrossProduct(up).DotProduct(dir);
+        double cos = baseUp.DotProduct(up);
+        return System.Math.Atan2(sin, cos);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL twist 계산 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return 0.0;
+      }
+    }
+
+    private bool TryApplyHiddenVisualStyle(Database db, Transaction tr, Viewport vp)
+    {
+      try
+      {
+        DBDictionary vsDict = tr.GetObject(db.VisualStyleDictionaryId, OpenMode.ForRead) as DBDictionary;
+        if (vsDict == null)
+          return false;
+
+        foreach (DBDictionaryEntry entry in vsDict)
+        {
+          string name = System.Convert.ToString(entry.Key, System.Globalization.CultureInfo.InvariantCulture);
+          if (name.IndexOf("Hidden", System.StringComparison.OrdinalIgnoreCase) < 0)
+            continue;
+
+          vp.VisualStyleId = entry.Value;
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL Hidden visualStyle=" + name + " id=" + entry.Value);
+          return true;
+        }
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL Hidden visualStyle not found");
+        return false;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL Hidden style 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private bool TrySetViewportShadePlotHidden(Viewport vp)
+    {
+      if (vp == null)
+        return false;
+
+      try
+      {
+        System.Reflection.PropertyInfo prop = vp.GetType().GetProperty("ShadePlot");
+        if (prop == null || !prop.CanWrite)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL ShadePlot property 없음");
+          return false;
+        }
+
+        object value = null;
+        if (prop.PropertyType.IsEnum)
+        {
+          foreach (string name in System.Enum.GetNames(prop.PropertyType))
+          {
+            if (name.IndexOf("Hidden", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+              value = System.Enum.Parse(prop.PropertyType, name);
+              break;
+            }
+          }
+        }
+
+        if (value == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL ShadePlot Hidden enum 없음 type=" + prop.PropertyType.FullName);
+          return false;
+        }
+
+        prop.SetValue(vp, value, null);
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL ShadePlot 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private bool TrySetTagDatabaseFacetres(Database db, double value)
+    {
+      if (db == null)
+        return false;
+
+      try
+      {
+        System.Reflection.PropertyInfo prop = db.GetType().GetProperty("Facetres");
+        if (prop == null || !prop.CanWrite)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL Facetres property 없음");
+          return false;
+        }
+
+        object converted = System.Convert.ChangeType(value, prop.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+        prop.SetValue(db, converted, null);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL Facetres=" + this.FormatNumber(value));
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL Facetres 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
     }
 
     private string SanitizeIsoFileName(string value)
@@ -3610,6 +4037,7 @@ namespace PlantFlow_Support
         return;
       }
       up = up.GetNormal();
+      s_isoPipeUp = up;
       Vector3d right = up.CrossProduct(axis);
       if (right.Length <= 1e-6)
       {
