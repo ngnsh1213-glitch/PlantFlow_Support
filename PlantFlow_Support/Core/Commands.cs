@@ -1926,33 +1926,58 @@ namespace PlantFlow_Support
         if (layoutBtr == null)
           return false;
 
-        double cx = 420.5;
-        double cy = 297.0;
-        double sw = 841.0;
-        double sh = 594.0;
-        foreach (ObjectId id in layoutBtr)
+        double lminx = 0.0;
+        double lminy = 0.0;
+        double lmaxx = 841.0;
+        double lmaxy = 594.0;
+        string plotSource = "fallbackA1";
+        try
         {
-          Viewport vp = tr.GetObject(id, OpenMode.ForRead, false) as Viewport;
-          if (vp == null)
-            continue;
-
-          cx = vp.CenterPoint.X;
-          cy = vp.CenterPoint.Y;
-          if (vp.Width > 1e-9)
-            sw = vp.Width;
-          if (vp.Height > 1e-9)
-            sh = vp.Height;
-          break;
+          Layout lay = tr.GetObject(layoutBtr.LayoutId, OpenMode.ForRead, false) as Layout;
+          if (lay != null)
+          {
+            Extents2d limits = lay.Limits;
+            double lwProbe = limits.MaxPoint.X - limits.MinPoint.X;
+            double lhProbe = limits.MaxPoint.Y - limits.MinPoint.Y;
+            if (lwProbe > 1e-6 && lhProbe > 1e-6)
+            {
+              lminx = limits.MinPoint.X;
+              lminy = limits.MinPoint.Y;
+              lmaxx = limits.MaxPoint.X;
+              lmaxy = limits.MaxPoint.Y;
+              plotSource = "Limits";
+            }
+          }
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg plotArea Limits 예외: " + ex.GetType().Name + ": " + ex.Message);
         }
 
-        const double TargetWidthRatio = 0.60;
-        const double TargetHeightRatio = 0.78;
-        const double TargetCenterXOffset = 0.14;
-        const double TargetCenterYOffset = 0.03;
-        double tw = sw * TargetWidthRatio;
-        double th = sh * TargetHeightRatio;
-        double tcx = cx - sw * TargetCenterXOffset;
-        double tcy = cy + sh * TargetCenterYOffset;
+        double lw = lmaxx - lminx;
+        double lh = lmaxy - lminy;
+        if (lw <= 1e-6 || lh <= 1e-6)
+        {
+          lminx = 0.0;
+          lminy = 0.0;
+          lmaxx = 841.0;
+          lmaxy = 594.0;
+          lw = 841.0;
+          lh = 594.0;
+          plotSource = "fallbackA1";
+        }
+
+        const double RightInset = 0.14;
+        const double BottomInset = 0.10;
+        const double Margin = 0.03;
+        double targetMinX = lminx + lw * Margin;
+        double targetMaxX = lmaxx - lw * RightInset;
+        double targetMinY = lminy + lh * BottomInset;
+        double targetMaxY = lmaxy - lh * Margin;
+        double tw = targetMaxX - targetMinX;
+        double th = targetMaxY - targetMinY;
+        double tcx = (targetMinX + targetMaxX) / 2.0;
+        double tcy = (targetMinY + targetMaxY) / 2.0;
         double aspect = th > 1e-9 ? tw / th : 1.3333;
         double viewHeight = ((detailW / aspect) > detailH ? (detailW / aspect) : detailH) * 1.15;
 
@@ -1965,7 +1990,7 @@ namespace PlantFlow_Support
         nvp.ViewCenter = new Point2d(dcx, dcy);
         nvp.ViewHeight = viewHeight;
         nvp.On = true;
-        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg newViewport center=(" + this.FormatNumber(tcx) + "," + this.FormatNumber(tcy) + ") size=(" + this.FormatNumber(tw) + "," + this.FormatNumber(th) + ") viewCenter=(" + this.FormatNumber(dcx) + "," + this.FormatNumber(dcy) + ") viewHeight=" + this.FormatNumber(viewHeight) + " sheet=(" + this.FormatNumber(sw) + "," + this.FormatNumber(sh) + ")");
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg newViewport center=(" + this.FormatNumber(tcx) + "," + this.FormatNumber(tcy) + ") size=(" + this.FormatNumber(tw) + "," + this.FormatNumber(th) + ") viewCenter=(" + this.FormatNumber(dcx) + "," + this.FormatNumber(dcy) + ") viewHeight=" + this.FormatNumber(viewHeight) + " plotArea=(" + this.FormatNumber(lminx) + "," + this.FormatNumber(lminy) + ")~(" + this.FormatNumber(lmaxx) + "," + this.FormatNumber(lmaxy) + ") source=" + plotSource);
         return true;
       }
       catch (System.Exception ex)
