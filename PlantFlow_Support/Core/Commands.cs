@@ -36,6 +36,8 @@ namespace PlantFlow_Support
     private static string s_isoExportPath;
     private static Document s_isoClosePendingDoc;
     private static Document s_isoClosePendingOriginalDoc;
+    private static Document s_isoRedrawPendingDoc;
+    private static int s_isoRedrawAttempt;
     public static ObjectId ViewportId;
     public static string LayerName;
     public static int ItemNo;
@@ -1751,20 +1753,13 @@ namespace PlantFlow_Support
     private void CloseIsoTempDocument(Document tempDoc, Document originalDoc)
     {
       bool discarded = false;
+      bool queueRedraw = false;
       try
       {
         if (originalDoc != null && !object.ReferenceEquals(originalDoc, tempDoc))
         {
           Application.DocumentManager.MdiActiveDocument = originalDoc;
-          try
-          {
-            originalDoc.SendStringToExecute("._REGEN\n", true, false, false);
-            PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube REGEN 큐잉 doc=" + originalDoc.Name);
-          }
-          catch (System.Exception ex)
-          {
-            PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube REGEN 예외: " + ex.GetType().Name + ": " + ex.Message);
-          }
+          queueRedraw = true;
         }
         tempDoc.CloseAndDiscard();
         discarded = true;
@@ -1773,7 +1768,68 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSVBISOOPEN CloseAndDiscard 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
+      finally
+      {
+        if (queueRedraw && originalDoc != null)
+        {
+          s_isoRedrawPendingDoc = originalDoc;
+          s_isoRedrawAttempt = 0;
+          Application.Idle -= this.VbIsoRedrawOnIdle;
+          Application.Idle += this.VbIsoRedrawOnIdle;
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube redraw Idle 예약 doc=" + originalDoc.Name + " discard=" + discarded);
+        }
+      }
       PlantOrthoView.FileDiag("PFSVBISOOPEN closed tempDoc discard=" + discarded);
+    }
+
+
+    private void VbIsoRedrawOnIdle(object sender, System.EventArgs e)
+    {
+      Application.Idle -= this.VbIsoRedrawOnIdle;
+      try
+      {
+        Document doc = s_isoRedrawPendingDoc;
+        if (doc == null)
+          return;
+
+        if (!object.ReferenceEquals(doc, Application.DocumentManager.MdiActiveDocument))
+        {
+          s_isoRedrawAttempt++;
+          if (s_isoRedrawAttempt <= 2)
+          {
+            Application.Idle += this.VbIsoRedrawOnIdle;
+            PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube redraw 대기 attempt=" + s_isoRedrawAttempt + " doc=" + doc.Name);
+            return;
+          }
+
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube redraw 포기 attempt=" + s_isoRedrawAttempt + " doc=" + doc.Name);
+          s_isoRedrawPendingDoc = null;
+          s_isoRedrawAttempt = 0;
+          return;
+        }
+
+        s_isoRedrawPendingDoc = null;
+        s_isoRedrawAttempt = 0;
+        object navvcube = null;
+        try
+        {
+          navvcube = Application.GetSystemVariable("NAVVCUBEDISPLAY");
+        }
+        catch (System.Exception ex)
+        {
+          navvcube = "read-error:" + ex.GetType().Name;
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube NAVVCUBEDISPLAY 조회 예외: " + ex.GetType().Name + ": " + ex.Message);
+        }
+
+        doc.SendStringToExecute("._REGENALL\n", true, false, false);
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube redraw(Idle) navvcube=" + navvcube + " REGENALL 큐잉 doc=" + doc.Name);
+      }
+      catch (System.Exception ex)
+      {
+        s_isoRedrawPendingDoc = null;
+        s_isoRedrawAttempt = 0;
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED viewcube redraw Idle 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
     }
 
     [CommandMethod("PFSCOUNTVIEW")]
