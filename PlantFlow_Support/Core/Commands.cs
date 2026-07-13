@@ -2215,7 +2215,9 @@ namespace PlantFlow_Support
           bool viewportOk = this.CreateNotabDetailViewport(tr, tagDb, solidExt);
           bool titleblockOk = this.UpdateIsoTitleBlockAttributes(tr, tagDb, tag);
           PlantOrthoView.FileDiag("PFSNOTABDETAIL template cloned=" + cloned + " viewport=" + (viewportOk ? "ok" : "skip") + " titleblock=" + (titleblockOk ? "ok" : "skip") + " ext=" + this.FormatExtents(solidExt));
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL commit 직전");
           tr.Commit();
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL commit 완료");
         }
 
         string detailsDir = this.GetIsoDetailsDirectory();
@@ -2226,6 +2228,7 @@ namespace PlantFlow_Support
         savedPath = System.IO.Path.Combine(detailsDir, safeTag + "_notab.dwg");
         if (System.IO.File.Exists(savedPath))
           System.IO.File.Delete(savedPath);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         tagDb.SaveAs(savedPath, DwgVersion.Current);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
         return savedPath;
@@ -2390,8 +2393,18 @@ namespace PlantFlow_Support
         vp.TwistAngle = twist;
         vp.CustomScale = DetailViewScale;
         vp.On = true;
-        bool hiddenOk = this.TryApplyHiddenVisualStyle(db, tr, vp);
-        bool shadeOk = this.TrySetViewportShadePlotHidden(vp);
+        bool skipHidden = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_HIDDEN"), "1", System.StringComparison.OrdinalIgnoreCase);
+        bool hiddenOk = false;
+        bool shadeOk = false;
+        if (skipHidden)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL hidden skip(env)");
+        }
+        else
+        {
+          hiddenOk = this.TryApplyHiddenVisualStyle(db, tr, vp);
+          shadeOk = this.TrySetViewportShadePlotHidden(vp);
+        }
         PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport viewDir=" + this.FormatVectorForCommand(viewDir) + " target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") twist=" + this.FormatNumber(twist) + " hidden=" + hiddenOk + " shadePlot=" + shadeOk + " scale=1:2 plotArea=(" + this.FormatNumber(lminx) + "," + this.FormatNumber(lminy) + ")~(" + this.FormatNumber(lmaxx) + "," + this.FormatNumber(lmaxy) + ") source=" + plotSource);
         return true;
       }
@@ -2438,14 +2451,47 @@ namespace PlantFlow_Support
         if (vsDict == null)
           return false;
 
+        ObjectId fallbackHidden = ObjectId.Null;
+        string fallbackHiddenName = null;
+        ObjectId fallbackAnyHidden = ObjectId.Null;
+        string fallbackAnyHiddenName = null;
         foreach (DBDictionaryEntry entry in vsDict)
         {
           string name = System.Convert.ToString(entry.Key, System.Globalization.CultureInfo.InvariantCulture);
+          if (string.Equals(name, "Hidden", System.StringComparison.OrdinalIgnoreCase))
+          {
+            vp.VisualStyleId = entry.Value;
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL Hidden visualStyle=" + name + " id=" + entry.Value + " match=exact");
+            return true;
+          }
+
           if (name.IndexOf("Hidden", System.StringComparison.OrdinalIgnoreCase) < 0)
             continue;
 
-          vp.VisualStyleId = entry.Value;
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL Hidden visualStyle=" + name + " id=" + entry.Value);
+          if (fallbackAnyHidden == ObjectId.Null)
+          {
+            fallbackAnyHidden = entry.Value;
+            fallbackAnyHiddenName = name;
+          }
+
+          if (name.IndexOf("3D", System.StringComparison.OrdinalIgnoreCase) < 0 && fallbackHidden == ObjectId.Null)
+          {
+            fallbackHidden = entry.Value;
+            fallbackHiddenName = name;
+          }
+        }
+
+        if (fallbackHidden != ObjectId.Null)
+        {
+          vp.VisualStyleId = fallbackHidden;
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL Hidden visualStyle=" + fallbackHiddenName + " id=" + fallbackHidden + " match=fallback-no3d");
+          return true;
+        }
+
+        if (fallbackAnyHidden != ObjectId.Null)
+        {
+          vp.VisualStyleId = fallbackAnyHidden;
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL Hidden visualStyle=" + fallbackAnyHiddenName + " id=" + fallbackAnyHidden + " match=fallback-any");
           return true;
         }
 

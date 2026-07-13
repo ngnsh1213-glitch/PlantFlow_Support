@@ -1,39 +1,41 @@
 # REPORT — Codex → Claude
 
-- cycle: 22
+- cycle: 23
 - status: done_uncommitted
 - commit: not_created (git commit requires explicit approval/review)
 - target: `PlantFlow_Support/Core/Commands.cs`
 - build: not_run (빌드 수동 원칙)
 
 ## 변경 요약
-- 신규 커맨드 `[CommandMethod("PFSNOTABDETAIL", CommandFlags.Session)]` 추가.
-- 선택한 서포트+파이프에서 기존 `TryGetSelectionPipeAxis`와 `CaptureIsoSelectionMetrics`를 재사용해 축/실측/타이틀블록 속성을 캡처.
-- `CaptureIsoSelectionMetrics`에서 계산하던 up 벡터를 신규 static `s_isoPipeUp`에 저장하도록 추가.
-- N1 헬퍼(`CloneSelectionToSideDatabase`, `CollectNotabN1SolidIds`)를 재사용해 문서 오픈 없이 side-DB에서 Solid3d를 수집.
-- 템플릿 DWG를 side-DB로 열고, 수집 Solid3d를 `WblockCloneObjects`로 ModelSpace에 이송.
-- `Title Block` 레이아웃에 신규 viewport를 생성하고 pipe axis 기반 `ViewDirection`, solid extents 중심 `ViewTarget`, 계산 twist, Hidden visual style, shade plot reflection 설정, 1:2 custom scale을 적용.
-- 타이틀블록은 기존 `UpdateIsoTitleBlockAttributes`를 재사용.
-- 저장 경로는 기존 상세도와 충돌하지 않도록 `<ProjectDwgDirectory>\Details\<safeTag>_notab.dwg`.
+- `PFSNOTABDETAIL` 크래시 진단용 stage 로그 추가.
+  - `PFSNOTABDETAIL commit 직전`
+  - `PFSNOTABDETAIL commit 완료`
+  - `PFSNOTABDETAIL saveAs 직전 path=...`
+  - 기존 `saved path=...` 로그 유지
+- `TryApplyHiddenVisualStyle` 매칭을 exact `"Hidden"` 우선으로 변경.
+  - 1순위: 이름이 정확히 `"Hidden"`인 visual style
+  - 2순위: `"Hidden"` 포함, `"3D"` 미포함
+  - 3순위: 기존 포함 매칭 fallback
+  - 선택 로그에 `match=exact|fallback-no3d|fallback-any` 기록
+- 환경변수 `PFS_NOTAB_SKIP_HIDDEN=1` 진단 토글 추가.
+  - 토글 ON이면 `TryApplyHiddenVisualStyle`과 `TrySetViewportShadePlotHidden` 호출을 건너뛰고 `hidden skip(env)` 로그 기록.
 
 ## 산출 파일
 - 수정: `PlantFlow_Support/Core/Commands.cs`
-- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260713_notab_n2`
-- 실행 커맨드: `PFSNOTABDETAIL`
-- 출력 DWG: `<ProjectDwgDirectory>\Details\<safeTag>_notab.dwg`
+- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_notab_n2_crashdiag`
 
 ## 검증
 - `git diff --check -- PlantFlow_Support/Core/Commands.cs`: PASS
-- `rg catch\s*\{\s*\}`: 빈 catch 없음
-- `rg PFSNOTABDETAIL/s_isoPipeUp/CreateNotabDetailDrawing/CreateNotabDetailViewport/TryApplyHiddenVisualStyle`: PASS
-- 기존 `PFSVBISOCLONE/OPEN/DONE/EXPORTED` 체인은 직접 수정 없음. 신규 커맨드/헬퍼 병렬 추가와 `s_isoPipeUp` 저장만 수행.
+- `rg PFS_NOTAB_SKIP_HIDDEN/commit 직전/commit 완료/saveAs 직전/match=exact/fallback-no3d/fallback-any`: PASS
+- 기존 `PFSVBISO*` 체인 직접 수정 없음. `PFSNOTABDETAIL` 관련 함수만 수정.
 - 빌드/Plant3D 실행 검증은 지시대로 수행하지 않음.
 
 ## 커밋 상태
 - 코드 변경과 REPORT 갱신은 완료됐으나 커밋은 수행하지 않음.
 - 커밋 시 `PlantFlow_Support/Core/Commands.cs`와 `.plans/REPORT.md`만 stage 대상.
 
-## 라이브 실행
-- 수동 빌드 후 Plant3D에서 `PFSNOTABDETAIL` 실행.
-- 서포트+파이프 선택 후 `Details\<safeTag>_notab.dwg`를 열어 `Title Block` 레이아웃의 은선제거 Main viewport와 타이틀블록 값을 확인.
-- FileDiag에서 `PFSNOTABDETAIL viewport ... hidden=True/False shadePlot=True/False scale=1:2` 로그 확인.
+## 라이브 검증
+1. 수동 빌드 후 `PFSNOTABDETAIL` 재실행.
+2. `Hidden visualStyle=... match=...` 로그 확인. 기대 1순위는 `match=exact`.
+3. 크래시 시 마지막 로그가 `commit 직전`, `commit 완료`, `saveAs 직전` 중 어디까지 찍혔는지 공유.
+4. 계속 크래시하면 `PFS_NOTAB_SKIP_HIDDEN=1` 설정 후 Plant3D 재시작, 재실행해 `hidden skip(env)` 상태에서 크래시 여부 확인.
