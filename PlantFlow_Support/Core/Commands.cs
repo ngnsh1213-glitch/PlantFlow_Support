@@ -25,6 +25,9 @@ namespace PlantFlow_Support
     private static string s_isoPipeLineNo;
     private static string s_isoBOP;
     private static string s_isoSize;
+    private static string s_isoSupportTag;
+    private static string s_isoDesignStd;
+    private static string s_isoShortDesc;
     private static Document s_isoOpenPendingTempDoc;
     private static Document s_isoOpenPendingOriginalDoc;
     private static int s_isoOpenSecondIdleAttempts;
@@ -895,6 +898,9 @@ namespace PlantFlow_Support
       s_isoPipeLineNo = string.Empty;
       s_isoBOP = string.Empty;
       s_isoSize = string.Empty;
+      s_isoSupportTag = string.Empty;
+      s_isoDesignStd = string.Empty;
+      s_isoShortDesc = string.Empty;
       Editor ed = doc.Editor;
       PromptSelectionResult psr = ed.GetSelection();
       if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
@@ -1529,7 +1535,6 @@ namespace PlantFlow_Support
         int poly = 0;
         int block = 0;
         int viewBorder = 0;
-        int cloned = 0;
         ObjectIdCollection ids = new ObjectIdCollection();
         Database sideDb = null;
         try
@@ -1574,7 +1579,27 @@ namespace PlantFlow_Support
           PlantOrthoView.FileDiag("PFSVBISOEXPORTED exported2D total=" + total + " Line=" + line + " Circle=" + circle + " Arc=" + arc + " Poly=" + poly + " Block=" + block + " viewBorder=" + viewBorder + " path=" + exportPath);
           this.WriteEditorMessageSafe(ed, "\nPFSVBISOEXPORTED exported2D total=" + total + " Line=" + line + " Circle=" + circle + " Arc=" + arc + " Poly=" + poly + " Block=" + block + " viewBorder=" + viewBorder, "PFSVBISOEXPORTED exported2D");
 
-          if (ids.Count == 0)
+          bool separateSaved = false;
+          if (ids.Count > 0 && s_isoRealSizeValid && originalDoc != null)
+          {
+            string savedPath;
+            bool separateOk = this.CreateIsoDetailDrawing(ids, sideDb, out savedPath);
+            if (separateOk)
+            {
+              PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg 성공 path=" + savedPath);
+              separateSaved = true;
+            }
+            else
+            {
+              PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg 실패 -> 원본 clone-back 폴백");
+            }
+          }
+
+          if (separateSaved)
+          {
+            PlantOrthoView.FileDiag("PFSVBISOEXPORTED clone-back skip: separateDwg success");
+          }
+          else if (ids.Count == 0)
           {
             PlantOrthoView.FileDiag("PFSVBISOEXPORTED clone-back skip: export ModelSpace empty path=" + exportPath);
           }
@@ -1584,81 +1609,7 @@ namespace PlantFlow_Support
           }
           else
           {
-            Database originalDb = originalDoc.Database;
-            using (DocumentLock dlk = originalDoc.LockDocument())
-            using (Transaction ttr = originalDb.TransactionManager.StartTransaction())
-            {
-              BlockTable tbt = ttr.GetObject(originalDb.BlockTableId, OpenMode.ForRead) as BlockTable;
-              if (tbt == null || !tbt.Has(BlockTableRecord.ModelSpace))
-              {
-                PlantOrthoView.FileDiag("PFSVBISOEXPORTED clone-back skip: original ModelSpace 없음 path=" + exportPath);
-                ttr.Commit();
-              }
-              else
-              {
-                ObjectId msId = tbt[BlockTableRecord.ModelSpace];
-                BlockTableRecord targetMs = ttr.GetObject(msId, OpenMode.ForWrite) as BlockTableRecord;
-                ObjectId detailLayerId = this.EnsureIsoDetailLayer(originalDb, ttr);
-                ObjectId annotationLayerId;
-                ObjectId textStyleId;
-                ObjectId dimStyleId;
-                this.EnsureIsoAnnotationResources(originalDb, ttr, out annotationLayerId, out textStyleId, out dimStyleId);
-                this.PurgePriorIsoDetail(ttr, targetMs, detailLayerId, annotationLayerId);
-                Database oldWorking = HostApplicationServices.WorkingDatabase;
-                IdMapping idMap = new IdMapping();
-                try
-                {
-                  HostApplicationServices.WorkingDatabase = originalDb;
-                  sideDb.WblockCloneObjects(ids, msId, idMap, DuplicateRecordCloning.Ignore, false);
-                }
-                finally
-                {
-                  HostApplicationServices.WorkingDatabase = oldWorking;
-                }
-
-                ObjectId detailBlockRefId = ObjectId.Null;
-                ObjectId detailEntityId = ObjectId.Null;
-                foreach (IdPair pair in idMap)
-                {
-                  if (!pair.IsPrimary || !pair.IsCloned)
-                    continue;
-
-                  Entity e = ttr.GetObject(pair.Value, OpenMode.ForWrite, false) as Entity;
-                  if (e == null)
-                    continue;
-
-                  e.LayerId = detailLayerId;
-                  if (detailEntityId == ObjectId.Null)
-                    detailEntityId = pair.Value;
-                  if (detailBlockRefId == ObjectId.Null && e is BlockReference)
-                    detailBlockRefId = pair.Value;
-                  cloned++;
-                }
-
-                this.LogIsoBlockInnerTypes(originalDb, ttr, detailBlockRefId);
-                if (targetMs != null && s_isoRealSizeValid)
-                {
-                  ObjectId dimSourceId = detailBlockRefId != ObjectId.Null ? detailBlockRefId : detailEntityId;
-                  Database prevWdb = HostApplicationServices.WorkingDatabase;
-                  try
-                  {
-                    HostApplicationServices.WorkingDatabase = originalDb;
-                    this.AppendIsoBoundingDimensions(ttr, targetMs, dimSourceId, annotationLayerId, dimStyleId);
-                  }
-                  finally
-                  {
-                    HostApplicationServices.WorkingDatabase = prevWdb;
-                  }
-                }
-                else
-                {
-                  PlantOrthoView.FileDiag("PFSVBISOEXPORTED dim skip realSizeValid=" + s_isoRealSizeValid + " targetMsNull=" + (targetMs == null));
-                }
-
-                ttr.Commit();
-                PlantOrthoView.FileDiag("PFSVBISOEXPORTED cloned2D=" + cloned + " -> 원본(PFS_ISO_DETAIL) path=" + exportPath);
-              }
-            }
+            this.CloneIsoExportToOriginal(ids, sideDb, originalDoc, exportPath);
           }
         }
         finally
@@ -1703,6 +1654,366 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSVBISODONE close Idle 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
+    }
+
+    private bool CloneIsoExportToOriginal(ObjectIdCollection ids, Database sideDb, Document originalDoc, string exportPath)
+    {
+      if (ids == null || ids.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED clone-back skip: export ModelSpace empty path=" + exportPath);
+        return false;
+      }
+      if (sideDb == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED clone-back skip: sideDb null path=" + exportPath);
+        return false;
+      }
+      if (originalDoc == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED clone-back skip: originalDoc null path=" + exportPath);
+        return false;
+      }
+
+      int cloned = 0;
+      Database originalDb = originalDoc.Database;
+      using (DocumentLock dlk = originalDoc.LockDocument())
+      using (Transaction ttr = originalDb.TransactionManager.StartTransaction())
+      {
+        BlockTable tbt = ttr.GetObject(originalDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+        if (tbt == null || !tbt.Has(BlockTableRecord.ModelSpace))
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED clone-back skip: original ModelSpace 없음 path=" + exportPath);
+          ttr.Commit();
+          return false;
+        }
+
+        ObjectId msId = tbt[BlockTableRecord.ModelSpace];
+        BlockTableRecord targetMs = ttr.GetObject(msId, OpenMode.ForWrite) as BlockTableRecord;
+        ObjectId detailLayerId = this.EnsureIsoDetailLayer(originalDb, ttr);
+        ObjectId annotationLayerId;
+        ObjectId textStyleId;
+        ObjectId dimStyleId;
+        this.EnsureIsoAnnotationResources(originalDb, ttr, out annotationLayerId, out textStyleId, out dimStyleId);
+        this.PurgePriorIsoDetail(ttr, targetMs, detailLayerId, annotationLayerId);
+        Database oldWorking = HostApplicationServices.WorkingDatabase;
+        IdMapping idMap = new IdMapping();
+        try
+        {
+          HostApplicationServices.WorkingDatabase = originalDb;
+          sideDb.WblockCloneObjects(ids, msId, idMap, DuplicateRecordCloning.Ignore, false);
+        }
+        finally
+        {
+          HostApplicationServices.WorkingDatabase = oldWorking;
+        }
+
+        ObjectId detailBlockRefId = ObjectId.Null;
+        ObjectId detailEntityId = ObjectId.Null;
+        foreach (IdPair pair in idMap)
+        {
+          if (!pair.IsPrimary || !pair.IsCloned)
+            continue;
+
+          Entity e = ttr.GetObject(pair.Value, OpenMode.ForWrite, false) as Entity;
+          if (e == null)
+            continue;
+
+          e.LayerId = detailLayerId;
+          if (detailEntityId == ObjectId.Null)
+            detailEntityId = pair.Value;
+          if (detailBlockRefId == ObjectId.Null && e is BlockReference)
+            detailBlockRefId = pair.Value;
+          cloned++;
+        }
+
+        this.LogIsoBlockInnerTypes(originalDb, ttr, detailBlockRefId);
+        if (targetMs != null && s_isoRealSizeValid)
+        {
+          ObjectId dimSourceId = detailBlockRefId != ObjectId.Null ? detailBlockRefId : detailEntityId;
+          Database prevWdb = HostApplicationServices.WorkingDatabase;
+          try
+          {
+            HostApplicationServices.WorkingDatabase = originalDb;
+            this.AppendIsoBoundingDimensions(ttr, targetMs, dimSourceId, annotationLayerId, dimStyleId);
+          }
+          finally
+          {
+            HostApplicationServices.WorkingDatabase = prevWdb;
+          }
+        }
+        else
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED dim skip realSizeValid=" + s_isoRealSizeValid + " targetMsNull=" + (targetMs == null));
+        }
+
+        ttr.Commit();
+      }
+
+      PlantOrthoView.FileDiag("PFSVBISOEXPORTED cloned2D=" + cloned + " -> 원본(PFS_ISO_DETAIL) path=" + exportPath);
+      return cloned > 0;
+    }
+
+    private string SanitizeIsoFileName(string value)
+    {
+      string name = string.IsNullOrWhiteSpace(value) ? "SUPPORT_" + System.DateTime.Now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture) : value.Trim();
+      char[] invalid = System.IO.Path.GetInvalidFileNameChars();
+      foreach (char c in invalid)
+        name = name.Replace(c, '_');
+      return name;
+    }
+
+    private string GetIsoDetailsDirectory()
+    {
+      string projectDir = string.Empty;
+      try
+      {
+        Autodesk.ProcessPower.ProjectManager.Project piping = Autodesk.ProcessPower.PlantInstance.PlantApplication.CurrentProject.ProjectParts["Piping"] as Autodesk.ProcessPower.ProjectManager.Project;
+        if (piping != null)
+          projectDir = piping.ProjectDwgDirectory;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg ProjectDwgDirectory 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      if (string.IsNullOrWhiteSpace(projectDir))
+        return null;
+
+      return System.IO.Path.Combine(projectDir, "Details");
+    }
+
+    private bool CreateIsoDetailDrawing(ObjectIdCollection exportIds, Database sideDb, out string savedPath)
+    {
+      savedPath = null;
+      if (exportIds == null || exportIds.Count == 0 || sideDb == null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg skip: exportIds/sideDb invalid");
+        return false;
+      }
+
+      string templatePath = this.ResolveIsoTemplatePath();
+      if (string.IsNullOrWhiteSpace(templatePath) || !System.IO.File.Exists(templatePath))
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg template 없음 path=" + (templatePath ?? "null"));
+        return false;
+      }
+
+      string tag = s_isoSupportTag;
+      if (string.IsNullOrWhiteSpace(tag) && !string.IsNullOrWhiteSpace(s_isoShortDesc))
+        tag = s_isoShortDesc + "_" + System.DateTime.Now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+      if (string.IsNullOrWhiteSpace(tag))
+        tag = "SUPPORT_" + System.DateTime.Now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+      string safeTag = this.SanitizeIsoFileName(tag);
+
+      Database tagDb = null;
+      Database oldWorking = HostApplicationServices.WorkingDatabase;
+      int cloned = 0;
+      bool viewportOk = false;
+      bool titleblockOk = false;
+      try
+      {
+        tagDb = new Database(false, true);
+        tagDb.ReadDwgFile(templatePath, System.IO.FileShare.Read, true, null);
+        HostApplicationServices.WorkingDatabase = tagDb;
+
+        using (Transaction tr = tagDb.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = tr.GetObject(tagDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          if (bt == null || !bt.Has(BlockTableRecord.ModelSpace))
+          {
+            PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg skip: template ModelSpace 없음 path=" + templatePath);
+            tr.Commit();
+            return false;
+          }
+
+          ObjectId msId = bt[BlockTableRecord.ModelSpace];
+          BlockTableRecord ms = tr.GetObject(msId, OpenMode.ForWrite) as BlockTableRecord;
+          ObjectId detailLayerId = this.EnsureIsoDetailLayer(tagDb, tr);
+          ObjectId annotationLayerId;
+          ObjectId textStyleId;
+          ObjectId dimStyleId;
+          this.EnsureIsoAnnotationResources(tagDb, tr, out annotationLayerId, out textStyleId, out dimStyleId);
+
+          IdMapping idMap = new IdMapping();
+          sideDb.WblockCloneObjects(exportIds, msId, idMap, DuplicateRecordCloning.Ignore, false);
+
+          ObjectId detailBlockRefId = ObjectId.Null;
+          ObjectId detailEntityId = ObjectId.Null;
+          foreach (IdPair pair in idMap)
+          {
+            if (!pair.IsPrimary || !pair.IsCloned)
+              continue;
+
+            Entity e = tr.GetObject(pair.Value, OpenMode.ForWrite, false) as Entity;
+            if (e == null)
+              continue;
+
+            e.LayerId = detailLayerId;
+            if (detailEntityId == ObjectId.Null)
+              detailEntityId = pair.Value;
+            if (detailBlockRefId == ObjectId.Null && e is BlockReference)
+              detailBlockRefId = pair.Value;
+            cloned++;
+          }
+
+          ObjectId dimSourceId = detailBlockRefId != ObjectId.Null ? detailBlockRefId : detailEntityId;
+          this.LogIsoBlockInnerTypes(tagDb, tr, detailBlockRefId);
+          if (ms != null && s_isoRealSizeValid)
+            this.AppendIsoBoundingDimensions(tr, ms, dimSourceId, annotationLayerId, dimStyleId);
+          else
+            PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg dim skip realSizeValid=" + s_isoRealSizeValid + " msNull=" + (ms == null));
+
+          viewportOk = this.FitIsoDetailViewport(tr, tagDb, dimSourceId);
+          titleblockOk = this.UpdateIsoTitleBlockAttributes(tr, tagDb, tag);
+          tr.Commit();
+        }
+
+        string detailsDir = this.GetIsoDetailsDirectory();
+        if (string.IsNullOrWhiteSpace(detailsDir))
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg save skip: Details dir 없음");
+          return false;
+        }
+
+        System.IO.Directory.CreateDirectory(detailsDir);
+        savedPath = System.IO.Path.Combine(detailsDir, safeTag + ".dwg");
+        if (System.IO.File.Exists(savedPath))
+          System.IO.File.Delete(savedPath);
+        tagDb.SaveAs(savedPath, DwgVersion.Current);
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg tag=" + tag + " path=" + savedPath + " cloned=" + cloned + " viewport=" + (viewportOk ? "ok" : "skip") + " titleblock=" + (titleblockOk ? "ok" : "skip"));
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg 예외: " + ex.GetType().Name + ": " + ex.Message + " path=" + (savedPath ?? "null"));
+        return false;
+      }
+      finally
+      {
+        HostApplicationServices.WorkingDatabase = oldWorking;
+        if (tagDb != null)
+          tagDb.Dispose();
+      }
+    }
+
+    private bool FitIsoDetailViewport(Transaction tr, Database db, ObjectId dimSourceId)
+    {
+      if (tr == null || db == null || dimSourceId == ObjectId.Null)
+        return false;
+
+      try
+      {
+        Entity source = tr.GetObject(dimSourceId, OpenMode.ForRead, false) as Entity;
+        if (source == null)
+          return false;
+
+        Extents3d ext = source.GeometricExtents;
+        double detailW = ext.MaxPoint.X - ext.MinPoint.X;
+        double detailH = ext.MaxPoint.Y - ext.MinPoint.Y;
+        if (detailW <= 1e-9 || detailH <= 1e-9)
+          return false;
+
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(db, tr, "Title Block");
+        if (layoutBtrId == ObjectId.Null)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg viewport skip: Title Block layout 없음");
+          return false;
+        }
+
+        BlockTableRecord layoutBtr = tr.GetObject(layoutBtrId, OpenMode.ForRead) as BlockTableRecord;
+        if (layoutBtr == null)
+          return false;
+
+        foreach (ObjectId id in layoutBtr)
+        {
+          Viewport vp = tr.GetObject(id, OpenMode.ForWrite, false) as Viewport;
+          if (vp == null || vp.Number <= 1)
+            continue;
+
+          double aspect = vp.Height > 1e-9 ? vp.Width / vp.Height : 1.41421356237;
+          double viewHeight = ((detailW / aspect) > detailH ? (detailW / aspect) : detailH) * 1.2;
+          vp.ViewCenter = new Point2d((ext.MinPoint.X + ext.MaxPoint.X) / 2.0, (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0);
+          vp.ViewHeight = viewHeight;
+          vp.On = true;
+          return true;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg viewport 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return false;
+    }
+
+    private bool UpdateIsoTitleBlockAttributes(Transaction tr, Database db, string supportTag)
+    {
+      if (tr == null || db == null)
+        return false;
+
+      try
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(db, tr, "Title Block");
+        if (layoutBtrId == ObjectId.Null)
+          return false;
+
+        BlockTableRecord layoutBtr = tr.GetObject(layoutBtrId, OpenMode.ForRead) as BlockTableRecord;
+        if (layoutBtr == null)
+          return false;
+
+        foreach (ObjectId id in layoutBtr)
+        {
+          BlockReference br = tr.GetObject(id, OpenMode.ForRead, false) as BlockReference;
+          if (br == null)
+            continue;
+
+          string blockName = this.GetBlockReferenceName(tr, br);
+          if (!string.Equals(blockName, "DRAWING_TITLE", System.StringComparison.OrdinalIgnoreCase))
+            continue;
+
+          bool changed = false;
+          foreach (ObjectId attId in br.AttributeCollection)
+          {
+            AttributeReference att = tr.GetObject(attId, OpenMode.ForWrite, false) as AttributeReference;
+            if (att == null)
+              continue;
+
+            string value = this.GetIsoTitleBlockValue(att.Tag, supportTag);
+            if (string.IsNullOrWhiteSpace(value))
+              continue;
+
+            att.TextString = value;
+            changed = true;
+          }
+
+          return changed;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOEXPORTED separateDwg titleblock 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return false;
+    }
+
+    private string GetIsoTitleBlockValue(string tagName, string supportTag)
+    {
+      if (string.IsNullOrWhiteSpace(tagName))
+        return null;
+
+      string tag = tagName.Trim().ToUpperInvariant();
+      if (tag == "SUPPORT_CODE")
+        return supportTag;
+      if (tag == "PIPE_NO")
+        return s_isoPipeLineNo;
+      if (tag == "STD")
+        return s_isoDesignStd;
+      if (tag == "DRAWING_NO")
+        return supportTag;
+      if (tag == "PIPE_SUPPORT_DETAIL")
+        return s_isoShortDesc;
+      return null;
     }
 
     private void PurgePriorIsoDetail(Transaction tr, BlockTableRecord targetMs, ObjectId detailLayerId, ObjectId annotationLayerId)
@@ -2960,9 +3271,12 @@ namespace PlantFlow_Support
             }
             else
             {
+              if (props.Count > 0) s_isoSupportTag = props[0];
+              if (props.Count > 1) s_isoDesignStd = props[1];
               if (props.Count > 2) s_isoPipeLineNo = props[2];
               if (props.Count > 4) s_isoBOP = this.RoundPropertyValue(props[4]);
               if (props.Count > 6) s_isoSize = props[6];
+              if (props.Count > 7) s_isoShortDesc = props[7];
             }
           }
           catch (System.Exception ex)
