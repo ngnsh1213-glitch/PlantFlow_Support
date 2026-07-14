@@ -1,6 +1,19 @@
 # SESSION — 현재 작업 상태
 
-_최종 갱신: 2026-07-14 (★무탭 엔진 Main 라이브 PASS)_
+_최종 갱신: 2026-07-14 (무탭 레이아웃·자동포함·자동화 완결, 다음=N3 치수)_
+
+## ★ 무탭 레이아웃/워크플로/자동화 완결 (2026-07-14, 커밋 ~4fcf1b1)
+이 세션에서 RECOVER 해결(H5) 이후 아래 전부 라이브 PASS. 다음 트랙 = **N3(치수)**.
+- **RECOVER 해결(H5)**: `sourceDb`(side clone DB) 미Dispose가 detailDb.SaveAs 오염 → `CopyCleanNotabSolids` 직후·SaveAs 전 Dispose(ref 시그니처). 포럼 근거. cycle30~36 detailDb 내부 가설(H0~H4) 전부 기각.
+- **#1 페이퍼 초기화면**: 헤드리스 TileMode=크래시 → **저장 후 reopen** 방식(`new Database(false,true)`+`TileMode=false`+`SaveAs(...SecurityParameters)`, WorkingDatabase 미변경). 포럼 3종 근거(생성자/SecurityParameters/TileMode). ※빌드DB TileMode·활성레이아웃 전환은 네이티브 크래시.
+- **뷰포트 도면영역 정합**: ID 실측 LL(30.5,84.5)~UR(640.5,573.5)=610×489, center(335.5,329). scale 1:4. target=서포트중심(supportExt).
+- **서포트만 선택→파이프+유볼트 자동포함**: `AutoIncludeRelatedParts`(서포트 bbox+margin150 교차 Pipe/Support 추가). 유볼트=AcPpDb3dSupport.
+- **초기화면 zoom extents**: reopen에서 오버올 뷰포트(활성화前 Number=-1이라 dims로 판별) 뷰를 페이퍼 extents로.
+- **★dev 완전 자동화**: dev_test.bat이 로그 초기화 후 런치 → `pfs_dev_start.scr`=SECURELOAD0(보안다이얼로그 제거)+NETLOAD+`PFSNOTABTEST`(SupportName 태그로 서포트 자동선택→추출). Claude가 `C:\Temp\pfs_diag.log` 직접 Read(복붙 불요). [[pfs-dev-loop-tier1]]
+
+---
+
+_이전 갱신: 2026-07-14 (★무탭 엔진 Main 라이브 PASS)_
 
 ## ★★★ 무탭 엔진 Main — 라이브 PASS (2026-07-14, cycle 30 커밋 5efbf40)
 - **판정**: `PFSNOTABDETAIL` 라이브 실행 → `Details\GD1-001_notab.dwg` 열람 확인.
