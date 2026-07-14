@@ -1,52 +1,45 @@
 # REPORT — Codex → Claude
 
-- cycle: 31
+- cycle: 32
 - status: done
 - commit: created (current HEAD)
 - target: `PlantFlow_Support/Core/Commands.cs`
-- build: not_run (빌드 수동 원칙)
+- build: pass (`dotnet build`, 오류 0 / 기존 경고 15)
 
 ## 변경 요약
-- `PFSNOTABDETAIL` 저장 RECOVER 근인 판별용 계측 추가.
-  - `CopyCleanNotabSolids(...)`에서 `src`/`clean` persistent reactor 개수를 복제 직후 기록.
-  - 로그: `PFSNOTABDETAIL recover-diag reactors src=Ns clean=Nc id=<id>`
-  - `detailDb.NamedObjectsDictionary` 최상위 키를 pre-title 저장 전/최종 SaveAs 직전에 기록.
-  - 로그: `PFSNOTABDETAIL recover-diag nod=[...]`
-- 타이틀블록 clone 전 바이섹션 저장 추가.
-  - 솔리드+레이아웃 커밋 후 `<savedPath>.pretitle.dwg`로 임시 SaveAs를 시도하고 삭제.
-  - 로그: `PFSNOTABDETAIL recover-diag preTitleSave=ok|warn:<msg>`
-  - 원 산출물 경로는 유지.
-- H0 대비 저비용 F0 반영.
-  - `TryStripCleanSolidMetadata(...)`에서 persistent reactor를 순회 제거.
-  - 개별 제거 실패도 `FileDiag`로 남김.
-  - 로그: `PFSNOTABDETAIL cleanSolid reactors removed=N id=<id>`
-- cycle 30의 audit reflection 제거.
-  - `TryAuditNotabDetailDatabase(...)` 호출 삭제.
-  - `TryAuditNotabDetailDatabase(...)`, `GetReflectedPropertyValue(...)` 함수 삭제.
+- `TryStripCleanSolidMetadata(...)`의 미존재 API 호출 제거.
+  - 삭제: `solid.RemovePersistentReactor(...)` 기반 reactor 제거 루프.
+  - 유지: `solid.GetPersistentReactorIds()` 카운트 계측.
+  - 신규 로그: `PFSNOTABDETAIL cleanSolid reactors(strip-skipped API-absent)=<count> id=<solid.ObjectId>`
+- cycle 31 계측은 보존.
+  - `CopyCleanNotabSolids(...)`의 `recover-diag reactors src=... clean=...` 유지.
+  - NOD 덤프 `recover-diag nod=[...]` 유지.
+  - `preTitleSave=...` 바이섹션 유지.
 
 ## 산출 파일
 - 수정: `PlantFlow_Support/Core/Commands.cs`
 - 수정: `.plans/REPORT.md`
-- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_recover_diag`
+- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_reactor_api_fix`
 
 ## 검증
 - `git diff --check -- PlantFlow_Support/Core/Commands.cs`: PASS (CRLF 경고만 출력)
-- `rg recover-diag/cleanSolid reactors removed`: PASS
-- `rg TryAuditNotabDetailDatabase/GetReflectedPropertyValue`: no matches
+- `rg RemovePersistentReactor`: no matches
+- `rg reactors(strip-skipped API-absent)/recover-diag reactors/preTitleSave/recover-diag nod`: PASS
 - 주변 코드 확인:
-  - `CreateNotabDetailDrawing` 흐름은 솔리드+레이아웃 커밋 → pre-title 저장 계측 → 타이틀블록/뷰포트 커밋 → 최종 SaveAs.
-  - 기존 `PFSVBISO*`, `CreateIsoDetailDrawing` 직접 변경 없음(diff 범위 밖).
-- 빈 catch 추가 없음. 새 catch는 모두 `FileDiag` 기록.
-- 빌드/Plant3D 실행 검증은 지시대로 수행하지 않음.
+  - `TryStripCleanSolidMetadata(...)`만 실질 수정.
+  - `CreateNotabDetailDrawing`/`CopyCleanNotabSolids`의 계측·바이섹션 무손상.
+- 빈 catch 추가 없음. 새/기존 catch는 `FileDiag` 기록.
+- `dotnet build`: PASS
+  - 오류 0개.
+  - 경고 15개는 HANDOFF 배경의 기존 경고 범주.
 
 ## 라이브 검증
-1. 수동 빌드 후 `PFSNOTABDETAIL` 실행.
-2. 기대 로그:
-   - `PFSNOTABDETAIL recover-diag reactors src=... clean=...`
-   - `PFSNOTABDETAIL cleanSolid reactors removed=...`
+1. `PFSNOTABDETAIL` 실행.
+2. 핵심 로그 확인:
+   - `PFSNOTABDETAIL recover-diag reactors src=Ns clean=Nc ...`
+   - `PFSNOTABDETAIL cleanSolid reactors(strip-skipped API-absent)=...`
    - `PFSNOTABDETAIL recover-diag nod=[...]`
    - `PFSNOTABDETAIL recover-diag preTitleSave=...`
-   - `PFSNOTABDETAIL saved path=..._notab.dwg`
-3. RECOVER 경고 소멸 여부 확인.
-   - 소멸: H0(persistent reactor) 확정 가능성 높음.
-   - 잔존: `preTitleSave`/`nod` 로그로 H2(타이틀블록 clone/딕셔너리 반입) 재판정.
+3. 분기:
+   - `src Ns > 0`: H0 사실 확정 → 다음 cycle F-A(`detailDb.Wblock()` 계열) 검토.
+   - `src Ns = 0`: H0 기각 → NOD/preTitleSave 로그로 H2 판정.

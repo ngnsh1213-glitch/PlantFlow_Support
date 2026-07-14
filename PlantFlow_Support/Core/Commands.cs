@@ -2983,36 +2983,16 @@ namespace PlantFlow_Support
         PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid xdata strip skip: " + ex.GetType().Name + ": " + ex.Message);
       }
 
-      int removed = 0;
       try
       {
         ObjectIdCollection reactorIds = solid.GetPersistentReactorIds();
-        if (reactorIds != null)
-        {
-          ObjectId[] ids = new ObjectId[reactorIds.Count];
-          for (int i = 0; i < reactorIds.Count; i++)
-            ids[i] = reactorIds[i];
-
-          foreach (ObjectId reactorId in ids)
-          {
-            try
-            {
-              solid.RemovePersistentReactor(reactorId);
-              removed++;
-            }
-            catch (System.Exception ex)
-            {
-              PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid reactor strip skip reactor=" + reactorId + ": " + ex.GetType().Name + ": " + ex.Message);
-            }
-          }
-        }
+        int reactorCount = reactorIds == null ? 0 : reactorIds.Count;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid reactors(strip-skipped API-absent)=" + reactorCount + " id=" + solid.ObjectId);
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid reactor scan skip: " + ex.GetType().Name + ": " + ex.Message);
       }
-
-      PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid reactors removed=" + removed + " id=" + solid.ObjectId);
     }
 
     private int CountPersistentReactors(DBObject obj, string label, ObjectId id)
