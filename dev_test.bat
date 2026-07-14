@@ -27,6 +27,12 @@ powershell -NoProfile -Command "Get-Process acad -ErrorAction SilentlyContinue |
 timeout /t 2 /nobreak >nul
 
 echo.
+echo  [log] Backing up and clearing C:\Temp\pfs_diag.log ...
+if not exist "C:\Temp" mkdir "C:\Temp"
+if exist "C:\Temp\pfs_diag.log" copy /Y "C:\Temp\pfs_diag.log" "C:\Temp\pfs_diag.prev.log" >nul
+if exist "C:\Temp\pfs_diag.log" del /Q "C:\Temp\pfs_diag.log"
+
+echo.
 echo  [4/4] Launching Plant 3D 2026 (PowerShell, unicode-safe) ...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%LAUNCH%"
 goto :end

@@ -930,6 +930,8 @@ namespace PlantFlow_Support
       if (doc == null)
         return;
 
+      PlantOrthoView.FileDiag("========== PFSNOTABDETAIL RUN START ==========");
+
       s_isoPipeAxisValid = false;
       s_isoPipeAxis = Vector3d.XAxis;
       s_isoPipeUp = Vector3d.ZAxis;
@@ -2824,15 +2826,21 @@ namespace PlantFlow_Support
           Extents3d ext = new Extents3d();
           bool has = false;
           Viewport overall = null;
+          System.Text.StringBuilder vpNums = new System.Text.StringBuilder();
           foreach (ObjectId eid in ps)
           {
             Entity e = tr.GetObject(eid, OpenMode.ForRead, false) as Entity;
             if (e == null) continue;
             Viewport v = e as Viewport;
-            if (v != null && v.Number == 1) { overall = v; continue; } // 오버올 뷰포트=확장 대상(extents 제외)
+            if (v != null)
+            {
+              vpNums.Append(v.Number).Append(",");
+              if (v.Number == 1) { overall = v; continue; } // 오버올 뷰포트=확장 대상(extents 제외)
+            }
             try { Extents3d ex = e.GeometricExtents; if (!has) { ext = ex; has = true; } else ext.AddExtents(ex); }
             catch { }
           }
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-zoom diag vpNumbers=[" + vpNums.ToString() + "]");
 
           if (has && overall != null)
           {
@@ -3203,10 +3211,10 @@ namespace PlantFlow_Support
         if (layoutBtr == null)
           return false;
 
-        const double TargetMinX = 61.0;
-        const double TargetMinY = 169.0;
-        const double TargetWidth = 549.0;   // UR(610,573.5) - LL(61,169)
-        const double TargetHeight = 404.5;
+        const double TargetMinX = 30.5;     // ID 실측: 도면영역 LL(30.5,84.5)~UR(640.5,573.5)
+        const double TargetMinY = 84.5;
+        const double TargetWidth = 610.0;
+        const double TargetHeight = 489.0;
         double tcx = TargetMinX + (TargetWidth / 2.0);
         double tcy = TargetMinY + (TargetHeight / 2.0);
 
