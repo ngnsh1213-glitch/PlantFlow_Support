@@ -2462,7 +2462,11 @@ namespace PlantFlow_Support
           layoutBtrId = this.EnsureNotabDetailLayout(detailDb, tr);
           if (layoutBtrId == ObjectId.Null)
             throw new System.InvalidOperationException("detail layout 없음");
-          this.TryConfigureNotabA1Layout(tr, layoutBtrId);
+          bool skipA1Plot = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_A1PLOT"), "1", System.StringComparison.OrdinalIgnoreCase);
+          if (skipA1Plot)
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL A1plot skip(env)");
+          else
+            this.TryConfigureNotabA1Layout(tr, layoutBtrId);
 
           tr.Commit();
           PlantOrthoView.FileDiag("PFSNOTABDETAIL preTitle commit 완료");
@@ -2478,7 +2482,6 @@ namespace PlantFlow_Support
           System.IO.File.Delete(savedPath);
 
         this.LogNotabNamedObjectsDictionary(detailDb);
-        this.TrySaveNotabPreTitleProbe(detailDb, savedPath);
 
         using (Transaction tr = detailDb.TransactionManager.StartTransaction())
         {
@@ -2509,7 +2512,7 @@ namespace PlantFlow_Support
         this.LogNotabNamedObjectsDictionary(detailDb);
         this.TryRemoveNotabPnpDictionary(detailDb);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
-        detailDb.SaveAs(savedPath, DwgVersion.Current);
+        this.SaveNotabDetailWithWblockFallback(detailDb, savedPath);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
         return savedPath;
       }
@@ -2864,34 +2867,52 @@ namespace PlantFlow_Support
       return count;
     }
 
-    private void TrySaveNotabPreTitleProbe(Database db, string savedPath)
+    private void SaveNotabDetailWithWblockFallback(Database detailDb, string savedPath)
     {
-      if (db == null || string.IsNullOrWhiteSpace(savedPath))
-        return;
+      if (detailDb == null)
+        throw new System.ArgumentNullException("detailDb");
+      if (string.IsNullOrWhiteSpace(savedPath))
+        throw new System.ArgumentNullException("savedPath");
 
-      string probePath = savedPath + ".pretitle.dwg";
+      Database cleanDb = null;
       try
       {
-        if (System.IO.File.Exists(probePath))
-          System.IO.File.Delete(probePath);
-        db.SaveAs(probePath, DwgVersion.Current);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag preTitleSave=ok path=" + probePath);
+        cleanDb = detailDb.Wblock();
+        int layoutCount = this.CountLayouts(cleanDb);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL wblock-save cleanDb=ok layouts=" + layoutCount);
+        cleanDb.SaveAs(savedPath, DwgVersion.Current);
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag preTitleSave=warn:" + ex.GetType().Name + ": " + ex.Message);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL wblock-save fallback detailDb SaveAs: " + ex.GetType().Name + ": " + ex.Message);
+        detailDb.SaveAs(savedPath, DwgVersion.Current);
       }
       finally
       {
-        try
+        if (cleanDb != null)
+          cleanDb.Dispose();
+      }
+    }
+
+    private int CountLayouts(Database db)
+    {
+      if (db == null)
+        return 0;
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
         {
-          if (System.IO.File.Exists(probePath))
-            System.IO.File.Delete(probePath);
+          DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead, false) as DBDictionary;
+          int count = this.CountDictionaryEntries(layouts);
+          tr.Commit();
+          return count;
         }
-        catch (System.Exception ex)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag preTitleDelete=warn:" + ex.GetType().Name + ": " + ex.Message);
-        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL wblock-save layout count 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return -1;
       }
     }
 
