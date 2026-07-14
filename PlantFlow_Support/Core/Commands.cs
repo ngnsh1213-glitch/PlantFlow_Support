@@ -2432,32 +2432,37 @@ namespace PlantFlow_Support
         tag = "SUPPORT_" + System.DateTime.Now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
       string safeTag = this.SanitizeIsoFileName(tag);
 
-      Database tagDb = null;
+      Database detailDb = null;
       Database oldWorking = HostApplicationServices.WorkingDatabase;
       string savedPath = null;
       try
       {
-        tagDb = new Database(false, true);
-        tagDb.ReadDwgFile(templatePath, System.IO.FileShare.Read, true, null);
-        tagDb.CloseInput(true);
-        HostApplicationServices.WorkingDatabase = tagDb;
-        this.TrySetTagDatabaseFacetres(tagDb, 10.0);
+        detailDb = new Database(true, true);
+        HostApplicationServices.WorkingDatabase = detailDb;
+        this.TrySetTagDatabaseFacetres(detailDb, 10.0);
 
         Extents3d solidExt;
         int cloned;
         ObjectId viewportId = ObjectId.Null;
         bool skipViewport = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_VIEWPORT"), "1", System.StringComparison.OrdinalIgnoreCase);
         bool viewportOk = false;
-        using (Transaction tr = tagDb.TransactionManager.StartTransaction())
+        int titleblockCloned = 0;
+        using (Transaction tr = detailDb.TransactionManager.StartTransaction())
         {
-          ObjectId msId = this.GetModelSpaceId(tagDb, tr);
+          ObjectId msId = this.GetModelSpaceId(detailDb, tr);
           if (msId == ObjectId.Null)
-            throw new System.InvalidOperationException("template ModelSpace 없음");
+            throw new System.InvalidOperationException("detail ModelSpace 없음");
 
-          ObjectId detailLayerId = this.EnsureIsoDetailLayer(tagDb, tr);
-          cloned = this.CopyCleanNotabSolids(sourceDb, solidIds, tagDb, tr, msId, detailLayerId, out solidExt);
+          ObjectId detailLayerId = this.EnsureIsoDetailLayer(detailDb, tr);
+          cloned = this.CopyCleanNotabSolids(sourceDb, solidIds, detailDb, tr, msId, detailLayerId, out solidExt);
           if (cloned == 0)
             throw new System.InvalidOperationException("cloned solid/extents 없음");
+
+          ObjectId layoutBtrId = this.EnsureNotabDetailLayout(detailDb, tr);
+          if (layoutBtrId == ObjectId.Null)
+            throw new System.InvalidOperationException("detail layout 없음");
+          this.TryConfigureNotabA1Layout(tr, layoutBtrId);
+          titleblockCloned = this.CloneTemplateTitleBlock2D(templatePath, detailDb, tr, layoutBtrId);
 
           if (skipViewport)
           {
@@ -2465,17 +2470,17 @@ namespace PlantFlow_Support
           }
           else
           {
-            viewportOk = this.CreateNotabDetailViewport(tr, tagDb, out viewportId);
+            viewportOk = this.CreateNotabDetailViewport(tr, detailDb, out viewportId);
           }
-          bool titleblockOk = this.UpdateIsoTitleBlockAttributes(tr, tagDb, tag);
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL template cloned=" + cloned + " viewport=" + (viewportOk ? "ok" : "skip") + " titleblock=" + (titleblockOk ? "ok" : "skip") + " ext=" + this.FormatExtents(solidExt));
+          bool titleblockOk = this.UpdateIsoTitleBlockAttributesInLayout(tr, layoutBtrId, tag);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL plainDb cloned=" + cloned + " viewport=" + (viewportOk ? "ok" : "skip") + " titleblockClone=" + titleblockCloned + " titleblockUpdate=" + (titleblockOk ? "ok" : "skip") + " ext=" + this.FormatExtents(solidExt));
           PlantOrthoView.FileDiag("PFSNOTABDETAIL commit 직전");
           tr.Commit();
           PlantOrthoView.FileDiag("PFSNOTABDETAIL commit 완료");
         }
 
         if (!skipViewport && viewportId != ObjectId.Null)
-          this.ConfigureNotabDetailViewport(tagDb, viewportId, solidExt);
+          this.ConfigureNotabDetailViewport(detailDb, viewportId, solidExt);
 
         string detailsDir = this.GetIsoDetailsDirectory();
         if (string.IsNullOrWhiteSpace(detailsDir))
@@ -2486,16 +2491,220 @@ namespace PlantFlow_Support
         if (System.IO.File.Exists(savedPath))
           System.IO.File.Delete(savedPath);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
-        tagDb.SaveAs(savedPath, DwgVersion.Current);
+        detailDb.SaveAs(savedPath, DwgVersion.Current);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
         return savedPath;
       }
       finally
       {
         HostApplicationServices.WorkingDatabase = oldWorking;
-        if (tagDb != null)
-          tagDb.Dispose();
+        if (detailDb != null)
+          detailDb.Dispose();
       }
+    }
+
+    private ObjectId EnsureNotabDetailLayout(Database db, Transaction tr)
+    {
+      if (db == null || tr == null)
+        return ObjectId.Null;
+
+      ObjectId titleId = this.GetLayoutBlockTableRecordId(db, tr, "Title Block");
+      if (titleId != ObjectId.Null)
+        return titleId;
+
+      ObjectId layout1Id = this.GetLayoutBlockTableRecordId(db, tr, "Layout1");
+      if (layout1Id == ObjectId.Null)
+        return ObjectId.Null;
+
+      try
+      {
+        DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead) as DBDictionary;
+        if (layouts != null && layouts.Contains("Layout1") && !layouts.Contains("Title Block"))
+        {
+          Layout layout = tr.GetObject(layouts.GetAt("Layout1"), OpenMode.ForWrite, false) as Layout;
+          if (layout != null)
+          {
+            layout.LayoutName = "Title Block";
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL layout renamed Layout1 -> Title Block");
+          }
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL layout rename skip: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      titleId = this.GetLayoutBlockTableRecordId(db, tr, "Title Block");
+      return titleId != ObjectId.Null ? titleId : layout1Id;
+    }
+
+    private ObjectId GetNotabDetailLayoutBlockTableRecordId(Database db, Transaction tr)
+    {
+      ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(db, tr, "Title Block");
+      if (layoutBtrId != ObjectId.Null)
+        return layoutBtrId;
+      return this.GetLayoutBlockTableRecordId(db, tr, "Layout1");
+    }
+
+    private bool TryConfigureNotabA1Layout(Transaction tr, ObjectId layoutBtrId)
+    {
+      if (tr == null || layoutBtrId == ObjectId.Null)
+        return false;
+
+      try
+      {
+        BlockTableRecord layoutBtr = tr.GetObject(layoutBtrId, OpenMode.ForRead, false) as BlockTableRecord;
+        if (layoutBtr == null || layoutBtr.LayoutId == ObjectId.Null)
+          return false;
+
+        Layout layout = tr.GetObject(layoutBtr.LayoutId, OpenMode.ForWrite, false) as Layout;
+        if (layout == null)
+          return false;
+
+        System.Reflection.PropertyInfo limitsProperty = layout.GetType().GetProperty("Limits");
+        if (limitsProperty != null && limitsProperty.CanWrite)
+        {
+          limitsProperty.SetValue(layout, new Extents2d(new Point2d(0.0, 0.0), new Point2d(841.0, 594.0)), null);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL layout A1 limits set 841x594");
+          return true;
+        }
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL layout A1 limits skip: Limits setter 없음");
+        return false;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL layout A1 limits skip: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private int CloneTemplateTitleBlock2D(string templatePath, Database targetDb, Transaction targetTr, ObjectId targetLayoutBtrId)
+    {
+      if (string.IsNullOrWhiteSpace(templatePath) || targetDb == null || targetTr == null || targetLayoutBtrId == ObjectId.Null)
+        return 0;
+
+      Database templateDb = null;
+      Database oldWorking = HostApplicationServices.WorkingDatabase;
+      try
+      {
+        templateDb = new Database(false, true);
+        templateDb.ReadDwgFile(templatePath, System.IO.FileShare.Read, true, null);
+        templateDb.CloseInput(true);
+
+        ObjectIdCollection sourceIds = new ObjectIdCollection();
+        using (Transaction sourceTr = templateDb.TransactionManager.StartTransaction())
+        {
+          ObjectId sourceLayoutBtrId = this.GetLayoutBlockTableRecordId(templateDb, sourceTr, "Title Block");
+          if (sourceLayoutBtrId == ObjectId.Null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL titleblock clone skip: template Title Block layout 없음");
+            sourceTr.Commit();
+            return 0;
+          }
+
+          BlockTableRecord sourceLayoutBtr = sourceTr.GetObject(sourceLayoutBtrId, OpenMode.ForRead, false) as BlockTableRecord;
+          if (sourceLayoutBtr == null)
+          {
+            sourceTr.Commit();
+            return 0;
+          }
+
+          foreach (ObjectId id in sourceLayoutBtr)
+          {
+            Entity entity = sourceTr.GetObject(id, OpenMode.ForRead, false) as Entity;
+            if (entity == null || entity is Viewport)
+              continue;
+            sourceIds.Add(id);
+          }
+          sourceTr.Commit();
+        }
+
+        if (sourceIds.Count == 0)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL titleblock clone skip: source 2D empty");
+          return 0;
+        }
+
+        IdMapping idMap = new IdMapping();
+        try
+        {
+          HostApplicationServices.WorkingDatabase = targetDb;
+          templateDb.WblockCloneObjects(sourceIds, targetLayoutBtrId, idMap, DuplicateRecordCloning.Ignore, false);
+        }
+        finally
+        {
+          HostApplicationServices.WorkingDatabase = oldWorking;
+        }
+
+        int cloned = 0;
+        foreach (IdPair pair in idMap)
+        {
+          if (pair.IsPrimary && pair.IsCloned)
+            cloned++;
+        }
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL titleblock clone cloned=" + cloned + " source=" + sourceIds.Count);
+        return cloned;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL titleblock clone 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return 0;
+      }
+      finally
+      {
+        HostApplicationServices.WorkingDatabase = oldWorking;
+        if (templateDb != null)
+          templateDb.Dispose();
+      }
+    }
+
+    private bool UpdateIsoTitleBlockAttributesInLayout(Transaction tr, ObjectId layoutBtrId, string supportTag)
+    {
+      if (tr == null || layoutBtrId == ObjectId.Null)
+        return false;
+
+      try
+      {
+        BlockTableRecord layoutBtr = tr.GetObject(layoutBtrId, OpenMode.ForRead) as BlockTableRecord;
+        if (layoutBtr == null)
+          return false;
+
+        foreach (ObjectId id in layoutBtr)
+        {
+          BlockReference br = tr.GetObject(id, OpenMode.ForRead, false) as BlockReference;
+          if (br == null)
+            continue;
+
+          string blockName = this.GetBlockReferenceName(tr, br);
+          if (!string.Equals(blockName, "DRAWING_TITLE", System.StringComparison.OrdinalIgnoreCase))
+            continue;
+
+          bool changed = false;
+          foreach (ObjectId attId in br.AttributeCollection)
+          {
+            AttributeReference att = tr.GetObject(attId, OpenMode.ForWrite, false) as AttributeReference;
+            if (att == null)
+              continue;
+
+            string value = this.GetIsoTitleBlockValue(att.Tag, supportTag);
+            if (string.IsNullOrWhiteSpace(value))
+              continue;
+
+            att.TextString = value;
+            changed = true;
+          }
+
+          return changed;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL titleblock update 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return false;
     }
 
     private ObjectId GetModelSpaceId(Database db, Transaction tr)
@@ -2656,10 +2865,10 @@ namespace PlantFlow_Support
 
       try
       {
-        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(db, tr, "Title Block");
+        ObjectId layoutBtrId = this.GetNotabDetailLayoutBlockTableRecordId(db, tr);
         if (layoutBtrId == ObjectId.Null)
         {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport skip: Title Block layout 없음");
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport skip: Title Block/Layout1 layout 없음");
           return false;
         }
 
