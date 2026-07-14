@@ -970,6 +970,7 @@ namespace PlantFlow_Support
           throw new System.InvalidOperationException("solidIds 없음");
 
         string savedPath = this.CreateNotabDetailDrawing(ref sourceDb, solidIds);
+        this.TryReopenSetNotabPaperSpace(savedPath);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL done selected=" + selectedIds.Length + " solids=" + solidIds.Count + " axis=" + this.FormatVectorForCommand(s_isoPipeAxis) + " up=" + this.FormatVectorForCommand(s_isoPipeUp) + " saved=" + savedPath);
         ed.WriteMessage("\nPFSNOTABDETAIL saved=" + savedPath);
       }
@@ -2509,7 +2510,6 @@ namespace PlantFlow_Support
         if (!skipViewport && viewportId != ObjectId.Null)
           this.ConfigureNotabDetailViewport(detailDb, viewportId, supportExt, supportExtSource);
 
-        this.TryApplyNotabPaperInit(detailDb);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         detailDb.SaveAs(savedPath, DwgVersion.Current);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
@@ -2774,23 +2774,33 @@ namespace PlantFlow_Support
       return normalized;
     }
 
-    private void TryApplyNotabPaperInit(Database db)
+    private void TryReopenSetNotabPaperSpace(string savedPath)
     {
-      if (db == null)
+      if (string.IsNullOrWhiteSpace(savedPath))
         return;
 
+      Database reopenDb = null;
       try
       {
         string markerPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "pfs_notab_paper.flag");
         if (!System.IO.File.Exists(markerPath))
           return;
 
-        db.TileMode = false;
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-init tilemode=0(marker) ok");
+        reopenDb = new Database(false, false);
+        reopenDb.ReadDwgFile(savedPath, System.IO.FileShare.ReadWrite, true, null);
+        reopenDb.CloseInput(true);
+        reopenDb.TileMode = false;
+        reopenDb.SaveAs(savedPath, DwgVersion.Current);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-reopen tilemode=0 ok");
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-init tilemode=0(marker) 예외: " + ex.GetType().Name + ": " + ex.Message);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-reopen 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        if (reopenDb != null)
+          reopenDb.Dispose();
       }
     }
 
