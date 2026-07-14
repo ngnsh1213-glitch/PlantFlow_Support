@@ -2782,10 +2782,6 @@ namespace PlantFlow_Support
       Database reopenDb = null;
       try
       {
-        string markerPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "pfs_notab_paper.flag");
-        if (!System.IO.File.Exists(markerPath))
-          return;
-
         reopenDb = new Database(false, true);
         reopenDb.ReadDwgFile(savedPath, System.IO.FileShare.ReadWrite, true, null);
         reopenDb.CloseInput(true);
@@ -3146,10 +3142,10 @@ namespace PlantFlow_Support
         if (layoutBtr == null)
           return false;
 
-        const double TargetMinX = 30.5;
-        const double TargetMinY = 84.5;
-        const double TargetWidth = 640.5;
-        const double TargetHeight = 573.5;
+        const double TargetMinX = 61.0;
+        const double TargetMinY = 169.0;
+        const double TargetWidth = 610.0;
+        const double TargetHeight = 489.0;
         double tcx = TargetMinX + (TargetWidth / 2.0);
         double tcy = TargetMinY + (TargetHeight / 2.0);
 
