@@ -2787,6 +2787,7 @@ namespace PlantFlow_Support
         reopenDb.ReadDwgFile(savedPath, System.IO.FileShare.ReadWrite, true, null);
         reopenDb.CloseInput(true);
         reopenDb.TileMode = false;
+        this.TrySetNotabPaperZoomExtents(reopenDb);
         reopenDb.SaveAs(savedPath, true, DwgVersion.Current, reopenDb.SecurityParameters);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-reopen tilemode=0 ok");
       }
@@ -2798,6 +2799,65 @@ namespace PlantFlow_Support
       {
         if (reopenDb != null)
           reopenDb.Dispose();
+      }
+    }
+
+    // reopen DB(Plant 미부착)에서 Title Block 레이아웃의 오버올 뷰포트(Number 1) 뷰를 페이퍼 extents에 맞춘다.
+    // 열 때 초기 화면이 도면 전체를 보이도록(zoom extents 상당). 실패해도 페이퍼 열림은 유지.
+    private void TrySetNotabPaperZoomExtents(Database db)
+    {
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          DBDictionary lays = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead) as DBDictionary;
+          if (lays == null || !lays.Contains("Title Block"))
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-zoom skip: Title Block layout 없음");
+            tr.Commit();
+            return;
+          }
+          Layout lay = tr.GetObject(lays.GetAt("Title Block"), OpenMode.ForRead) as Layout;
+          BlockTableRecord ps = lay == null ? null : tr.GetObject(lay.BlockTableRecordId, OpenMode.ForRead) as BlockTableRecord;
+          if (ps == null) { tr.Commit(); return; }
+
+          Extents3d ext = new Extents3d();
+          bool has = false;
+          Viewport overall = null;
+          foreach (ObjectId eid in ps)
+          {
+            Entity e = tr.GetObject(eid, OpenMode.ForRead, false) as Entity;
+            if (e == null) continue;
+            Viewport v = e as Viewport;
+            if (v != null && v.Number == 1) { overall = v; continue; } // 오버올 뷰포트=확장 대상(extents 제외)
+            try { Extents3d ex = e.GeometricExtents; if (!has) { ext = ex; has = true; } else ext.AddExtents(ex); }
+            catch { }
+          }
+
+          if (has && overall != null)
+          {
+            overall.UpgradeOpen();
+            double w = ext.MaxPoint.X - ext.MinPoint.X;
+            double h = ext.MaxPoint.Y - ext.MinPoint.Y;
+            double cx = (ext.MinPoint.X + ext.MaxPoint.X) / 2.0;
+            double cy = (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0;
+            overall.ViewCenter = new Point2d(cx, cy);
+            double vpAspect = overall.Height > 1e-9 ? overall.Width / overall.Height : 1.0;
+            double neededH = h * 1.05;
+            double neededByW = vpAspect > 1e-9 ? (w * 1.05) / vpAspect : h * 1.05;
+            overall.ViewHeight = System.Math.Max(neededH, neededByW);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-zoom ok center=(" + this.FormatNumber(cx) + "," + this.FormatNumber(cy) + ") viewH=" + this.FormatNumber(overall.ViewHeight));
+          }
+          else
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-zoom skip: overall=" + (overall != null) + " hasExt=" + has);
+          }
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-zoom 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
     }
 
