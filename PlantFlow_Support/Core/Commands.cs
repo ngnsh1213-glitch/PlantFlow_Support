@@ -2490,6 +2490,7 @@ namespace PlantFlow_Support
         savedPath = System.IO.Path.Combine(detailsDir, safeTag + "_notab.dwg");
         if (System.IO.File.Exists(savedPath))
           System.IO.File.Delete(savedPath);
+        this.TryAuditNotabDetailDatabase(detailDb);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         detailDb.SaveAs(savedPath, DwgVersion.Current);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
@@ -2561,20 +2562,62 @@ namespace PlantFlow_Support
         if (layout == null)
           return false;
 
-        System.Reflection.PropertyInfo limitsProperty = layout.GetType().GetProperty("Limits");
-        if (limitsProperty != null && limitsProperty.CanWrite)
+        string mediaName = null;
+        try
         {
-          limitsProperty.SetValue(layout, new Extents2d(new Point2d(0.0, 0.0), new Point2d(841.0, 594.0)), null);
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL layout A1 limits set 841x594");
-          return true;
+          PlotSettings ps = new PlotSettings(layout.ModelType);
+          ps.CopyFrom(layout);
+          PlotSettingsValidator psv = PlotSettingsValidator.Current;
+          try
+          {
+            psv.SetPlotConfigurationName(ps, "None", null);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL A1 plot device None skip: " + ex.GetType().Name + ": " + ex.Message);
+          }
+
+          System.Collections.Specialized.StringCollection mediaNames = psv.GetCanonicalMediaNameList(ps);
+          if (mediaNames != null)
+          {
+            foreach (string candidate in mediaNames)
+            {
+              if (candidate != null && candidate.IndexOf("A1", System.StringComparison.OrdinalIgnoreCase) >= 0)
+              {
+                mediaName = candidate;
+                break;
+              }
+            }
+          }
+
+          if (!string.IsNullOrWhiteSpace(mediaName))
+          {
+            psv.SetCanonicalMediaName(ps, mediaName);
+            layout.CopyFrom(ps);
+          }
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL A1 PlotSettings skip: " + ex.GetType().Name + ": " + ex.Message);
         }
 
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL layout A1 limits skip: Limits setter 없음");
-        return false;
+        try
+        {
+          System.Reflection.PropertyInfo limitsProperty = layout.GetType().GetProperty("Limits");
+          if (limitsProperty != null && limitsProperty.CanWrite)
+            limitsProperty.SetValue(layout, new Extents2d(new Point2d(0.0, 0.0), new Point2d(841.0, 594.0)), null);
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL A1 Limits reflection skip: " + ex.GetType().Name + ": " + ex.Message);
+        }
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL A1 media=" + (mediaName ?? "none") + " plotArea=(0,0)~(841,594)");
+        return true;
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL layout A1 limits skip: " + ex.GetType().Name + ": " + ex.Message);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL A1 layout config skip: " + ex.GetType().Name + ": " + ex.Message);
         return false;
       }
     }
@@ -2644,7 +2687,9 @@ namespace PlantFlow_Support
             cloned++;
         }
 
+        int normalized = this.NormalizeNotabClonedTitleBlockEntities(targetDb, targetTr, idMap);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL titleblock clone cloned=" + cloned + " source=" + sourceIds.Count);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL titleblock clone normalized=" + normalized);
         return cloned;
       }
       catch (System.Exception ex)
@@ -2657,6 +2702,116 @@ namespace PlantFlow_Support
         HostApplicationServices.WorkingDatabase = oldWorking;
         if (templateDb != null)
           templateDb.Dispose();
+      }
+    }
+
+    private int NormalizeNotabClonedTitleBlockEntities(Database db, Transaction tr, IdMapping idMap)
+    {
+      if (db == null || tr == null || idMap == null)
+        return 0;
+
+      int normalized = 0;
+      try
+      {
+        ObjectId layer0Id = ObjectId.Null;
+        ObjectId continuousId = ObjectId.Null;
+        LayerTable layerTable = tr.GetObject(db.LayerTableId, OpenMode.ForRead, false) as LayerTable;
+        if (layerTable != null && layerTable.Has("0"))
+          layer0Id = layerTable["0"];
+        LinetypeTable lineTypeTable = tr.GetObject(db.LinetypeTableId, OpenMode.ForRead, false) as LinetypeTable;
+        if (lineTypeTable != null && lineTypeTable.Has("Continuous"))
+          continuousId = lineTypeTable["Continuous"];
+
+        foreach (IdPair pair in idMap)
+        {
+          if (!pair.IsPrimary || !pair.IsCloned)
+            continue;
+
+          Entity entity = tr.GetObject(pair.Value, OpenMode.ForWrite, false) as Entity;
+          if (entity == null)
+            continue;
+
+          bool changed = false;
+          if ((entity.LayerId == ObjectId.Null || entity.LayerId.IsErased) && layer0Id != ObjectId.Null)
+          {
+            entity.LayerId = layer0Id;
+            changed = true;
+          }
+          if ((entity.LinetypeId == ObjectId.Null || entity.LinetypeId.IsErased) && continuousId != ObjectId.Null)
+          {
+            entity.LinetypeId = continuousId;
+            changed = true;
+          }
+
+          if (changed)
+            normalized++;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL titleblock normalize 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return normalized;
+    }
+
+    private bool TryAuditNotabDetailDatabase(Database db)
+    {
+      if (db == null)
+        return false;
+
+      try
+      {
+        System.Type auditInfoType = typeof(Database).Assembly.GetType("Autodesk.AutoCAD.DatabaseServices.AuditInfo");
+        if (auditInfoType == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL audit skip: AuditInfo type 없음");
+          return false;
+        }
+
+        object auditInfo = null;
+        System.Reflection.ConstructorInfo ctor = auditInfoType.GetConstructor(new System.Type[] { typeof(bool), typeof(bool) });
+        if (ctor != null)
+          auditInfo = ctor.Invoke(new object[] { true, false });
+        else
+          auditInfo = System.Activator.CreateInstance(auditInfoType);
+
+        System.Reflection.MethodInfo auditMethod = typeof(Database).GetMethod("Audit", new System.Type[] { auditInfoType });
+        if (auditMethod == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL audit skip: Database.Audit method 없음");
+          return false;
+        }
+
+        auditMethod.Invoke(db, new object[] { auditInfo });
+        string errors = this.GetReflectedPropertyValue(auditInfo, "NumErrors");
+        string fixes = this.GetReflectedPropertyValue(auditInfo, "NumFixes");
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL audit errors=" + errors + " fixes=" + fixes);
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL audit 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private string GetReflectedPropertyValue(object instance, string propertyName)
+    {
+      if (instance == null || string.IsNullOrEmpty(propertyName))
+        return "n/a";
+
+      try
+      {
+        System.Reflection.PropertyInfo property = instance.GetType().GetProperty(propertyName);
+        if (property == null)
+          return "n/a";
+        object value = property.GetValue(instance, null);
+        return value == null ? "null" : value.ToString();
+      }
+      catch (System.Exception ex)
+      {
+        return "err:" + ex.GetType().Name;
       }
     }
 
@@ -2880,29 +3035,7 @@ namespace PlantFlow_Support
         double lminy = 0.0;
         double lmaxx = 841.0;
         double lmaxy = 594.0;
-        string plotSource = "fallbackA1";
-        try
-        {
-          Layout lay = tr.GetObject(layoutBtr.LayoutId, OpenMode.ForRead, false) as Layout;
-          if (lay != null)
-          {
-            Extents2d limits = lay.Limits;
-            double lwProbe = limits.MaxPoint.X - limits.MinPoint.X;
-            double lhProbe = limits.MaxPoint.Y - limits.MinPoint.Y;
-            if (lwProbe > 1e-6 && lhProbe > 1e-6)
-            {
-              lminx = limits.MinPoint.X;
-              lminy = limits.MinPoint.Y;
-              lmaxx = limits.MaxPoint.X;
-              lmaxy = limits.MaxPoint.Y;
-              plotSource = "Limits";
-            }
-          }
-        }
-        catch (System.Exception ex)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL plotArea Limits 예외: " + ex.GetType().Name + ": " + ex.Message);
-        }
+        string plotSource = "A1-hard";
 
         double lw = lmaxx - lminx;
         double lh = lmaxy - lminy;
