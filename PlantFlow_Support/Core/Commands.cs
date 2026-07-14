@@ -2827,20 +2827,28 @@ namespace PlantFlow_Support
           bool has = false;
           Viewport overall = null;
           System.Text.StringBuilder vpNums = new System.Text.StringBuilder();
+          System.Collections.Generic.List<Viewport> vps = new System.Collections.Generic.List<Viewport>();
           foreach (ObjectId eid in ps)
           {
             Entity e = tr.GetObject(eid, OpenMode.ForRead, false) as Entity;
             if (e == null) continue;
             Viewport v = e as Viewport;
-            if (v != null)
-            {
-              vpNums.Append(v.Number).Append(",");
-              if (v.Number == 1) { overall = v; continue; } // 오버올 뷰포트=확장 대상(extents 제외)
-            }
+            if (v != null) { vpNums.Append(v.Number).Append(","); vps.Add(v); continue; }
             try { Extents3d ex = e.GeometricExtents; if (!has) { ext = ex; has = true; } else ext.AddExtents(ex); }
             catch { }
           }
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-zoom diag vpNumbers=[" + vpNums.ToString() + "]");
+          // 오버올 뷰포트는 활성화 전 Number=-1이라 Number로 못 찾는다. dims로 판별:
+          // 우리 디테일 뷰포트(610x489)가 아닌 것 = 오버올. 디테일 border는 extents에 포함.
+          foreach (Viewport v in vps)
+          {
+            bool isDetail = System.Math.Abs(v.Width - 610.0) < 1.0 && System.Math.Abs(v.Height - 489.0) < 1.0;
+            if (isDetail)
+            {
+              try { Extents3d ex = v.GeometricExtents; if (!has) { ext = ex; has = true; } else ext.AddExtents(ex); } catch { }
+            }
+            else overall = v;
+          }
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-zoom diag vpNumbers=[" + vpNums.ToString() + "] overallFound=" + (overall != null));
 
           if (has && overall != null)
           {
