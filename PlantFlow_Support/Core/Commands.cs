@@ -954,6 +954,7 @@ namespace PlantFlow_Support
       }
 
       ObjectId[] selectedIds = psr.Value.GetObjectIds();
+      selectedIds = this.AutoIncludeRelatedParts(doc.Database, selectedIds);
       Vector3d pipeAxis;
       ObjectId pipeId;
       s_isoPipeAxisValid = this.TryGetSelectionPipeAxis(doc.Database, selectedIds, out pipeAxis, out pipeId);
@@ -3144,8 +3145,8 @@ namespace PlantFlow_Support
 
         const double TargetMinX = 61.0;
         const double TargetMinY = 169.0;
-        const double TargetWidth = 610.0;
-        const double TargetHeight = 489.0;
+        const double TargetWidth = 549.0;   // UR(610,573.5) - LL(61,169)
+        const double TargetHeight = 404.5;
         double tcx = TargetMinX + (TargetWidth / 2.0);
         double tcy = TargetMinY + (TargetHeight / 2.0);
 
@@ -5567,6 +5568,106 @@ namespace PlantFlow_Support
         if (nested != null)
           this.CountBlockRecordEntityTypes(tr, nested.BlockTableRecord, ref line, ref circle, ref ellipse, ref spline, ref arc, ref poly, depth + 1);
       }
+    }
+
+    // 서포트만 선택해도 같은 위치의 관련 파트(관통 파이프 + 유볼트 등 co-located 서포트)를 자동 포함한다.
+    // 선택된 서포트의 로컬 bbox와 교차하는 모델공간 Pipe/Support만 추가(다른 위치 서포트는 제외).
+    private ObjectId[] AutoIncludeRelatedParts(Database db, ObjectId[] selectedIds)
+    {
+      if (db == null || selectedIds == null || selectedIds.Length == 0)
+        return selectedIds;
+
+      try
+      {
+        System.Collections.Generic.List<ObjectId> result = new System.Collections.Generic.List<ObjectId>(selectedIds);
+        System.Collections.Generic.HashSet<ObjectId> existing = new System.Collections.Generic.HashSet<ObjectId>(selectedIds);
+
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          // 1) 선택된 서포트들의 union bbox(앵커). 서포트 없으면 전체 선택 bbox 폴백.
+          Extents3d anchor = new Extents3d();
+          bool hasAnchor = false;
+          foreach (ObjectId id in selectedIds)
+          {
+            string cls = id.ObjectClass == null ? string.Empty : id.ObjectClass.Name;
+            if (cls.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) < 0)
+              continue;
+            Entity e = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+            if (e == null) continue;
+            try { Extents3d ex = e.GeometricExtents; if (!hasAnchor) { anchor = ex; hasAnchor = true; } else anchor.AddExtents(ex); }
+            catch (System.Exception exx) { PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include anchor ext 예외 id=" + id + ": " + exx.GetType().Name); }
+          }
+          if (!hasAnchor)
+          {
+            foreach (ObjectId id in selectedIds)
+            {
+              Entity e = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+              if (e == null) continue;
+              try { Extents3d ex = e.GeometricExtents; if (!hasAnchor) { anchor = ex; hasAnchor = true; } else anchor.AddExtents(ex); }
+              catch { }
+            }
+          }
+          if (!hasAnchor) { tr.Commit(); return selectedIds; }
+
+          // 앵커를 여유 마진으로 확장(유볼트 등 co-located 파트 포착).
+          double dx = anchor.MaxPoint.X - anchor.MinPoint.X;
+          double dy = anchor.MaxPoint.Y - anchor.MinPoint.Y;
+          double dz = anchor.MaxPoint.Z - anchor.MinPoint.Z;
+          double margin = 0.5 * System.Math.Max(dx, System.Math.Max(dy, dz));
+          if (margin < 25.0) margin = 25.0;
+          Extents3d probe = new Extents3d(
+            new Point3d(anchor.MinPoint.X - margin, anchor.MinPoint.Y - margin, anchor.MinPoint.Z - margin),
+            new Point3d(anchor.MaxPoint.X + margin, anchor.MaxPoint.Y + margin, anchor.MaxPoint.Z + margin));
+
+          // 2) 모델공간 스캔: probe와 교차하는 Pipe/Support 추가. 기타 Plant 파트는 진단 로그만.
+          ObjectId msId = this.GetModelSpaceId(db, tr);
+          BlockTableRecord ms = msId == ObjectId.Null ? null : tr.GetObject(msId, OpenMode.ForRead) as BlockTableRecord;
+          int addedPipe = 0, addedSup = 0;
+          if (ms != null)
+          {
+            foreach (ObjectId eid in ms)
+            {
+              if (existing.Contains(eid)) continue;
+              string cls = eid.ObjectClass == null ? string.Empty : eid.ObjectClass.Name;
+              bool isPipe = cls.IndexOf("Pipe", System.StringComparison.OrdinalIgnoreCase) >= 0;
+              bool isSup = cls.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) >= 0;
+              bool isPlant = cls.IndexOf("AcPpDb3d", System.StringComparison.OrdinalIgnoreCase) >= 0;
+              if (!isPipe && !isSup && !isPlant) continue;
+              Entity e = tr.GetObject(eid, OpenMode.ForRead, false) as Entity;
+              if (e == null) continue;
+              Extents3d ex;
+              try { ex = e.GeometricExtents; } catch { continue; }
+              if (!this.NotabExtentsIntersect(probe, ex)) continue;
+              if (isPipe || isSup)
+              {
+                existing.Add(eid);
+                result.Add(eid);
+                if (isPipe) addedPipe++; else addedSup++;
+              }
+              else
+              {
+                PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include otherPart class=" + cls + " (미포함)");
+              }
+            }
+          }
+          tr.Commit();
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include anchor=" + this.FormatExtents(anchor) + " margin=" + this.FormatNumber(margin) + " addedPipe=" + addedPipe + " addedSupport=" + addedSup);
+        }
+        return result.ToArray();
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return selectedIds;
+      }
+    }
+
+    private bool NotabExtentsIntersect(Extents3d a, Extents3d b)
+    {
+      if (a.MaxPoint.X < b.MinPoint.X || a.MinPoint.X > b.MaxPoint.X) return false;
+      if (a.MaxPoint.Y < b.MinPoint.Y || a.MinPoint.Y > b.MaxPoint.Y) return false;
+      if (a.MaxPoint.Z < b.MinPoint.Z || a.MinPoint.Z > b.MaxPoint.Z) return false;
+      return true;
     }
 
     private bool TryGetSelectionPipeAxis(Database db, ObjectId[] selectedIds, out Vector3d axis, out ObjectId pipeId)
