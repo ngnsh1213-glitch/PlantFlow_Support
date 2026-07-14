@@ -2462,9 +2462,10 @@ namespace PlantFlow_Support
           layoutBtrId = this.EnsureNotabDetailLayout(detailDb, tr);
           if (layoutBtrId == ObjectId.Null)
             throw new System.InvalidOperationException("detail layout 없음");
-          bool skipA1Plot = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_A1PLOT"), "1", System.StringComparison.OrdinalIgnoreCase);
+          string skipA1PlotSource;
+          bool skipA1Plot = this.ShouldSkipNotabA1Plot(out skipA1PlotSource);
           if (skipA1Plot)
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL A1plot skip(env)");
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL A1plot skip(" + skipA1PlotSource + ")");
           else
             this.TryConfigureNotabA1Layout(tr, layoutBtrId);
 
@@ -2482,6 +2483,7 @@ namespace PlantFlow_Support
           System.IO.File.Delete(savedPath);
 
         this.LogNotabNamedObjectsDictionary(detailDb);
+        this.LogNotabLayoutPlotConfig(detailDb);
 
         using (Transaction tr = detailDb.TransactionManager.StartTransaction())
         {
@@ -2511,6 +2513,8 @@ namespace PlantFlow_Support
 
         this.LogNotabNamedObjectsDictionary(detailDb);
         this.TryRemoveNotabPnpDictionary(detailDb);
+        this.LogNotabLayoutPlotConfig(detailDb);
+        this.ScanNotabInvalidKeys(detailDb);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         this.SaveNotabDetailWithWblockFallback(detailDb, savedPath);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
@@ -2565,6 +2569,40 @@ namespace PlantFlow_Support
       if (layoutBtrId != ObjectId.Null)
         return layoutBtrId;
       return this.GetLayoutBlockTableRecordId(db, tr, "Layout1");
+    }
+
+    private bool ShouldSkipNotabA1Plot(out string source)
+    {
+      source = "none";
+
+      try
+      {
+        if (string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_A1PLOT"), "1", System.StringComparison.OrdinalIgnoreCase))
+        {
+          source = "env";
+          return true;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL A1plot env check 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      try
+      {
+        string markerPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "pfs_skip_a1plot.flag");
+        if (System.IO.File.Exists(markerPath))
+        {
+          source = "marker";
+          return true;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL A1plot marker check 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return false;
     }
 
     private bool TryConfigureNotabA1Layout(Transaction tr, ObjectId layoutBtrId)
@@ -2773,6 +2811,184 @@ namespace PlantFlow_Support
       }
 
       return normalized;
+    }
+
+    private void LogNotabLayoutPlotConfig(Database db)
+    {
+      if (db == null)
+        return;
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead, false) as DBDictionary;
+          if (layouts == null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL plotcfg layouts=null");
+            return;
+          }
+
+          foreach (DBDictionaryEntry entry in layouts)
+          {
+            try
+            {
+              Layout layout = tr.GetObject(entry.Value, OpenMode.ForRead, false) as Layout;
+              if (layout == null)
+                continue;
+
+              string layoutName = string.IsNullOrWhiteSpace(layout.LayoutName) ? entry.Key : layout.LayoutName;
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL plotcfg layout=" + layoutName
+                + " plotter=" + this.GetReflectedString(layout, "PlotConfigurationName")
+                + " media=" + this.GetReflectedString(layout, "CanonicalMediaName")
+                + " stylesheet=" + this.GetReflectedString(layout, "CurrentStyleSheet")
+                + " plotSettings=" + this.GetReflectedString(layout, "PlotSettingsName"));
+            }
+            catch (System.Exception ex)
+            {
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL plotcfg layout skip key=" + entry.Key + ": " + ex.GetType().Name + ": " + ex.Message);
+            }
+          }
+
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL plotcfg 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private string GetReflectedString(object target, string propertyName)
+    {
+      if (target == null || string.IsNullOrEmpty(propertyName))
+        return "n/a";
+
+      try
+      {
+        System.Reflection.PropertyInfo property = target.GetType().GetProperty(propertyName);
+        if (property == null)
+          return "n/a";
+        object value = property.GetValue(target, null);
+        return value == null ? "null" : value.ToString();
+      }
+      catch (System.Exception ex)
+      {
+        return "err:" + ex.GetType().Name;
+      }
+    }
+
+    private void ScanNotabInvalidKeys(Database db)
+    {
+      if (db == null)
+        return;
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          this.ScanDictionaryKeys(tr, db.NamedObjectsDictionaryId, "NOD", 0);
+          this.ScanDictionaryKeys(tr, db.LayoutDictionaryId, "LayoutDictionary", 0);
+          this.ScanSymbolTableKeys(tr, db.BlockTableId, "BlockTable");
+          this.ScanSymbolTableKeys(tr, db.LayerTableId, "LayerTable");
+          this.ScanSymbolTableKeys(tr, db.LinetypeTableId, "LinetypeTable");
+          this.ScanSymbolTableKeys(tr, db.TextStyleTableId, "TextStyleTable");
+          this.ScanSymbolTableKeys(tr, db.DimStyleTableId, "DimStyleTable");
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL keyscan 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void ScanDictionaryKeys(Transaction tr, ObjectId dictionaryId, string dictName, int depth)
+    {
+      if (tr == null || dictionaryId == ObjectId.Null || depth > 4)
+        return;
+
+      try
+      {
+        DBDictionary dictionary = tr.GetObject(dictionaryId, OpenMode.ForRead, false) as DBDictionary;
+        if (dictionary == null)
+          return;
+
+        int total = 0;
+        System.Collections.Generic.List<string> badKeys = new System.Collections.Generic.List<string>();
+        foreach (DBDictionaryEntry entry in dictionary)
+        {
+          total++;
+          if (this.IsSuspiciousDictionaryKey(entry.Key))
+            badKeys.Add(this.FormatKeyForLog(entry.Key));
+
+          if (entry.Value != ObjectId.Null)
+          {
+            DBObject child = tr.GetObject(entry.Value, OpenMode.ForRead, false) as DBObject;
+            if (child is DBDictionary)
+              this.ScanDictionaryKeys(tr, entry.Value, dictName + "/" + this.FormatKeyForLog(entry.Key), depth + 1);
+          }
+        }
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL keyscan dict=" + dictName + " count=" + total + " emptyKeys=" + badKeys.Count + " keys=[" + string.Join(",", badKeys.ToArray()) + "]");
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL keyscan dict=" + dictName + " 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void ScanSymbolTableKeys(Transaction tr, ObjectId tableId, string tableName)
+    {
+      if (tr == null || tableId == ObjectId.Null)
+        return;
+
+      try
+      {
+        SymbolTable table = tr.GetObject(tableId, OpenMode.ForRead, false) as SymbolTable;
+        if (table == null)
+          return;
+
+        int total = 0;
+        System.Collections.Generic.List<string> badKeys = new System.Collections.Generic.List<string>();
+        foreach (ObjectId id in table)
+        {
+          total++;
+          SymbolTableRecord record = tr.GetObject(id, OpenMode.ForRead, false) as SymbolTableRecord;
+          string name = record == null ? null : record.Name;
+          if (this.IsSuspiciousDictionaryKey(name))
+            badKeys.Add(this.FormatKeyForLog(name));
+        }
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL keyscan dict=" + tableName + " count=" + total + " emptyKeys=" + badKeys.Count + " keys=[" + string.Join(",", badKeys.ToArray()) + "]");
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL keyscan dict=" + tableName + " 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private bool IsSuspiciousDictionaryKey(string key)
+    {
+      if (string.IsNullOrWhiteSpace(key))
+        return true;
+
+      for (int i = 0; i < key.Length; i++)
+      {
+        if (char.IsControl(key[i]))
+          return true;
+      }
+
+      return false;
+    }
+
+    private string FormatKeyForLog(string key)
+    {
+      if (key == null)
+        return "<null>";
+      if (key.Length == 0)
+        return "<empty>";
+      return key.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
     }
 
     private void LogNotabNamedObjectsDictionary(Database db)
