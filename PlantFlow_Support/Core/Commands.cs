@@ -2513,6 +2513,7 @@ namespace PlantFlow_Support
 
         this.LogNotabNamedObjectsDictionary(detailDb);
         this.TryRemoveNotabPnpDictionary(detailDb);
+        this.NormalizeNotabLayoutPlotters(detailDb);
         this.LogNotabLayoutPlotConfig(detailDb);
         this.ScanNotabInvalidKeys(detailDb);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
@@ -3020,6 +3021,53 @@ namespace PlantFlow_Support
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag nod 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void NormalizeNotabLayoutPlotters(Database db)
+    {
+      if (db == null)
+        return;
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead, false) as DBDictionary;
+          if (layouts == null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL plotter-normalize layouts=null");
+            return;
+          }
+
+          PlotSettingsValidator psv = PlotSettingsValidator.Current;
+          foreach (DBDictionaryEntry entry in layouts)
+          {
+            string layoutName = entry.Key;
+            try
+            {
+              Layout layout = tr.GetObject(entry.Value, OpenMode.ForWrite, false) as Layout;
+              if (layout == null)
+                continue;
+
+              if (!string.IsNullOrWhiteSpace(layout.LayoutName))
+                layoutName = layout.LayoutName;
+
+              psv.SetPlotConfigurationName(layout, "None", null);
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL plotter-normalize layout=" + layoutName + " -> None ok");
+            }
+            catch (System.Exception ex)
+            {
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL plotter-normalize layout=" + layoutName + " -> None fail:" + ex.GetType().Name + ": " + ex.Message);
+            }
+          }
+
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL plotter-normalize 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
     }
 
