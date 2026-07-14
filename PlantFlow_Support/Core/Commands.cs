@@ -2442,6 +2442,8 @@ namespace PlantFlow_Support
         this.TrySetTagDatabaseFacetres(detailDb, 10.0);
 
         Extents3d solidExt;
+        Extents3d supportExt;
+        string supportExtSource;
         int cloned;
         ObjectId viewportId = ObjectId.Null;
         bool skipViewport = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_VIEWPORT"), "1", System.StringComparison.OrdinalIgnoreCase);
@@ -2455,7 +2457,7 @@ namespace PlantFlow_Support
             throw new System.InvalidOperationException("detail ModelSpace 없음");
 
           ObjectId detailLayerId = this.EnsureIsoDetailLayer(detailDb, tr);
-          cloned = this.CopyCleanNotabSolids(sourceDb, solidIds, detailDb, tr, msId, detailLayerId, out solidExt);
+          cloned = this.CopyCleanNotabSolids(sourceDb, solidIds, detailDb, tr, msId, detailLayerId, out solidExt, out supportExt, out supportExtSource);
           if (cloned == 0)
             throw new System.InvalidOperationException("cloned solid/extents 없음");
 
@@ -2509,13 +2511,14 @@ namespace PlantFlow_Support
         }
 
         if (!skipViewport && viewportId != ObjectId.Null)
-          this.ConfigureNotabDetailViewport(detailDb, viewportId, solidExt);
+          this.ConfigureNotabDetailViewport(detailDb, viewportId, supportExt, supportExtSource);
 
         this.LogNotabNamedObjectsDictionary(detailDb);
         this.TryRemoveNotabPnpDictionary(detailDb);
         this.NormalizeNotabLayoutPlotters(detailDb);
         this.LogNotabLayoutPlotConfig(detailDb);
         this.ScanNotabInvalidKeys(detailDb);
+        this.SetNotabInitialPaperLayout(detailDb);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         this.SaveNotabDetailWithWblockFallback(detailDb, savedPath);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
@@ -3071,6 +3074,68 @@ namespace PlantFlow_Support
       }
     }
 
+    private void SetNotabInitialPaperLayout(Database db)
+    {
+      if (db == null)
+        return;
+
+      bool tileModeOk = false;
+      bool activeOk = false;
+      string zoomState = "skip";
+      try
+      {
+        db.TileMode = false;
+        tileModeOk = true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL layout tilemode set 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead, false) as DBDictionary;
+          if (layouts == null || !layouts.Contains("Title Block"))
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL layout active skip: Title Block 없음");
+            tr.Commit();
+          }
+          else
+          {
+            foreach (DBDictionaryEntry entry in layouts)
+            {
+              try
+              {
+                Layout layout = tr.GetObject(entry.Value, OpenMode.ForWrite, false) as Layout;
+                if (layout == null)
+                  continue;
+
+                bool selected = string.Equals(layout.LayoutName, "Title Block", System.StringComparison.OrdinalIgnoreCase)
+                  || string.Equals(entry.Key, "Title Block", System.StringComparison.OrdinalIgnoreCase);
+                layout.TabSelected = selected;
+                if (selected)
+                  activeOk = true;
+              }
+              catch (System.Exception ex)
+              {
+                PlantOrthoView.FileDiag("PFSNOTABDETAIL layout active entry skip key=" + entry.Key + ": " + ex.GetType().Name + ": " + ex.Message);
+              }
+            }
+
+            tr.Commit();
+          }
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL layout active 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      PlantOrthoView.FileDiag("PFSNOTABDETAIL layout active=" + (activeOk ? "Title Block" : "skip") + " tilemode=" + (tileModeOk ? "0" : "skip") + " zoomExtents=" + zoomState);
+    }
+
     private void TryRemoveNotabPnpDictionary(Database db)
     {
       if (db == null)
@@ -3237,9 +3302,11 @@ namespace PlantFlow_Support
       return bt[BlockTableRecord.ModelSpace];
     }
 
-    private int CopyCleanNotabSolids(Database sourceDb, System.Collections.Generic.List<ObjectId> solidIds, Database targetDb, Transaction targetTr, ObjectId targetMsId, ObjectId layerId, out Extents3d solidExt)
+    private int CopyCleanNotabSolids(Database sourceDb, System.Collections.Generic.List<ObjectId> solidIds, Database targetDb, Transaction targetTr, ObjectId targetMsId, ObjectId layerId, out Extents3d solidExt, out Extents3d supportExt, out string supportExtSource)
     {
       solidExt = new Extents3d();
+      supportExt = new Extents3d();
+      supportExtSource = "fallback";
       bool hasExt = false;
       int copied = 0;
       if (sourceDb == null || solidIds == null || targetDb == null || targetTr == null || targetMsId == ObjectId.Null)
@@ -3251,6 +3318,10 @@ namespace PlantFlow_Support
 
       using (Transaction sourceTr = sourceDb.TransactionManager.StartTransaction())
       {
+        bool hasSupportExt = this.TryGetNotabSupportSolidExtents(sourceDb, sourceTr, out supportExt);
+        if (hasSupportExt)
+          supportExtSource = "support";
+
         foreach (ObjectId solidId in solidIds)
         {
           try
@@ -3294,8 +3365,127 @@ namespace PlantFlow_Support
         sourceTr.Commit();
       }
 
-      PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid copied=" + copied + " ext=" + (hasExt ? this.FormatExtents(solidExt) : "none"));
+      if (hasExt && supportExtSource == "fallback")
+        supportExt = solidExt;
+
+      PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid copied=" + copied + " ext=" + (hasExt ? this.FormatExtents(solidExt) : "none") + " supportExt=" + (hasExt ? this.FormatExtents(supportExt) : "none") + " src=" + supportExtSource);
       return hasExt ? copied : 0;
+    }
+
+    private bool TryGetNotabSupportSolidExtents(Database sourceDb, Transaction tr, out Extents3d supportExt)
+    {
+      supportExt = new Extents3d();
+      if (sourceDb == null || tr == null)
+        return false;
+
+      try
+      {
+        BlockTable bt = tr.GetObject(sourceDb.BlockTableId, OpenMode.ForRead, false) as BlockTable;
+        if (bt == null || !bt.Has(BlockTableRecord.ModelSpace))
+          return false;
+
+        BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead, false) as BlockTableRecord;
+        if (ms == null)
+          return false;
+
+        bool hasSupportExt = false;
+        int supportCount = 0;
+        foreach (ObjectId id in ms)
+        {
+          try
+          {
+            DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
+            Entity ent = obj as Entity;
+            if (ent == null || ent.IsErased)
+              continue;
+
+            string className = id.ObjectClass == null ? string.Empty : id.ObjectClass.Name;
+            string typeName = obj.GetType().Name;
+            string dxfName = ent.GetRXClass() != null ? ent.GetRXClass().DxfName : string.Empty;
+            bool isSupport = className.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) >= 0
+              || typeName.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) >= 0
+              || dxfName.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!isSupport)
+              continue;
+
+            supportCount++;
+            this.AccumulateNotabSupportSolidExtents(ent, 0, ref hasSupportExt, ref supportExt);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL supportExt scan skip id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+          }
+        }
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL supportExt scan supports=" + supportCount + " ext=" + (hasSupportExt ? this.FormatExtents(supportExt) : "none"));
+        return hasSupportExt;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL supportExt scan 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private void AccumulateNotabSupportSolidExtents(Entity ent, int depth, ref bool hasExt, ref Extents3d supportExt)
+    {
+      if (ent == null)
+        return;
+      if (depth > 6)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL supportExt depthLimit type=" + ent.GetType().Name + " depth=" + depth);
+        return;
+      }
+
+      Solid3d solid = ent as Solid3d;
+      if (solid != null)
+      {
+        try
+        {
+          Extents3d ext = solid.GeometricExtents;
+          if (!hasExt)
+          {
+            supportExt = ext;
+            hasExt = true;
+          }
+          else
+          {
+            supportExt.AddExtents(ext);
+          }
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL supportExt solid skip type=" + solid.GetType().Name + ": " + ex.GetType().Name + ": " + ex.Message);
+        }
+
+        return;
+      }
+
+      DBObjectCollection exploded = new DBObjectCollection();
+      try
+      {
+        ent.Explode(exploded);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL supportExt explode skip depth=" + depth + " type=" + ent.GetType().Name + ": " + ex.GetType().Name + ": " + ex.Message);
+        return;
+      }
+
+      foreach (DBObject child in exploded)
+      {
+        Entity childEntity = child as Entity;
+        try
+        {
+          if (childEntity != null)
+            this.AccumulateNotabSupportSolidExtents(childEntity, depth + 1, ref hasExt, ref supportExt);
+        }
+        finally
+        {
+          if (child != null)
+            child.Dispose();
+        }
+      }
     }
 
     private void TryStripCleanSolidMetadata(Solid3d solid)
@@ -3427,46 +3617,23 @@ namespace PlantFlow_Support
         if (layoutBtr == null)
           return false;
 
-        double lminx = 0.0;
-        double lminy = 0.0;
-        double lmaxx = 841.0;
-        double lmaxy = 594.0;
-        string plotSource = "A1-hard";
-
-        double lw = lmaxx - lminx;
-        double lh = lmaxy - lminy;
-        if (lw <= 1e-6 || lh <= 1e-6)
-        {
-          lminx = 0.0;
-          lminy = 0.0;
-          lmaxx = 841.0;
-          lmaxy = 594.0;
-          lw = 841.0;
-          lh = 594.0;
-          plotSource = "fallbackA1";
-        }
-
-        const double RightInset = 0.14;
-        const double BottomInset = 0.10;
-        const double Margin = 0.03;
-        double targetMinX = lminx + lw * Margin;
-        double targetMaxX = lmaxx - lw * RightInset;
-        double targetMinY = lminy + lh * BottomInset;
-        double targetMaxY = lmaxy - lh * Margin;
-        double tw = targetMaxX - targetMinX;
-        double th = targetMaxY - targetMinY;
-        double tcx = (targetMinX + targetMaxX) / 2.0;
-        double tcy = (targetMinY + targetMaxY) / 2.0;
+        const double TargetMinX = 30.5;
+        const double TargetMinY = 84.5;
+        const double TargetWidth = 640.5;
+        const double TargetHeight = 573.5;
+        double tcx = TargetMinX + (TargetWidth / 2.0);
+        double tcy = TargetMinY + (TargetHeight / 2.0);
 
         Viewport vp = new Viewport();
         layoutBtr.AppendEntity(vp);
         tr.AddNewlyCreatedDBObject(vp, true);
         viewportId = vp.ObjectId;
         vp.CenterPoint = new Point3d(tcx, tcy, 0.0);
-        vp.Width = tw;
-        vp.Height = th;
+        vp.Width = TargetWidth;
+        vp.Height = TargetHeight;
         vp.On = true;
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 1차 생성 완료 id=" + viewportId + " center=(" + this.FormatNumber(tcx) + "," + this.FormatNumber(tcy) + ") size=(" + this.FormatNumber(tw) + "," + this.FormatNumber(th) + ") plotArea=(" + this.FormatNumber(lminx) + "," + this.FormatNumber(lminy) + ")~(" + this.FormatNumber(lmaxx) + "," + this.FormatNumber(lmaxy) + ") source=" + plotSource);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport rect LL=(" + this.FormatNumber(TargetMinX) + "," + this.FormatNumber(TargetMinY) + ") size=(" + this.FormatNumber(TargetWidth) + "," + this.FormatNumber(TargetHeight) + ") center=(" + this.FormatNumber(tcx) + "," + this.FormatNumber(tcy) + ")");
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 1차 생성 완료 id=" + viewportId + " center=(" + this.FormatNumber(tcx) + "," + this.FormatNumber(tcy) + ") size=(" + this.FormatNumber(TargetWidth) + "," + this.FormatNumber(TargetHeight) + ") source=fixedRect");
         return true;
       }
       catch (System.Exception ex)
@@ -3477,7 +3644,7 @@ namespace PlantFlow_Support
       return false;
     }
 
-    private bool ConfigureNotabDetailViewport(Database db, ObjectId viewportId, Extents3d solidExt)
+    private bool ConfigureNotabDetailViewport(Database db, ObjectId viewportId, Extents3d targetExt, string targetSource)
     {
       if (db == null || viewportId == ObjectId.Null)
         return false;
@@ -3494,11 +3661,11 @@ namespace PlantFlow_Support
             return false;
           }
 
-          const double DetailViewScale = 0.5;
+          const double DetailViewScale = 0.25;
           Point3d target = new Point3d(
-            (solidExt.MinPoint.X + solidExt.MaxPoint.X) / 2.0,
-            (solidExt.MinPoint.Y + solidExt.MaxPoint.Y) / 2.0,
-            (solidExt.MinPoint.Z + solidExt.MaxPoint.Z) / 2.0);
+            (targetExt.MinPoint.X + targetExt.MaxPoint.X) / 2.0,
+            (targetExt.MinPoint.Y + targetExt.MaxPoint.Y) / 2.0,
+            (targetExt.MinPoint.Z + targetExt.MaxPoint.Z) / 2.0);
           Vector3d viewDir = s_isoPipeAxisValid && s_isoPipeAxis.Length > 1e-6 ? s_isoPipeAxis.GetNormal() : Vector3d.XAxis;
           Vector3d viewUp = s_isoPipeUp.Length > 1e-6 ? s_isoPipeUp.GetNormal() : Vector3d.ZAxis;
           double twist = this.ComputeNotabViewportTwist(viewDir, viewUp);
@@ -3521,7 +3688,8 @@ namespace PlantFlow_Support
             shadeOk = this.TrySetViewportShadePlotHidden(vp);
           }
 
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport viewDir=" + this.FormatVectorForCommand(viewDir) + " target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") twist=" + this.FormatNumber(twist) + " hidden=" + hiddenOk + " shadePlot=" + shadeOk + " scale=1:2");
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") src=" + (string.IsNullOrWhiteSpace(targetSource) ? "fallback" : targetSource));
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport viewDir=" + this.FormatVectorForCommand(viewDir) + " target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") twist=" + this.FormatNumber(twist) + " hidden=" + hiddenOk + " shadePlot=" + shadeOk + " scale=1:4");
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 2차 view설정 직전");
           tr.Commit();
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 2차 view설정 완료");
