@@ -1,34 +1,31 @@
-﻿# REPORT — Codex → Claude
+# REPORT — Codex → Claude
 
-- cycle: 37-H5
+- cycle: 38
 - status: done
 - commit: HEAD (최종 해시는 Codex 완료 보고 참조)
-- title: RECOVER H5 — sourceDb 조기 Dispose
+- title: 크래시 회귀 격리 — cycle37 D(TileMode/활성레이아웃) 원복
 
 ## 변경 요약
 - `PlantFlow_Support/Core/Commands.cs`
-  - `NotabDetailCommand` 호출부를 `CreateNotabDetailDrawing(ref sourceDb, solidIds)`로 변경.
-  - `CreateNotabDetailDrawing` 시그니처를 `ref Database sourceDb`로 변경.
-  - `CopyCleanNotabSolids(...)` 성공 직후 `sourceDb.Dispose(); sourceDb = null;` 수행.
-  - 로그 추가: `PFSNOTABDETAIL sourceDb disposed(before-save) ok`.
-  - 호출부 `finally`는 기존 null 체크로 이중 Dispose를 차단.
+  - `CreateNotabDetailDrawing` 저장 직전의 `SetNotabInitialPaperLayout(detailDb)` 호출 제거.
+  - `SetNotabInitialPaperLayout(Database db)` 헬퍼 전체 제거.
+  - 제거 범위: `detailDb.TileMode = false`, `Title Block` `TabSelected` 활성화, `layout active=... tilemode=... zoomExtents=...` 로그.
 
-## sourceDb 사용 검증
-- `sourceDb`는 `CopyCleanNotabSolids(...)` 이후 `CreateNotabDetailDrawing` 내부에서 재참조되지 않음.
-- 이후 viewport/layout/plotcfg/keyscan/save 단계는 `detailDb`와 `templateDb`만 사용.
-
-## 기존 cycle 37 레이아웃 변경 상태
-- viewport 고정 사각형, support target, scale 1:4, Title Block paper layout 초기화 코드는 유지.
-- 이번 집도는 H5 추가분만 반영.
+## 보존 확인
+- A 유지: `CreateNotabDetailViewport` fixedRect viewport 생성 로그 유지.
+- B 유지: `ConfigureNotabDetailViewport` supportExt target 중심 설정 유지.
+- C 유지: viewport `CustomScale=0.25`, `scale=1:4` 로그 유지.
+- E 유지: `sourceDb.Dispose(); sourceDb = null;` 및 `PFSNOTABDETAIL sourceDb disposed(before-save) ok` 로그 유지.
+- 저장 경로는 기존 `SaveNotabDetailWithWblockFallback(detailDb, savedPath)` 그대로 유지.
 
 ## 검증
-- 백업 생성: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_cycle37_h5`
+- 백업 생성: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_cycle38`
 - `dotnet build`: PASS, 오류 0 / 기존 경고 15
 - `git diff --check -- PlantFlow_Support/Core/Commands.cs`: PASS, CRLF 경고만 있음
-- 빈 catch 없음
+- `rg "SetNotabInitialPaperLayout|layout active|layout tilemode|zoomExtents|TileMode = false"`: D 제거 확인
 - `CreateIsoDetailDrawing` / `PFSVBISO*` 집도 없음
 
 ## 라이브 확인 포인트
-- `PFSNOTABDETAIL sourceDb disposed(before-save) ok` 로그가 `saveAs 직전`보다 먼저 출력되는지 확인.
-- 저장 시 AutoCAD RECOVER 경고 소멸 여부 확인.
-- 소멸 시 H5 확정, 잔존 시 sourceDb 생존 가설 기각.
+- `PFSNOTABDETAIL layout active=... tilemode=... zoomExtents=...` 로그가 더 이상 나오지 않아야 함.
+- `PFSNOTABDETAIL` 실행 시 크래시 소멸 여부 확인.
+- 크래시 없이 저장되면 RECOVER 경고 소멸 여부와 A/B/C 레이아웃 정합을 확인.

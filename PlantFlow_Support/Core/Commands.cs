@@ -2522,7 +2522,6 @@ namespace PlantFlow_Support
         this.NormalizeNotabLayoutPlotters(detailDb);
         this.LogNotabLayoutPlotConfig(detailDb);
         this.ScanNotabInvalidKeys(detailDb);
-        this.SetNotabInitialPaperLayout(detailDb);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         this.SaveNotabDetailWithWblockFallback(detailDb, savedPath);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
@@ -3076,68 +3075,6 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL plotter-normalize 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
-    }
-
-    private void SetNotabInitialPaperLayout(Database db)
-    {
-      if (db == null)
-        return;
-
-      bool tileModeOk = false;
-      bool activeOk = false;
-      string zoomState = "skip";
-      try
-      {
-        db.TileMode = false;
-        tileModeOk = true;
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL layout tilemode set 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-
-      try
-      {
-        using (Transaction tr = db.TransactionManager.StartTransaction())
-        {
-          DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead, false) as DBDictionary;
-          if (layouts == null || !layouts.Contains("Title Block"))
-          {
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL layout active skip: Title Block 없음");
-            tr.Commit();
-          }
-          else
-          {
-            foreach (DBDictionaryEntry entry in layouts)
-            {
-              try
-              {
-                Layout layout = tr.GetObject(entry.Value, OpenMode.ForWrite, false) as Layout;
-                if (layout == null)
-                  continue;
-
-                bool selected = string.Equals(layout.LayoutName, "Title Block", System.StringComparison.OrdinalIgnoreCase)
-                  || string.Equals(entry.Key, "Title Block", System.StringComparison.OrdinalIgnoreCase);
-                layout.TabSelected = selected;
-                if (selected)
-                  activeOk = true;
-              }
-              catch (System.Exception ex)
-              {
-                PlantOrthoView.FileDiag("PFSNOTABDETAIL layout active entry skip key=" + entry.Key + ": " + ex.GetType().Name + ": " + ex.Message);
-              }
-            }
-
-            tr.Commit();
-          }
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL layout active 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-
-      PlantOrthoView.FileDiag("PFSNOTABDETAIL layout active=" + (activeOk ? "Title Block" : "skip") + " tilemode=" + (tileModeOk ? "0" : "skip") + " zoomExtents=" + zoomState);
     }
 
     private void TryRemoveNotabPnpDictionary(Database db)
