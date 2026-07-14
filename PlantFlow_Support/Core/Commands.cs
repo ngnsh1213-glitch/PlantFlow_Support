@@ -1032,6 +1032,14 @@ namespace PlantFlow_Support
       s_isoPipeAxis = s_isoPipeAxisValid ? pipeAxis : Vector3d.XAxis;
       this.CaptureIsoSelectionMetrics(doc.Database, selectedIds);
 
+      // [방어] 파이프라인이 사이드DB/Plant explode 부작용으로 활성 뷰를 Perspective로 뒤집는
+      // 현상 대비: 진입 시 PERSPECTIVE 저장 → finally에서 원복. 진입/종료값을 로그로 남겨
+      // 어느 스텝이 뒤집는지 계측한다.
+      object savedPerspective = null;
+      try { savedPerspective = Application.GetSystemVariable("PERSPECTIVE"); }
+      catch (System.Exception px) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp 읽기 예외: " + px.GetType().Name + ": " + px.Message); }
+      PlantOrthoView.FileDiag("PFSNOTABDETAIL persp enter=" + (savedPerspective == null ? "(null)" : savedPerspective.ToString()));
+
       Database sourceDb = null;
       try
       {
@@ -1054,6 +1062,22 @@ namespace PlantFlow_Support
       {
         if (sourceDb != null)
           sourceDb.Dispose();
+
+        // PERSPECTIVE 원복: sysvar 복원만으로는 활성 뷰포트 Gs 뷰가 즉시 갱신 안 될 수 있어
+        // REGEN까지 병행한다(자문 근거). 종료값도 로그로 남겨 재현 확인.
+        try
+        {
+          object nowPerspective = Application.GetSystemVariable("PERSPECTIVE");
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL persp exit=" + (nowPerspective == null ? "(null)" : nowPerspective.ToString()) + " restore=" + (savedPerspective == null ? "(null)" : savedPerspective.ToString()));
+          if (savedPerspective != null && !object.Equals(nowPerspective, savedPerspective))
+          {
+            Application.SetSystemVariable("PERSPECTIVE", savedPerspective);
+            try { doc.Editor.Regen(); }
+            catch (System.Exception rex) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp Regen 예외: " + rex.GetType().Name + ": " + rex.Message); }
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL persp 원복 적용 " + nowPerspective + " -> " + savedPerspective);
+          }
+        }
+        catch (System.Exception cx) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp 원복 예외: " + cx.GetType().Name + ": " + cx.Message); }
       }
     }
 
@@ -5753,12 +5777,20 @@ namespace PlantFlow_Support
           }
           if (!hasAnchor) { tr.Commit(); return selectedIds; }
 
-          // 앵커를 여유 마진으로 확장(유볼트 등 co-located 파트 포착).
-          double dx = anchor.MaxPoint.X - anchor.MinPoint.X;
-          double dy = anchor.MaxPoint.Y - anchor.MinPoint.Y;
-          double dz = anchor.MaxPoint.Z - anchor.MinPoint.Z;
-          double margin = 0.5 * System.Math.Max(dx, System.Math.Max(dy, dz));
-          if (margin < 25.0) margin = 25.0;
+          // [접촉 판정] 선택 서포트 bbox와 '실제로 맞닿은(교차)' 파트만 포함한다.
+          // 크기비례 마진(0.5*max dim)은 큰 서포트에서 과대해져(예 1977mm) 파이프 축을 따라
+          // 이웃 서포트까지 쓸어담는 결함 → 폐기. 대신 서포트 bbox 자체를 기준으로,
+          // 유볼트가 파이프 위에 살짝 떠 co-located될 여지를 위해 파이프 지름 규격 수준의
+          // 작은 접촉 tol만 부여한다. 이웃 서포트(최근접 수백 mm)는 이 tol에 닿지 않아 배제됨.
+          // env PFS_NOTAB_MARGIN로 튜닝(기본 150mm = GD1 실증값).
+          double margin = 150.0;
+          string marginEnv = System.Environment.GetEnvironmentVariable("PFS_NOTAB_MARGIN");
+          if (!string.IsNullOrWhiteSpace(marginEnv))
+          {
+            double parsedMargin;
+            if (double.TryParse(marginEnv, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedMargin) && parsedMargin >= 0.0)
+              margin = parsedMargin;
+          }
           Extents3d probe = new Extents3d(
             new Point3d(anchor.MinPoint.X - margin, anchor.MinPoint.Y - margin, anchor.MinPoint.Z - margin),
             new Point3d(anchor.MaxPoint.X + margin, anchor.MaxPoint.Y + margin, anchor.MaxPoint.Z + margin));
