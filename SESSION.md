@@ -11,6 +11,14 @@ _최종 갱신: 2026-07-14 (무탭 레이아웃·자동포함·자동화 완결,
 - **초기화면 zoom extents**: reopen에서 오버올 뷰포트(활성화前 Number=-1이라 dims로 판별) 뷰를 페이퍼 extents로.
 - **★dev 완전 자동화**: dev_test.bat이 로그 초기화 후 런치 → `pfs_dev_start.scr`=SECURELOAD0(보안다이얼로그 제거)+NETLOAD+`PFSNOTABTEST`(SupportName 태그로 서포트 자동선택→추출). Claude가 `C:\Temp\pfs_diag.log` 직접 Read(복붙 불요). [[pfs-dev-loop-tier1]]
 
+### 다음 세션 시작점 (N3 = 치수, 최대 리스크)
+- **진행 트랙**: 무탭 엔진. 레이아웃/워크플로/자동화 전부 완결(위). 남은 것 = N3(치수)→N4(밸룬/BOP/BOM)→N5(3부채 코드 소멸).
+- **직전 실측**: `PFSNOTABTEST`(GD1-001) 원클릭 라이브 = auto-include(파이프+유볼트)·뷰포트 610×489·zoom·페이퍼열림·RECOVER0·크래시0 전부 PASS. 최신 커밋 613ae6f.
+- **대기 액션**: N3 착수 미개시. 계획 초안 `<appDataDir>\scratch\plan_pfs_notab_n3_20260714.md` 존재. 최대 리스크(§9 지목=DCS→PSDCS 매핑 정밀도)라 계획→§9 자문→핸드오프 권장.
+- **N3 핵심**: 평면화 2D블록 없이 **뷰포트 투영(DCS→PSDCS 행렬)으로 치수 배치좌표·pipeCenter 계산** → Main에 비연관(non-associative) 치수 직접 제도(가로 폭 분할+세로 높이, 텍스트=실측 mm). 재사용=`s_isoRealWidth/Height`, basis right/up, `PSUtil.CreateHorizontal/VerticalDimension`, B4c/d/e 분할 로직.
+- **N3 검증 이점**: PFSNOTABTEST 원클릭 + Claude가 pfs_diag.log 직접 read로 매핑 정밀도 빠른 반복 가능.
+- **관련 경로**: 코드=PlantFlow_Support/Core/Commands.cs(RunNotabDetailPipeline/CreateNotabDetailViewport/ConfigureNotabDetailViewport/TryReopenSetNotabPaperSpace/AutoIncludeRelatedParts/PFSNOTABTEST). 계획=plan_pfs_notab_n3_20260714.md·plan_pfs_notab_layout_fit_20260714.md·plan_pfs_notab_recover_20260714.md. 로그=C:\Temp\pfs_diag.log(런마커 `===== RUN START =====`).
+
 ---
 
 _이전 갱신: 2026-07-14 (★무탭 엔진 Main 라이브 PASS)_
