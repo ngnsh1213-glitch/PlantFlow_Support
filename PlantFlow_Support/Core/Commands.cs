@@ -2786,11 +2786,11 @@ namespace PlantFlow_Support
         if (!System.IO.File.Exists(markerPath))
           return;
 
-        reopenDb = new Database(false, false);
+        reopenDb = new Database(false, true);
         reopenDb.ReadDwgFile(savedPath, System.IO.FileShare.ReadWrite, true, null);
         reopenDb.CloseInput(true);
         reopenDb.TileMode = false;
-        reopenDb.SaveAs(savedPath, DwgVersion.Current);
+        reopenDb.SaveAs(savedPath, true, DwgVersion.Current, reopenDb.SecurityParameters);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-reopen tilemode=0 ok");
       }
       catch (System.Exception ex)
