@@ -932,6 +932,83 @@ namespace PlantFlow_Support
 
       PlantOrthoView.FileDiag("========== PFSNOTABDETAIL RUN START ==========");
 
+      Editor ed = doc.Editor;
+      PromptSelectionResult psr = ed.GetSelection();
+      if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL 선택 취소/빈 선택");
+        ed.WriteMessage("\nPFSNOTABDETAIL: 선택 없음");
+        return;
+      }
+
+      this.RunNotabDetailPipeline(doc, psr.Value.GetObjectIds());
+    }
+
+    // 자동 테스트(dev 원클릭): SupportName 태그로 서포트를 찾아 선택 없이 추출한다.
+    // env PFS_NOTAB_TEST_TAG로 태그 지정, 기본 "GD1-001". 파이프/유볼트는 AutoIncludeRelatedParts가 자동 추가.
+    [CommandMethod("PFSNOTABTEST", CommandFlags.Session)]
+    public void NotabDetailTestCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      PlantOrthoView.FileDiag("========== PFSNOTABTEST RUN START ==========");
+      string tag = System.Environment.GetEnvironmentVariable("PFS_NOTAB_TEST_TAG");
+      if (string.IsNullOrWhiteSpace(tag)) tag = "GD1-001";
+
+      ObjectId supId = this.FindSupportByTag(doc.Database, tag);
+      if (supId == ObjectId.Null)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABTEST 서포트 태그 미발견 tag=" + tag);
+        doc.Editor.WriteMessage("\nPFSNOTABTEST: 서포트 '" + tag + "' 없음");
+        return;
+      }
+      PlantOrthoView.FileDiag("PFSNOTABTEST 서포트 발견 tag=" + tag + " id=" + supId);
+      this.RunNotabDetailPipeline(doc, new ObjectId[] { supId });
+    }
+
+    private ObjectId FindSupportByTag(Database db, string tag)
+    {
+      try
+      {
+        PSUtil ps = Commands.PSUtil;
+        if (ps == null) ps = new PSUtil();
+        if (ps == null || ps.dl_manager == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABTEST FindSupportByTag dl_manager null");
+          return ObjectId.Null;
+        }
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          ObjectId msId = this.GetModelSpaceId(db, tr);
+          BlockTableRecord ms = msId == ObjectId.Null ? null : tr.GetObject(msId, OpenMode.ForRead) as BlockTableRecord;
+          if (ms == null) { tr.Commit(); return ObjectId.Null; }
+          foreach (ObjectId eid in ms)
+          {
+            string cls = eid.ObjectClass == null ? string.Empty : eid.ObjectClass.Name;
+            if (cls.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+            try
+            {
+              System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection() { "SupportName" };
+              System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(eid, names, true);
+              string val = props != null && props.Count > 0 ? props[0] : string.Empty;
+              if (string.Equals(val, tag, System.StringComparison.OrdinalIgnoreCase)) { tr.Commit(); return eid; }
+            }
+            catch { }
+          }
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABTEST FindSupportByTag 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      return ObjectId.Null;
+    }
+
+    private void RunNotabDetailPipeline(Document doc, ObjectId[] selectedIds)
+    {
       s_isoPipeAxisValid = false;
       s_isoPipeAxis = Vector3d.XAxis;
       s_isoPipeUp = Vector3d.ZAxis;
@@ -947,15 +1024,6 @@ namespace PlantFlow_Support
       s_isoShortDesc = string.Empty;
 
       Editor ed = doc.Editor;
-      PromptSelectionResult psr = ed.GetSelection();
-      if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL 선택 취소/빈 선택");
-        ed.WriteMessage("\nPFSNOTABDETAIL: 선택 없음");
-        return;
-      }
-
-      ObjectId[] selectedIds = psr.Value.GetObjectIds();
       selectedIds = this.AutoIncludeRelatedParts(doc.Database, selectedIds);
       Vector3d pipeAxis;
       ObjectId pipeId;
