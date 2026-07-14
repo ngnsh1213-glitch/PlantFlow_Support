@@ -1,31 +1,47 @@
 # REPORT — Codex → Claude
 
-- cycle: 38
+- cycle: 39
 - status: done
 - commit: HEAD (최종 해시는 Codex 완료 보고 참조)
-- title: 크래시 회귀 격리 — cycle37 D(TileMode/활성레이아웃) 원복
+- title: 진단 cleanup + #1 페이퍼 초기화면 안전 재구현
 
 ## 변경 요약
 - `PlantFlow_Support/Core/Commands.cs`
-  - `CreateNotabDetailDrawing` 저장 직전의 `SetNotabInitialPaperLayout(detailDb)` 호출 제거.
-  - `SetNotabInitialPaperLayout(Database db)` 헬퍼 전체 제거.
-  - 제거 범위: `detailDb.TileMode = false`, `Title Block` `TabSelected` 활성화, `layout active=... tilemode=... zoomExtents=...` 로그.
+  - RECOVER 해결 후 불필요해진 진단/우회 호출과 함수 정의 제거.
+  - 최종 저장을 `detailDb.SaveAs(savedPath, DwgVersion.Current)` 직접 호출로 원복.
+  - A1 플롯 스킵 토글 제거 후 `TryConfigureNotabA1Layout` 항상 적용.
+  - `%TEMP%\pfs_notab_paper.flag` 존재 시에만 `detailDb.TileMode = false`를 적용하는 `TryApplyNotabPaperInit` 추가.
+
+## 삭제 목록
+- `TryRemoveNotabPnpDictionary`
+- `NormalizeNotabLayoutPlotters`
+- `ScanNotabInvalidKeys`
+- `LogNotabLayoutPlotConfig`
+- `LogNotabNamedObjectsDictionary`
+- `SaveNotabDetailWithWblockFallback`
+- `ShouldSkipNotabA1Plot`
+- 관련 보조 헬퍼: keyscan/plotcfg/wblock/pnp 카운트/포맷 헬퍼
+- RECOVER reactor 진단 로그와 `CountPersistentReactors`
 
 ## 보존 확인
-- A 유지: `CreateNotabDetailViewport` fixedRect viewport 생성 로그 유지.
-- B 유지: `ConfigureNotabDetailViewport` supportExt target 중심 설정 유지.
-- C 유지: viewport `CustomScale=0.25`, `scale=1:4` 로그 유지.
-- E 유지: `sourceDb.Dispose(); sourceDb = null;` 및 `PFSNOTABDETAIL sourceDb disposed(before-save) ok` 로그 유지.
-- 저장 경로는 기존 `SaveNotabDetailWithWblockFallback(detailDb, savedPath)` 그대로 유지.
+- E 유지: `sourceDb.Dispose(); sourceDb = null;` 및 `PFSNOTABDETAIL sourceDb disposed(before-save) ok`.
+- A 유지: viewport fixedRect 생성 및 `viewport rect` 로그.
+- B 유지: supportExt target 중심 설정 및 `viewport target` 로그.
+- C 유지: `CustomScale=0.25`, `scale=1:4` 로그.
+- `TryStripCleanSolidMetadata`의 확장딕셔너리/XData strip 본체 유지.
+- `CreateIsoDetailDrawing` / `PFSVBISO*` / `PFSNOTABBOX*` 집도 없음.
+
+## #1 토글
+- 파일 마커: `%TEMP%\pfs_notab_paper.flag`
+- 마커 있음: 저장 직전 `detailDb.TileMode = false` 적용, 로그 `PFSNOTABDETAIL paper-init tilemode=0(marker) ok`.
+- 마커 없음: paper-init 미적용, 로그 없음.
 
 ## 검증
-- 백업 생성: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_cycle38`
+- 백업 생성: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_cycle39`
 - `dotnet build`: PASS, 오류 0 / 기존 경고 15
 - `git diff --check -- PlantFlow_Support/Core/Commands.cs`: PASS, CRLF 경고만 있음
-- `rg "SetNotabInitialPaperLayout|layout active|layout tilemode|zoomExtents|TileMode = false"`: D 제거 확인
-- `CreateIsoDetailDrawing` / `PFSVBISO*` 집도 없음
+- cleanup 대상 문자열 `pnp-purge|plotter-normalize|plotcfg|keyscan|recover-diag|wblock-save|pfs_skip_a1plot|PFS_NOTAB_SKIP_A1PLOT`: 잔존 없음
 
 ## 라이브 확인 포인트
-- `PFSNOTABDETAIL layout active=... tilemode=... zoomExtents=...` 로그가 더 이상 나오지 않아야 함.
-- `PFSNOTABDETAIL` 실행 시 크래시 소멸 여부 확인.
-- 크래시 없이 저장되면 RECOVER 경고 소멸 여부와 A/B/C 레이아웃 정합을 확인.
+- 1차: 마커 없이 `PFSNOTABDETAIL` 실행, 크래시/RECOVER 없음과 저장 성공 확인.
+- 2차: `%TEMP%\pfs_notab_paper.flag` 생성 후 `paper-init tilemode=0(marker) ok` 로그와 페이퍼 공간 초기 표시 여부 확인.

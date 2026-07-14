@@ -2468,12 +2468,7 @@ namespace PlantFlow_Support
           layoutBtrId = this.EnsureNotabDetailLayout(detailDb, tr);
           if (layoutBtrId == ObjectId.Null)
             throw new System.InvalidOperationException("detail layout 없음");
-          string skipA1PlotSource;
-          bool skipA1Plot = this.ShouldSkipNotabA1Plot(out skipA1PlotSource);
-          if (skipA1Plot)
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL A1plot skip(" + skipA1PlotSource + ")");
-          else
-            this.TryConfigureNotabA1Layout(tr, layoutBtrId);
+          this.TryConfigureNotabA1Layout(tr, layoutBtrId);
 
           tr.Commit();
           PlantOrthoView.FileDiag("PFSNOTABDETAIL preTitle commit 완료");
@@ -2487,9 +2482,6 @@ namespace PlantFlow_Support
         savedPath = System.IO.Path.Combine(detailsDir, safeTag + "_notab.dwg");
         if (System.IO.File.Exists(savedPath))
           System.IO.File.Delete(savedPath);
-
-        this.LogNotabNamedObjectsDictionary(detailDb);
-        this.LogNotabLayoutPlotConfig(detailDb);
 
         using (Transaction tr = detailDb.TransactionManager.StartTransaction())
         {
@@ -2517,13 +2509,9 @@ namespace PlantFlow_Support
         if (!skipViewport && viewportId != ObjectId.Null)
           this.ConfigureNotabDetailViewport(detailDb, viewportId, supportExt, supportExtSource);
 
-        this.LogNotabNamedObjectsDictionary(detailDb);
-        this.TryRemoveNotabPnpDictionary(detailDb);
-        this.NormalizeNotabLayoutPlotters(detailDb);
-        this.LogNotabLayoutPlotConfig(detailDb);
-        this.ScanNotabInvalidKeys(detailDb);
+        this.TryApplyNotabPaperInit(detailDb);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
-        this.SaveNotabDetailWithWblockFallback(detailDb, savedPath);
+        detailDb.SaveAs(savedPath, DwgVersion.Current);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
         return savedPath;
       }
@@ -2576,40 +2564,6 @@ namespace PlantFlow_Support
       if (layoutBtrId != ObjectId.Null)
         return layoutBtrId;
       return this.GetLayoutBlockTableRecordId(db, tr, "Layout1");
-    }
-
-    private bool ShouldSkipNotabA1Plot(out string source)
-    {
-      source = "none";
-
-      try
-      {
-        if (string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_A1PLOT"), "1", System.StringComparison.OrdinalIgnoreCase))
-        {
-          source = "env";
-          return true;
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL A1plot env check 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-
-      try
-      {
-        string markerPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "pfs_skip_a1plot.flag");
-        if (System.IO.File.Exists(markerPath))
-        {
-          source = "marker";
-          return true;
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL A1plot marker check 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-
-      return false;
     }
 
     private bool TryConfigureNotabA1Layout(Transaction tr, ObjectId layoutBtrId)
@@ -2820,369 +2774,23 @@ namespace PlantFlow_Support
       return normalized;
     }
 
-    private void LogNotabLayoutPlotConfig(Database db)
+    private void TryApplyNotabPaperInit(Database db)
     {
       if (db == null)
         return;
 
       try
       {
-        using (Transaction tr = db.TransactionManager.StartTransaction())
-        {
-          DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead, false) as DBDictionary;
-          if (layouts == null)
-          {
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL plotcfg layouts=null");
-            return;
-          }
-
-          foreach (DBDictionaryEntry entry in layouts)
-          {
-            try
-            {
-              Layout layout = tr.GetObject(entry.Value, OpenMode.ForRead, false) as Layout;
-              if (layout == null)
-                continue;
-
-              string layoutName = string.IsNullOrWhiteSpace(layout.LayoutName) ? entry.Key : layout.LayoutName;
-              PlantOrthoView.FileDiag("PFSNOTABDETAIL plotcfg layout=" + layoutName
-                + " plotter=" + this.GetReflectedString(layout, "PlotConfigurationName")
-                + " media=" + this.GetReflectedString(layout, "CanonicalMediaName")
-                + " stylesheet=" + this.GetReflectedString(layout, "CurrentStyleSheet")
-                + " plotSettings=" + this.GetReflectedString(layout, "PlotSettingsName"));
-            }
-            catch (System.Exception ex)
-            {
-              PlantOrthoView.FileDiag("PFSNOTABDETAIL plotcfg layout skip key=" + entry.Key + ": " + ex.GetType().Name + ": " + ex.Message);
-            }
-          }
-
-          tr.Commit();
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL plotcfg 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-    }
-
-    private string GetReflectedString(object target, string propertyName)
-    {
-      if (target == null || string.IsNullOrEmpty(propertyName))
-        return "n/a";
-
-      try
-      {
-        System.Reflection.PropertyInfo property = target.GetType().GetProperty(propertyName);
-        if (property == null)
-          return "n/a";
-        object value = property.GetValue(target, null);
-        return value == null ? "null" : value.ToString();
-      }
-      catch (System.Exception ex)
-      {
-        return "err:" + ex.GetType().Name;
-      }
-    }
-
-    private void ScanNotabInvalidKeys(Database db)
-    {
-      if (db == null)
-        return;
-
-      try
-      {
-        using (Transaction tr = db.TransactionManager.StartTransaction())
-        {
-          this.ScanDictionaryKeys(tr, db.NamedObjectsDictionaryId, "NOD", 0);
-          this.ScanDictionaryKeys(tr, db.LayoutDictionaryId, "LayoutDictionary", 0);
-          this.ScanSymbolTableKeys(tr, db.BlockTableId, "BlockTable");
-          this.ScanSymbolTableKeys(tr, db.LayerTableId, "LayerTable");
-          this.ScanSymbolTableKeys(tr, db.LinetypeTableId, "LinetypeTable");
-          this.ScanSymbolTableKeys(tr, db.TextStyleTableId, "TextStyleTable");
-          this.ScanSymbolTableKeys(tr, db.DimStyleTableId, "DimStyleTable");
-          tr.Commit();
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL keyscan 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-    }
-
-    private void ScanDictionaryKeys(Transaction tr, ObjectId dictionaryId, string dictName, int depth)
-    {
-      if (tr == null || dictionaryId == ObjectId.Null || depth > 4)
-        return;
-
-      try
-      {
-        DBDictionary dictionary = tr.GetObject(dictionaryId, OpenMode.ForRead, false) as DBDictionary;
-        if (dictionary == null)
+        string markerPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "pfs_notab_paper.flag");
+        if (!System.IO.File.Exists(markerPath))
           return;
 
-        int total = 0;
-        System.Collections.Generic.List<string> badKeys = new System.Collections.Generic.List<string>();
-        foreach (DBDictionaryEntry entry in dictionary)
-        {
-          total++;
-          if (this.IsSuspiciousDictionaryKey(entry.Key))
-            badKeys.Add(this.FormatKeyForLog(entry.Key));
-
-          if (entry.Value != ObjectId.Null)
-          {
-            DBObject child = tr.GetObject(entry.Value, OpenMode.ForRead, false) as DBObject;
-            if (child is DBDictionary)
-              this.ScanDictionaryKeys(tr, entry.Value, dictName + "/" + this.FormatKeyForLog(entry.Key), depth + 1);
-          }
-        }
-
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL keyscan dict=" + dictName + " count=" + total + " emptyKeys=" + badKeys.Count + " keys=[" + string.Join(",", badKeys.ToArray()) + "]");
+        db.TileMode = false;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-init tilemode=0(marker) ok");
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL keyscan dict=" + dictName + " 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-    }
-
-    private void ScanSymbolTableKeys(Transaction tr, ObjectId tableId, string tableName)
-    {
-      if (tr == null || tableId == ObjectId.Null)
-        return;
-
-      try
-      {
-        SymbolTable table = tr.GetObject(tableId, OpenMode.ForRead, false) as SymbolTable;
-        if (table == null)
-          return;
-
-        int total = 0;
-        System.Collections.Generic.List<string> badKeys = new System.Collections.Generic.List<string>();
-        foreach (ObjectId id in table)
-        {
-          total++;
-          SymbolTableRecord record = tr.GetObject(id, OpenMode.ForRead, false) as SymbolTableRecord;
-          string name = record == null ? null : record.Name;
-          if (this.IsSuspiciousDictionaryKey(name))
-            badKeys.Add(this.FormatKeyForLog(name));
-        }
-
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL keyscan dict=" + tableName + " count=" + total + " emptyKeys=" + badKeys.Count + " keys=[" + string.Join(",", badKeys.ToArray()) + "]");
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL keyscan dict=" + tableName + " 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-    }
-
-    private bool IsSuspiciousDictionaryKey(string key)
-    {
-      if (string.IsNullOrWhiteSpace(key))
-        return true;
-
-      for (int i = 0; i < key.Length; i++)
-      {
-        if (char.IsControl(key[i]))
-          return true;
-      }
-
-      return false;
-    }
-
-    private string FormatKeyForLog(string key)
-    {
-      if (key == null)
-        return "<null>";
-      if (key.Length == 0)
-        return "<empty>";
-      return key.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
-    }
-
-    private void LogNotabNamedObjectsDictionary(Database db)
-    {
-      if (db == null)
-        return;
-
-      try
-      {
-        using (Transaction tr = db.TransactionManager.StartTransaction())
-        {
-          DBDictionary nod = tr.GetObject(db.NamedObjectsDictionaryId, OpenMode.ForRead, false) as DBDictionary;
-          if (nod == null)
-          {
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag nod=[]");
-            return;
-          }
-
-          System.Collections.Generic.List<string> keys = new System.Collections.Generic.List<string>();
-          foreach (DBDictionaryEntry entry in nod)
-          {
-            keys.Add(entry.Key);
-          }
-          keys.Sort(System.StringComparer.OrdinalIgnoreCase);
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag nod=[" + string.Join(",", keys.ToArray()) + "]");
-          tr.Commit();
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag nod 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-    }
-
-    private void NormalizeNotabLayoutPlotters(Database db)
-    {
-      if (db == null)
-        return;
-
-      try
-      {
-        using (Transaction tr = db.TransactionManager.StartTransaction())
-        {
-          DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead, false) as DBDictionary;
-          if (layouts == null)
-          {
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL plotter-normalize layouts=null");
-            return;
-          }
-
-          PlotSettingsValidator psv = PlotSettingsValidator.Current;
-          foreach (DBDictionaryEntry entry in layouts)
-          {
-            string layoutName = entry.Key;
-            try
-            {
-              Layout layout = tr.GetObject(entry.Value, OpenMode.ForWrite, false) as Layout;
-              if (layout == null)
-                continue;
-
-              if (!string.IsNullOrWhiteSpace(layout.LayoutName))
-                layoutName = layout.LayoutName;
-
-              psv.SetPlotConfigurationName(layout, "None", null);
-              PlantOrthoView.FileDiag("PFSNOTABDETAIL plotter-normalize layout=" + layoutName + " -> None ok");
-            }
-            catch (System.Exception ex)
-            {
-              PlantOrthoView.FileDiag("PFSNOTABDETAIL plotter-normalize layout=" + layoutName + " -> None fail:" + ex.GetType().Name + ": " + ex.Message);
-            }
-          }
-
-          tr.Commit();
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL plotter-normalize 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-    }
-
-    private void TryRemoveNotabPnpDictionary(Database db)
-    {
-      if (db == null)
-        return;
-
-      try
-      {
-        using (Transaction tr = db.TransactionManager.StartTransaction())
-        {
-          DBDictionary nod = tr.GetObject(db.NamedObjectsDictionaryId, OpenMode.ForWrite, false) as DBDictionary;
-          if (nod == null)
-          {
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL pnp-purge before=0 removed=0 after=0 nod=null");
-            return;
-          }
-
-          int before = this.CountDictionaryEntries(nod);
-          int removed = 0;
-          if (nod.Contains("Autodesk_PNP"))
-          {
-            ObjectId pnpId = nod.GetAt("Autodesk_PNP");
-            nod.Remove("Autodesk_PNP");
-            removed = 1;
-
-            try
-            {
-              DBObject pnpObject = tr.GetObject(pnpId, OpenMode.ForWrite, false) as DBObject;
-              if (pnpObject != null && !pnpObject.IsErased)
-                pnpObject.Erase(true);
-            }
-            catch (System.Exception ex)
-            {
-              PlantOrthoView.FileDiag("PFSNOTABDETAIL pnp-purge child erase skip: " + ex.GetType().Name + ": " + ex.Message);
-            }
-          }
-
-          int after = this.CountDictionaryEntries(nod);
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL pnp-purge before=" + before + " removed=" + removed + " after=" + after);
-          tr.Commit();
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL pnp-purge 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-    }
-
-    private int CountDictionaryEntries(DBDictionary dictionary)
-    {
-      if (dictionary == null)
-        return 0;
-
-      int count = 0;
-      foreach (DBDictionaryEntry entry in dictionary)
-      {
-        count++;
-      }
-      return count;
-    }
-
-    private void SaveNotabDetailWithWblockFallback(Database detailDb, string savedPath)
-    {
-      if (detailDb == null)
-        throw new System.ArgumentNullException("detailDb");
-      if (string.IsNullOrWhiteSpace(savedPath))
-        throw new System.ArgumentNullException("savedPath");
-
-      Database cleanDb = null;
-      try
-      {
-        cleanDb = detailDb.Wblock();
-        int layoutCount = this.CountLayouts(cleanDb);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL wblock-save cleanDb=ok layouts=" + layoutCount);
-        cleanDb.SaveAs(savedPath, DwgVersion.Current);
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL wblock-save fallback detailDb SaveAs: " + ex.GetType().Name + ": " + ex.Message);
-        detailDb.SaveAs(savedPath, DwgVersion.Current);
-      }
-      finally
-      {
-        if (cleanDb != null)
-          cleanDb.Dispose();
-      }
-    }
-
-    private int CountLayouts(Database db)
-    {
-      if (db == null)
-        return 0;
-
-      try
-      {
-        using (Transaction tr = db.TransactionManager.StartTransaction())
-        {
-          DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead, false) as DBDictionary;
-          int count = this.CountDictionaryEntries(layouts);
-          tr.Commit();
-          return count;
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL wblock-save layout count 예외: " + ex.GetType().Name + ": " + ex.Message);
-        return -1;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL paper-init tilemode=0(marker) 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
     }
 
@@ -3281,9 +2889,6 @@ namespace PlantFlow_Support
             targetTr.AddNewlyCreatedDBObject(clean, true);
             if (layerId != ObjectId.Null)
               clean.LayerId = layerId;
-            int srcReactors = this.CountPersistentReactors(src, "src", solidId);
-            int cleanReactors = this.CountPersistentReactors(clean, "clean", clean.ObjectId);
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag reactors src=" + srcReactors + " clean=" + cleanReactors + " id=" + solidId);
             this.TryStripCleanSolidMetadata(clean);
 
             Extents3d ext = clean.GeometricExtents;
@@ -3460,33 +3065,6 @@ namespace PlantFlow_Support
         PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid xdata strip skip: " + ex.GetType().Name + ": " + ex.Message);
       }
 
-      try
-      {
-        ObjectIdCollection reactorIds = solid.GetPersistentReactorIds();
-        int reactorCount = reactorIds == null ? 0 : reactorIds.Count;
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid reactors(strip-skipped API-absent)=" + reactorCount + " id=" + solid.ObjectId);
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid reactor scan skip: " + ex.GetType().Name + ": " + ex.Message);
-      }
-    }
-
-    private int CountPersistentReactors(DBObject obj, string label, ObjectId id)
-    {
-      if (obj == null)
-        return 0;
-
-      try
-      {
-        ObjectIdCollection reactorIds = obj.GetPersistentReactorIds();
-        return reactorIds == null ? 0 : reactorIds.Count;
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag reactors " + label + "=warn:" + ex.GetType().Name + ": " + ex.Message + " id=" + id);
-        return -1;
-      }
     }
 
     private int PrepareClonedNotabSolids(Transaction tr, IdMapping idMap, ObjectId layerId, out Extents3d solidExt)
