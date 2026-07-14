@@ -1143,6 +1143,97 @@ namespace PlantFlow_Support
       }
     }
 
+    [CommandMethod("PFSNOTABBOXVPWIRE", CommandFlags.Session)]
+    public void NotabBoxViewportWireCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      Editor ed = doc != null ? doc.Editor : null;
+      Database tdb = null;
+      Database oldWorking = HostApplicationServices.WorkingDatabase;
+      try
+      {
+        string templatePath = this.ResolveIsoTemplatePath();
+        if (string.IsNullOrWhiteSpace(templatePath) || !System.IO.File.Exists(templatePath))
+        {
+          PlantOrthoView.FileDiag("PFSNOTABBOXVPWIRE template 없음 path=" + (templatePath ?? string.Empty));
+          if (ed != null)
+            ed.WriteMessage("\nPFSNOTABBOXVPWIRE: template 없음");
+          return;
+        }
+
+        tdb = new Database(false, true);
+        tdb.ReadDwgFile(templatePath, System.IO.FileShare.Read, true, null);
+        tdb.CloseInput(true);
+        HostApplicationServices.WorkingDatabase = tdb;
+
+        using (Transaction tr = tdb.TransactionManager.StartTransaction())
+        {
+          ObjectId msId = this.GetModelSpaceId(tdb, tr);
+          if (msId == ObjectId.Null)
+            throw new System.InvalidOperationException("template ModelSpace 없음");
+
+          BlockTableRecord ms = tr.GetObject(msId, OpenMode.ForWrite, false) as BlockTableRecord;
+          if (ms == null)
+            throw new System.InvalidOperationException("template ModelSpace open 실패");
+
+          Solid3d box = new Solid3d();
+          box.SetDatabaseDefaults(tdb);
+          box.CreateBox(300.0, 300.0, 300.0);
+          ms.AppendEntity(box);
+          tr.AddNewlyCreatedDBObject(box, true);
+          Extents3d boxExt = box.GeometricExtents;
+          Point3d target = new Point3d(
+            (boxExt.MinPoint.X + boxExt.MaxPoint.X) / 2.0,
+            (boxExt.MinPoint.Y + boxExt.MaxPoint.Y) / 2.0,
+            (boxExt.MinPoint.Z + boxExt.MaxPoint.Z) / 2.0);
+
+          ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(tdb, tr, "Title Block");
+          if (layoutBtrId == ObjectId.Null)
+            throw new System.InvalidOperationException("Title Block layout 없음");
+
+          BlockTableRecord layoutBtr = tr.GetObject(layoutBtrId, OpenMode.ForWrite, false) as BlockTableRecord;
+          if (layoutBtr == null)
+            throw new System.InvalidOperationException("Title Block layout open 실패");
+
+          Viewport vp = new Viewport();
+          layoutBtr.AppendEntity(vp);
+          tr.AddNewlyCreatedDBObject(vp, true);
+          vp.CenterPoint = new Point3d(420.0, 297.0, 0.0);
+          vp.Width = 600.0;
+          vp.Height = 380.0;
+          vp.ViewDirection = Vector3d.YAxis;
+          vp.ViewTarget = target;
+          vp.ViewCenter = new Point2d(0.0, 0.0);
+          vp.CustomScale = 0.5;
+          vp.On = true;
+          bool shadeOk = this.TrySetViewportShadePlotHidden(vp);
+          PlantOrthoView.FileDiag("PFSNOTABBOXVPWIRE viewport viewDir set, hidden=skip, shadePlot=" + shadeOk + ", commit 직전");
+          tr.Commit();
+          PlantOrthoView.FileDiag("PFSNOTABBOXVPWIRE commit 완료");
+        }
+
+        string tempDir = @"C:\Temp";
+        System.IO.Directory.CreateDirectory(tempDir);
+        string savedPath = System.IO.Path.Combine(tempDir, "notab_boxvpwire_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", System.Globalization.CultureInfo.InvariantCulture) + ".dwg");
+        tdb.SaveAs(savedPath, DwgVersion.Current);
+        PlantOrthoView.FileDiag("PFSNOTABBOXVPWIRE saved path=" + savedPath);
+        if (ed != null)
+          ed.WriteMessage("\nPFSNOTABBOXVPWIRE saved=" + savedPath);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABBOXVPWIRE 예외: " + ex.GetType().Name + ": " + ex.Message);
+        if (ed != null)
+          ed.WriteMessage("\nPFSNOTABBOXVPWIRE error: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        HostApplicationServices.WorkingDatabase = oldWorking;
+        if (tdb != null)
+          tdb.Dispose();
+      }
+    }
+
     private Database CloneSelectionToSideDatabase(Database originalDb, ObjectId[] selectedIds, string logPrefix)
     {
       if (originalDb == null)
