@@ -1,17 +1,32 @@
 # SESSION — 현재 작업 상태
 
-_최종 갱신: 2026-07-13 (B4d+B4e 라이브 PASS)_
+_최종 갱신: 2026-07-14 (무탭 엔진 크래시 해결·세션 이관)_
 
-## 진행 중 트랙
-- **PFS 오쏘 격리(1서포트=1도면) — B4d(가로 분할 치수)·B4e(중복제거) 라이브 PASS (2026-07-13)**.
-  - ✅ 완료: B1g(VIEWBASE 커널)·B2(EXPORTLAYOUT+clone-back)·B3a(방향 Main)·B4a(치수 폭300/높이75)·B4c(세로 치수 서포트만)·**B4d·B4e**.
-  - **B4d(커밋 f6c99fa, 라이브 PASS)**: 가로 치수를 파이프 원 중심 X 기준 좌/우 분할(예 100/200) + 전체(300) 유지. `IsoCircleCandidate.CenterX` 추가, `TryGetIsoSupportPaperExtents`가 `pipeCenterX` 노출. 라벨=`s_isoRealWidth` 비례 안분.
-  - **B4e(커밋 cf44403, 라이브 PASS)**: (A) 재실행 시 기존 `PFS_ISO_DETAIL`/`AUTO_DIM` 레이어 객체 삭제(`PurgePriorIsoDetail`) → 최신 1개만. 라이브 `priorDetail purge erased=N` 확인, 중복 100 해소. (B) 원본 재활성 후 `REGEN` 큐잉.
-  - **★미해결(나중): 뷰큐브 미표시** — B4e의 REGEN으론 부족(뷰 전환해야 표시). 다른 방식 필요(뷰/시점 리셋 등). 사용자 지시로 후순위 보류.
-  - 잔여 노이즈(무해): `LogIsoDimensionExtents` `eInvalidExtents h=25` 로깅만 실패(치수 생성엔 영향 없음).
-  - 데이터: PLN 미부여(빈값), BOP=423, size=80, realW=300/realH=75.
-  - 상세: `plan_pfs_iso_b4d_dimsplit_20260713.md`, `plan_pfs_iso_b4e_dedup_viewcube_20260713.md`. 핸드오프 `.plans/HANDOFF.md`(cycle 9)·`HANDOFF_B4d.md`·`HANDOFF_B4e.md`(RESULT done).
-- (종료) **핫 리로드 스파이크** — 리포 밖 `C:\Lisp\HotReload`로 이관 완료(커밋 4447a17). HANDOFF.md는 B4e(cycle 9)로 회수됨. 더 이상 사용 안 함.
+## ★세션 요약 (2026-07-13~14) — 격리 치수 완성 → 별도 도면 → 무탭 엔진
+### 1. 격리 치수/중복 (완료, 라이브 PASS)
+- **B4d**(f6c99fa): 가로 치수 파이프중심 분할(100/200)+전체(300). **B4c**(f02ee1b): 세로 치수 서포트만. **B4e**(cf44403): 재실행 중복 제거(`PurgePriorIsoDetail`).
+### 2. 별도 도면(태그별 .dwg+타이틀블록) — ✅ 라이브 완성
+- `CreateIsoDetailDrawing`: side-DB tagDb(템플릿 .dwt)→2D+치수 클론→플로팅 뷰포트(1:2 고정, Layout.Limits 기반)→DRAWING_TITLE 속성(SUPPORT_CODE=GD1-001 등)→`Details\<tag>.dwg`. 원본 무변경. 커밋 6ded95e~c841ad0.
+- 태그 소스=서포트 `SupportName`/`Tag`(=GD1-001), PIPE_NO=LineNumberTag, STD=DesignStd. (PFSISOTBLPROBE로 실측 확정)
+### 3. ★무탭 엔진 — GO 확정 + 크래시 해결 (이번 세션 핵심)
+- **동기**: 기존 파이프라인 3부채=뷰큐브 미표시·EXPORTLAYOUT 다이얼로그·temp dwg 누적. 근본=temp 문서 MDI 활성화 + VIEWBASE/EXPORTLAYOUT 명령.
+- **스파이크(C:\Lisp\NoTabSpike)**: ①접근C=side-DB Solid3d+Hidden 뷰포트로 은선제거 정투영 실증(VIEWBASE/EXPORTLAYOUT 불요) ②스파이크D=side-DB에서 Plant `entity.Explode()` 작동(문서없이 Solid3d 추출) → **완전 무탭 GO**. 메모리 [[pfs-notab-engine-go]].
+- **엔진 구현**: N1(PFSNOTABN1, 커밋 73861e6)=side-DB 재귀 explode→Solid3d. N2(PFSNOTABDETAIL)=solid+Hidden 뷰포트+타이틀블록→`Details\<tag>_notab.dwg`.
+- **★N2 commit 크래시 진단·해결(cycle 22~29)**: 근본원인=**".dwt 템플릿 DB에 은선/3D 뷰포트(ViewDirection/Hidden/ShadePlot) commit"** = 네이티브 크래시. (진단 격리: 템플릿+박스=OK, 템플릿+평면뷰포트=OK, 평범DB+Hidden뷰포트=OK[스파이크C], 오직 템플릿+3D뷰포트만 크래시. Plant solid/비주얼스타일명 무죄.)
+  - **해결=§9 #3(커밋 703f1ee)**: 뷰포트를 템플릿이 아닌 **평범 DB(`new Database(true,true)`)** 에 생성 + 템플릿 타이틀블록 2D만 WblockClone 병합 → **크래시 소멸**(commit 완료+saved).
+### 대기 중 액션 (다음 세션 시작점)
+- **cycle 30(HANDOFF.md 발행됨) 라이브 대기**: A1 레이아웃/플롯 정합(현재 평범DB 기본 12×9라 타이틀블록 A1좌표와 미스매치) + 저장 무결성("run RECOVER" 경고 제거, Audit+dangling 의존 교정). Codex 집도(`1`)→빌드→`PFSNOTABDETAIL` 라이브.
+### 다음 결정 분기
+- cycle 30 PASS(A1 정합+경고소멸) → **무탭 Main 완성**(3부채 소멸) → **N3(치수 재투영: 3D→PSDCS 비연관 치수, 최대리스크)** → N4(밸룬/BOP/PLN 콜아웃/BOM=기존 AnnotateViewport·SPInfo.AttachmentList 재사용) → N5(정리·전환: VIEWBASE/EXPORTLAYOUT/temp 제거).
+- cycle 30 FAIL → 로그로 A1/저장 원인 재판정.
+### 관련 경로
+- 계획: `<appDataDir>\scratch\plan_pfs_notab_engine_20260713.md`·`plan_pfs_notab_spike_20260713.md`·`plan_pfs_iso_separate_drawing_20260713.md`·`plan_pfs_iso_annotation_integration_20260713.md`.
+- 핸드오프: `.plans/HANDOFF.md`(cycle 30 ready). 코드: PlantFlow_Support/Core/Commands.cs (PFSNOTABDETAIL/N1/CreateNotabDetailDrawing/CopyCleanNotabSolids/CloneTemplateTitleBlock2D).
+- 스파이크: C:\Lisp\NoTabSpike (PFSNOTABSPIKE/PFSNOTABEXPLODE). 진단 커맨드(제품): PFSNOTABBOXTEST/BOXVPTEST/BOXVPWIRE(격리 완료, 잔존 무해).
+### ⚠️ 이관 주의
+- 커밋 규율: Codex가 git commit escalation 거부 다발 → **Claude가 대리 커밋** 중(코드 검증 후). 현 HEAD=703f1ee(+cycle30 대기).
+- 밸룬 멤버 소스=`SPInfo.AttachmentList`(SupportType"ATTACHMENT" 부착서포트, PaletteTab.Events.cs:171-319). 격리 선택에 부착서포트 포함+SPInfo 채우기 필요(N4).
+- 밸룬/BOP콜아웃/BOM은 기존 `OrthoViewportManager.AnnotateViewport` 엔진 재사용(새로 안 만듦).
 - (이전) **격리 방향 제어 — ✅ B3a PASS (2026-07-12)**.
   - 파이프라인: 선택셋 → 1st temp(Plant clone) → explode Solid3d → 2nd temp(순수 solid) → **-VPOINT(파이프축)** → SendStringToExecute VIEWBASE `_O _Current` → EXPORTLAYOUT 평면화 → 원본 clone-back(PFS_ISO_DETAIL 레이어).
   - **방향 제어(B3a)**: -VPOINT(파이프축)+VIEWBASE `_O _Current`로 Main뷰(파이프=원+서포트=직사각형) 생성. X/Y/수직Z 전 축 + 다중 타입 육안 확정. "축방향 응시=Main" 보편 적용.
@@ -28,12 +43,12 @@ _최종 갱신: 2026-07-13 (B4d+B4e 라이브 PASS)_
 - Plant 객체는 caller가 Erase 불가(eCannotBeErasedByCaller) → 순수 solid만 2nd temp에 clone(M3). transient solid 직접 cross-DB append 금지 → WblockCloneObjects만.
 - 상세: `plan_pfs_isolation_20260711.md`(§4-A~P), 메모리 `pfs-wblockclone-preserves-plant-geometry`.
 
-## 대기 중 액션
-- 없음. B4d+B4e 라이브 PASS로 종결.
-
-## 다음 결정 분기
-- **뷰큐브 미표시(보류)**: REGEN 불충분 확인. 후속 소분기에서 뷰/시점 리셋 등 다른 방식 검토.
-- **후보 트랙**: (a) 별도 도면 분리(태그당 최신 1개 — B4e 정합) (b) BOP MLeader(B4b) (c) 스케일/배치 (d) eInvalidExtents 로깅 노이즈 정리.
+## 진행 중 (2026-07-13 최신) — 무탭 엔진
+- **별도 도면(태그별 .dwg+타이틀블록) ✅ 라이브 완성**: side-DB tagDb(템플릿 .dwt)→2D+치수 클론→플로팅 뷰포트(1:2 고정)→DRAWING_TITLE 속성→Details\<tag>.dwg. 커밋 6ded95e~c841ad0. 원본 무변경.
+- **★무탭 엔진 GO (스파이크 실증)**: side-DB Solid3d+Hidden 뷰포트로 VIEWBASE/EXPORTLAYOUT 없이 은선제거 정투영 성공. 상세=메모리 [[pfs-notab-engine-go]]. 스파이크=C:\Lisp\NoTabSpike.
+- **대기 중 액션**: 스파이크 D(side-DB Plant explode) 라이브 실행 → 완전vs부분 무탭 확정.
+- **다음 결정 분기**: D 성공(Solid3d 산출)→완전 무탭 엔진 계획 / D 실패→부분 무탭(1차 explode 문서 1회만). 이후 밸룬+BOP/PLN 콜아웃+BOM(기존 AnnotateViewport 재사용) / 치수 3D→PSDCS 재설계.
+- **백로그(TODO)**: 주석엔진 통합(밸룬/BOP/BOM), 뷰포트-타이틀블록 정렬(미세조정), 무탭 3부채(뷰큐브/다이얼로그/temp누적—무탭이면 소멸).
 
 ## 관련 파일·경로
 - 잔여 백로그: `TODO.md`
