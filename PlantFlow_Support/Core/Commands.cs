@@ -969,7 +969,7 @@ namespace PlantFlow_Support
         if (solidIds.Count == 0)
           throw new System.InvalidOperationException("solidIds 없음");
 
-        string savedPath = this.CreateNotabDetailDrawing(sourceDb, solidIds);
+        string savedPath = this.CreateNotabDetailDrawing(ref sourceDb, solidIds);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL done selected=" + selectedIds.Length + " solids=" + solidIds.Count + " axis=" + this.FormatVectorForCommand(s_isoPipeAxis) + " up=" + this.FormatVectorForCommand(s_isoPipeUp) + " saved=" + savedPath);
         ed.WriteMessage("\nPFSNOTABDETAIL saved=" + savedPath);
       }
@@ -2414,7 +2414,7 @@ namespace PlantFlow_Support
       return cloned > 0;
     }
 
-    private string CreateNotabDetailDrawing(Database sourceDb, System.Collections.Generic.List<ObjectId> solidIds)
+    private string CreateNotabDetailDrawing(ref Database sourceDb, System.Collections.Generic.List<ObjectId> solidIds)
     {
       if (sourceDb == null)
         throw new System.ArgumentNullException("sourceDb");
@@ -2460,6 +2460,10 @@ namespace PlantFlow_Support
           cloned = this.CopyCleanNotabSolids(sourceDb, solidIds, detailDb, tr, msId, detailLayerId, out solidExt, out supportExt, out supportExtSource);
           if (cloned == 0)
             throw new System.InvalidOperationException("cloned solid/extents 없음");
+
+          sourceDb.Dispose();
+          sourceDb = null;
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL sourceDb disposed(before-save) ok");
 
           layoutBtrId = this.EnsureNotabDetailLayout(detailDb, tr);
           if (layoutBtrId == ObjectId.Null)
