@@ -2507,6 +2507,7 @@ namespace PlantFlow_Support
           this.ConfigureNotabDetailViewport(detailDb, viewportId, solidExt);
 
         this.LogNotabNamedObjectsDictionary(detailDb);
+        this.TryRemoveNotabPnpDictionary(detailDb);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         detailDb.SaveAs(savedPath, DwgVersion.Current);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
@@ -2801,6 +2802,66 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag nod 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
+    }
+
+    private void TryRemoveNotabPnpDictionary(Database db)
+    {
+      if (db == null)
+        return;
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          DBDictionary nod = tr.GetObject(db.NamedObjectsDictionaryId, OpenMode.ForWrite, false) as DBDictionary;
+          if (nod == null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL pnp-purge before=0 removed=0 after=0 nod=null");
+            return;
+          }
+
+          int before = this.CountDictionaryEntries(nod);
+          int removed = 0;
+          if (nod.Contains("Autodesk_PNP"))
+          {
+            ObjectId pnpId = nod.GetAt("Autodesk_PNP");
+            nod.Remove("Autodesk_PNP");
+            removed = 1;
+
+            try
+            {
+              DBObject pnpObject = tr.GetObject(pnpId, OpenMode.ForWrite, false) as DBObject;
+              if (pnpObject != null && !pnpObject.IsErased)
+                pnpObject.Erase(true);
+            }
+            catch (System.Exception ex)
+            {
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL pnp-purge child erase skip: " + ex.GetType().Name + ": " + ex.Message);
+            }
+          }
+
+          int after = this.CountDictionaryEntries(nod);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pnp-purge before=" + before + " removed=" + removed + " after=" + after);
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pnp-purge 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private int CountDictionaryEntries(DBDictionary dictionary)
+    {
+      if (dictionary == null)
+        return 0;
+
+      int count = 0;
+      foreach (DBDictionaryEntry entry in dictionary)
+      {
+        count++;
+      }
+      return count;
     }
 
     private void TrySaveNotabPreTitleProbe(Database db, string savedPath)

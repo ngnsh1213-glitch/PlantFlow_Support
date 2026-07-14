@@ -1,45 +1,51 @@
 # REPORT — Codex → Claude
 
-- cycle: 32
+- cycle: 33
 - status: done
 - commit: created (current HEAD)
 - target: `PlantFlow_Support/Core/Commands.cs`
 - build: pass (`dotnet build`, 오류 0 / 기존 경고 15)
 
 ## 변경 요약
-- `TryStripCleanSolidMetadata(...)`의 미존재 API 호출 제거.
-  - 삭제: `solid.RemovePersistentReactor(...)` 기반 reactor 제거 루프.
-  - 유지: `solid.GetPersistentReactorIds()` 카운트 계측.
-  - 신규 로그: `PFSNOTABDETAIL cleanSolid reactors(strip-skipped API-absent)=<count> id=<solid.ObjectId>`
-- cycle 31 계측은 보존.
-  - `CopyCleanNotabSolids(...)`의 `recover-diag reactors src=... clean=...` 유지.
-  - NOD 덤프 `recover-diag nod=[...]` 유지.
-  - `preTitleSave=...` 바이섹션 유지.
+- `CreateNotabDetailDrawing(...)` 최종 `SaveAs` 직전에 `Autodesk_PNP` NOD 엔트리 제거 호출 추가.
+  - 호출 위치: `ConfigureNotabDetailViewport(...)` 이후, `detailDb.SaveAs(...)` 직전.
+  - 호출: `TryRemoveNotabPnpDictionary(detailDb)`
+- 신규 `TryRemoveNotabPnpDictionary(Database db)` 추가.
+  - `NamedObjectsDictionary`를 `OpenMode.ForWrite`로 열고 `nod.Contains("Autodesk_PNP")` 확인.
+  - 존재 시 `nod.GetAt("Autodesk_PNP")` 후 `nod.Remove("Autodesk_PNP")`.
+  - 제거된 객체는 가능한 경우 `Erase(true)` 시도. 실패해도 `FileDiag` 기록 후 SaveAs 진행.
+  - 로그: `PFSNOTABDETAIL pnp-purge before=<n> removed=<0|1> after=<n>`
+- 신규 `CountDictionaryEntries(DBDictionary dictionary)` 추가.
+  - pnp purge 전/후 NOD entry 수 계산용.
+- 기존 계측 유지.
+  - `recover-diag nod=[...]`
+  - `recover-diag preTitleSave=...`
+  - `recover-diag reactors src=... clean=...`
 
 ## 산출 파일
 - 수정: `PlantFlow_Support/Core/Commands.cs`
 - 수정: `.plans/REPORT.md`
-- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_reactor_api_fix`
+- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_pnp_purge`
 
 ## 검증
+- `pwd`: `D:\PlantFlow\PlantFlow_Support`
 - `git diff --check -- PlantFlow_Support/Core/Commands.cs`: PASS (CRLF 경고만 출력)
-- `rg RemovePersistentReactor`: no matches
-- `rg reactors(strip-skipped API-absent)/recover-diag reactors/preTitleSave/recover-diag nod`: PASS
-- 주변 코드 확인:
-  - `TryStripCleanSolidMetadata(...)`만 실질 수정.
-  - `CreateNotabDetailDrawing`/`CopyCleanNotabSolids`의 계측·바이섹션 무손상.
-- 빈 catch 추가 없음. 새/기존 catch는 `FileDiag` 기록.
+- `rg pnp-purge`: PASS
+- `rg recover-diag`: PASS
 - `dotnet build`: PASS
   - 오류 0개.
-  - 경고 15개는 HANDOFF 배경의 기존 경고 범주.
+  - 경고 15개는 기존 경고 범주.
+- 주변 코드 확인:
+  - `CreateNotabDetailDrawing(...)`의 최종 저장 직전만 호출 추가.
+  - `CreateIsoDetailDrawing`/`PFSVBISO*` 직접 변경 없음.
+  - 기존 recover 계측·preTitleSave 바이섹션 유지.
+- 빈 catch 추가 없음. 새 catch는 모두 `FileDiag` 기록.
 
 ## 라이브 검증
-1. `PFSNOTABDETAIL` 실행.
-2. 핵심 로그 확인:
-   - `PFSNOTABDETAIL recover-diag reactors src=Ns clean=Nc ...`
-   - `PFSNOTABDETAIL cleanSolid reactors(strip-skipped API-absent)=...`
-   - `PFSNOTABDETAIL recover-diag nod=[...]`
-   - `PFSNOTABDETAIL recover-diag preTitleSave=...`
-3. 분기:
-   - `src Ns > 0`: H0 사실 확정 → 다음 cycle F-A(`detailDb.Wblock()` 계열) 검토.
-   - `src Ns = 0`: H0 기각 → NOD/preTitleSave 로그로 H2 판정.
+1. 수동 로드 후 `PFSNOTABDETAIL` 실행.
+2. 기대 로그:
+   - `PFSNOTABDETAIL pnp-purge before=... removed=1 after=...`
+   - `PFSNOTABDETAIL saved path=..._notab.dwg`
+3. 판정:
+   - RECOVER 경고 소멸 → H1(`Autodesk_PNP` side-DB 주입) 근인 제거 완료.
+   - RECOVER 경고 잔존 → F-A(`detailDb.Wblock()` fresh DB 저장) 백스톱 검토.
