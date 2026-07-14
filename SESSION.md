@@ -1,6 +1,21 @@
 # SESSION — 현재 작업 상태
 
-_최종 갱신: 2026-07-14 (무탭 엔진 크래시 해결·세션 이관)_
+_최종 갱신: 2026-07-14 (★무탭 엔진 Main 라이브 PASS)_
+
+## ★★★ 무탭 엔진 Main — 라이브 PASS (2026-07-14, cycle 30 커밋 5efbf40)
+- **판정**: `PFSNOTABDETAIL` 라이브 실행 → `Details\GD1-001_notab.dwg` 열람 확인.
+  - Title Block 레이아웃: **A1 프레임 + 타이틀블록 정상**, 뷰포트 안 **파이프 원 + 서포트 직사각형이 2D 은선제거 투영**으로 배치. = 설계 북극성 Main 실물 실증.
+  - 모델 공간: 원본 3D 솔리드(소스, 정상). 열기 시 손상/누락 없음.
+- **의미**: 문서 0(무탭) 파이프라인으로 VIEWBASE/EXPORTLAYOUT/평면화 **3부채 없이 Main 정투영 생성 라이브 증명**. side-DB(평범 DB) Solid3d + Hidden 뷰포트 방식 확정.
+- **RECOVER = ★해결 완료(2026-07-14, cycle 37-H5, 커밋 d7897e5)**: 근인=누수 side Database. `NotabDetailCommand`의 `sourceDb`(side clone)가 `detailDb.SaveAs` 시점까지 미Dispose(finally라 저장 후)→다른 DB 저장 오염=RECOVER. 해결=`CopyCleanNotabSolids` 직후·SaveAs 전 `sourceDb.Dispose()`(ref 시그니처). 라이브 PASS=경고+크래시 없음. 근거=Autodesk 포럼 accepted solution(사용자 발견). cycle 30~36 detailDb 내부 가설(H0~H4) 전부 기각됐던 이유=근인이 외부 누수DB라 keyscan 미검출.
+  - ★크래시 주의: 헤드리스 side-DB `TileMode=0`+활성레이아웃(cycle37 D)=네이티브 크래시→원복(cycle 38). 페이퍼 초기화면(#1)은 안전방법 후속.
+- **레이아웃 정합 완료(cycle 37 A/B/C, 커밋 c432ae6)**: 뷰포트 fixedRect LL(30.5,84.5)·640.5×573.5·center(350.75,371.25), target=서포트중심(supportExt), scale=1:4.
+- **cycle 30 집도 내역**(커밋 5efbf40, `Core/Commands.cs`): A1 hard 좌표 `(0,0)~(841,594)`(`source=A1-hard`), `PlotSettingsValidator` A1 media 적용, 타이틀블록 clone 정규화(normalized=0), audit reflection(사장).
+- **다음**: N3(치수 3D→PSDCS 비연관, 최대리스크) → N4(밸룬/BOP/BOM=기존 AnnotateViewport 재사용) → N5(3부채 코드 소멸) + RECOVER polish.
+
+---
+
+_이전 갱신: 2026-07-14 (무탭 엔진 크래시 해결·세션 이관)_
 
 ## ★세션 요약 (2026-07-13~14) — 격리 치수 완성 → 별도 도면 → 무탭 엔진
 ### 1. 격리 치수/중복 (완료, 라이브 PASS)
