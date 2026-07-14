@@ -2447,6 +2447,7 @@ namespace PlantFlow_Support
         bool skipViewport = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_VIEWPORT"), "1", System.StringComparison.OrdinalIgnoreCase);
         bool viewportOk = false;
         int titleblockCloned = 0;
+        ObjectId layoutBtrId = ObjectId.Null;
         using (Transaction tr = detailDb.TransactionManager.StartTransaction())
         {
           ObjectId msId = this.GetModelSpaceId(detailDb, tr);
@@ -2458,10 +2459,33 @@ namespace PlantFlow_Support
           if (cloned == 0)
             throw new System.InvalidOperationException("cloned solid/extents 없음");
 
-          ObjectId layoutBtrId = this.EnsureNotabDetailLayout(detailDb, tr);
+          layoutBtrId = this.EnsureNotabDetailLayout(detailDb, tr);
           if (layoutBtrId == ObjectId.Null)
             throw new System.InvalidOperationException("detail layout 없음");
           this.TryConfigureNotabA1Layout(tr, layoutBtrId);
+
+          tr.Commit();
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL preTitle commit 완료");
+        }
+
+        string detailsDir = this.GetIsoDetailsDirectory();
+        if (string.IsNullOrWhiteSpace(detailsDir))
+          throw new System.InvalidOperationException("Details dir 없음");
+
+        System.IO.Directory.CreateDirectory(detailsDir);
+        savedPath = System.IO.Path.Combine(detailsDir, safeTag + "_notab.dwg");
+        if (System.IO.File.Exists(savedPath))
+          System.IO.File.Delete(savedPath);
+
+        this.LogNotabNamedObjectsDictionary(detailDb);
+        this.TrySaveNotabPreTitleProbe(detailDb, savedPath);
+
+        using (Transaction tr = detailDb.TransactionManager.StartTransaction())
+        {
+          layoutBtrId = this.GetNotabDetailLayoutBlockTableRecordId(detailDb, tr);
+          if (layoutBtrId == ObjectId.Null)
+            throw new System.InvalidOperationException("detail layout 없음");
+
           titleblockCloned = this.CloneTemplateTitleBlock2D(templatePath, detailDb, tr, layoutBtrId);
 
           if (skipViewport)
@@ -2482,15 +2506,7 @@ namespace PlantFlow_Support
         if (!skipViewport && viewportId != ObjectId.Null)
           this.ConfigureNotabDetailViewport(detailDb, viewportId, solidExt);
 
-        string detailsDir = this.GetIsoDetailsDirectory();
-        if (string.IsNullOrWhiteSpace(detailsDir))
-          throw new System.InvalidOperationException("Details dir 없음");
-
-        System.IO.Directory.CreateDirectory(detailsDir);
-        savedPath = System.IO.Path.Combine(detailsDir, safeTag + "_notab.dwg");
-        if (System.IO.File.Exists(savedPath))
-          System.IO.File.Delete(savedPath);
-        this.TryAuditNotabDetailDatabase(detailDb);
+        this.LogNotabNamedObjectsDictionary(detailDb);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         detailDb.SaveAs(savedPath, DwgVersion.Current);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
@@ -2755,63 +2771,66 @@ namespace PlantFlow_Support
       return normalized;
     }
 
-    private bool TryAuditNotabDetailDatabase(Database db)
+    private void LogNotabNamedObjectsDictionary(Database db)
     {
       if (db == null)
-        return false;
+        return;
 
       try
       {
-        System.Type auditInfoType = typeof(Database).Assembly.GetType("Autodesk.AutoCAD.DatabaseServices.AuditInfo");
-        if (auditInfoType == null)
+        using (Transaction tr = db.TransactionManager.StartTransaction())
         {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL audit skip: AuditInfo type 없음");
-          return false;
+          DBDictionary nod = tr.GetObject(db.NamedObjectsDictionaryId, OpenMode.ForRead, false) as DBDictionary;
+          if (nod == null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag nod=[]");
+            return;
+          }
+
+          System.Collections.Generic.List<string> keys = new System.Collections.Generic.List<string>();
+          foreach (DBDictionaryEntry entry in nod)
+          {
+            keys.Add(entry.Key);
+          }
+          keys.Sort(System.StringComparer.OrdinalIgnoreCase);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag nod=[" + string.Join(",", keys.ToArray()) + "]");
+          tr.Commit();
         }
-
-        object auditInfo = null;
-        System.Reflection.ConstructorInfo ctor = auditInfoType.GetConstructor(new System.Type[] { typeof(bool), typeof(bool) });
-        if (ctor != null)
-          auditInfo = ctor.Invoke(new object[] { true, false });
-        else
-          auditInfo = System.Activator.CreateInstance(auditInfoType);
-
-        System.Reflection.MethodInfo auditMethod = typeof(Database).GetMethod("Audit", new System.Type[] { auditInfoType });
-        if (auditMethod == null)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL audit skip: Database.Audit method 없음");
-          return false;
-        }
-
-        auditMethod.Invoke(db, new object[] { auditInfo });
-        string errors = this.GetReflectedPropertyValue(auditInfo, "NumErrors");
-        string fixes = this.GetReflectedPropertyValue(auditInfo, "NumFixes");
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL audit errors=" + errors + " fixes=" + fixes);
-        return true;
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL audit 예외: " + ex.GetType().Name + ": " + ex.Message);
-        return false;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag nod 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
     }
 
-    private string GetReflectedPropertyValue(object instance, string propertyName)
+    private void TrySaveNotabPreTitleProbe(Database db, string savedPath)
     {
-      if (instance == null || string.IsNullOrEmpty(propertyName))
-        return "n/a";
+      if (db == null || string.IsNullOrWhiteSpace(savedPath))
+        return;
 
+      string probePath = savedPath + ".pretitle.dwg";
       try
       {
-        System.Reflection.PropertyInfo property = instance.GetType().GetProperty(propertyName);
-        if (property == null)
-          return "n/a";
-        object value = property.GetValue(instance, null);
-        return value == null ? "null" : value.ToString();
+        if (System.IO.File.Exists(probePath))
+          System.IO.File.Delete(probePath);
+        db.SaveAs(probePath, DwgVersion.Current);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag preTitleSave=ok path=" + probePath);
       }
       catch (System.Exception ex)
       {
-        return "err:" + ex.GetType().Name;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag preTitleSave=warn:" + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        try
+        {
+          if (System.IO.File.Exists(probePath))
+            System.IO.File.Delete(probePath);
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag preTitleDelete=warn:" + ex.GetType().Name + ": " + ex.Message);
+        }
       }
     }
 
@@ -2904,6 +2923,9 @@ namespace PlantFlow_Support
             targetTr.AddNewlyCreatedDBObject(clean, true);
             if (layerId != ObjectId.Null)
               clean.LayerId = layerId;
+            int srcReactors = this.CountPersistentReactors(src, "src", solidId);
+            int cleanReactors = this.CountPersistentReactors(clean, "clean", clean.ObjectId);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag reactors src=" + srcReactors + " clean=" + cleanReactors + " id=" + solidId);
             this.TryStripCleanSolidMetadata(clean);
 
             Extents3d ext = clean.GeometricExtents;
@@ -2959,6 +2981,54 @@ namespace PlantFlow_Support
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid xdata strip skip: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      int removed = 0;
+      try
+      {
+        ObjectIdCollection reactorIds = solid.GetPersistentReactorIds();
+        if (reactorIds != null)
+        {
+          ObjectId[] ids = new ObjectId[reactorIds.Count];
+          for (int i = 0; i < reactorIds.Count; i++)
+            ids[i] = reactorIds[i];
+
+          foreach (ObjectId reactorId in ids)
+          {
+            try
+            {
+              solid.RemovePersistentReactor(reactorId);
+              removed++;
+            }
+            catch (System.Exception ex)
+            {
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid reactor strip skip reactor=" + reactorId + ": " + ex.GetType().Name + ": " + ex.Message);
+            }
+          }
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid reactor scan skip: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid reactors removed=" + removed + " id=" + solid.ObjectId);
+    }
+
+    private int CountPersistentReactors(DBObject obj, string label, ObjectId id)
+    {
+      if (obj == null)
+        return 0;
+
+      try
+      {
+        ObjectIdCollection reactorIds = obj.GetPersistentReactorIds();
+        return reactorIds == null ? 0 : reactorIds.Count;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL recover-diag reactors " + label + "=warn:" + ex.GetType().Name + ": " + ex.Message + " id=" + id);
+        return -1;
       }
     }
 

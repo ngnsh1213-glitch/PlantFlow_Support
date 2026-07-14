@@ -1,54 +1,52 @@
 # REPORT — Codex → Claude
 
-- cycle: 30
+- cycle: 31
 - status: done
 - commit: created (current HEAD)
 - target: `PlantFlow_Support/Core/Commands.cs`
 - build: not_run (빌드 수동 원칙)
 
 ## 변경 요약
-- `PFSNOTABDETAIL` 저장 직전 audit 호출 추가.
-  - 신규 `TryAuditNotabDetailDatabase(...)`
-  - `AuditInfo`/`Database.Audit`는 AutoCAD 버전 차이를 피하려고 reflection으로 호출.
-  - 로그: `PFSNOTABDETAIL audit errors=... fixes=...`
-- A1 레이아웃 설정 보강.
-  - `TryConfigureNotabA1Layout(...)`에서 `PlotSettingsValidator`로 A1 canonical media 탐색 후 적용 시도.
-  - 실패 시 `FileDiag` 후 계속.
-  - 로그: `PFSNOTABDETAIL A1 media=... plotArea=(0,0)~(841,594)`
-- viewport drawing-area를 Layout limits 의존에서 A1 hard 좌표로 전환.
-  - `CreateNotabDetailViewport(...)`의 plotArea 기준을 `(0,0)~(841,594)`로 고정.
-  - 이전 평범 DB 기본 limits `12x9` 영향 제거.
-  - 로그 source는 `A1-hard`.
-- 타이틀블록 2D clone 후 기본 리소스 보정 추가.
-  - 신규 `NormalizeNotabClonedTitleBlockEntities(...)`
-  - cloned entity의 `LayerId`/`LinetypeId`가 무효면 layer `0`, linetype `Continuous`로 보정.
-  - 로그: `PFSNOTABDETAIL titleblock clone normalized=N`
+- `PFSNOTABDETAIL` 저장 RECOVER 근인 판별용 계측 추가.
+  - `CopyCleanNotabSolids(...)`에서 `src`/`clean` persistent reactor 개수를 복제 직후 기록.
+  - 로그: `PFSNOTABDETAIL recover-diag reactors src=Ns clean=Nc id=<id>`
+  - `detailDb.NamedObjectsDictionary` 최상위 키를 pre-title 저장 전/최종 SaveAs 직전에 기록.
+  - 로그: `PFSNOTABDETAIL recover-diag nod=[...]`
+- 타이틀블록 clone 전 바이섹션 저장 추가.
+  - 솔리드+레이아웃 커밋 후 `<savedPath>.pretitle.dwg`로 임시 SaveAs를 시도하고 삭제.
+  - 로그: `PFSNOTABDETAIL recover-diag preTitleSave=ok|warn:<msg>`
+  - 원 산출물 경로는 유지.
+- H0 대비 저비용 F0 반영.
+  - `TryStripCleanSolidMetadata(...)`에서 persistent reactor를 순회 제거.
+  - 개별 제거 실패도 `FileDiag`로 남김.
+  - 로그: `PFSNOTABDETAIL cleanSolid reactors removed=N id=<id>`
+- cycle 30의 audit reflection 제거.
+  - `TryAuditNotabDetailDatabase(...)` 호출 삭제.
+  - `TryAuditNotabDetailDatabase(...)`, `GetReflectedPropertyValue(...)` 함수 삭제.
 
 ## 산출 파일
 - 수정: `PlantFlow_Support/Core/Commands.cs`
-- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_notab_a1_audit`
+- 수정: `.plans/REPORT.md`
+- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_recover_diag`
 
 ## 검증
 - `git diff --check -- PlantFlow_Support/Core/Commands.cs`: PASS (CRLF 경고만 출력)
-- `rg A1 media/A1-hard/TryAuditNotabDetailDatabase/audit errors/NormalizeNotabClonedTitleBlockEntities/titleblock clone normalized`: PASS
+- `rg recover-diag/cleanSolid reactors removed`: PASS
+- `rg TryAuditNotabDetailDatabase/GetReflectedPropertyValue`: no matches
 - 주변 코드 확인:
-  - `PFSNOTABDETAIL` 저장 경로 유지.
-  - 기존 `PFSVBISO*`, `CreateIsoDetailDrawing` 직접 수정 없음.
-  - viewport plotArea가 Layout limits를 읽지 않도록 변경 확인.
-- 빈 catch 없음.
+  - `CreateNotabDetailDrawing` 흐름은 솔리드+레이아웃 커밋 → pre-title 저장 계측 → 타이틀블록/뷰포트 커밋 → 최종 SaveAs.
+  - 기존 `PFSVBISO*`, `CreateIsoDetailDrawing` 직접 변경 없음(diff 범위 밖).
+- 빈 catch 추가 없음. 새 catch는 모두 `FileDiag` 기록.
 - 빌드/Plant3D 실행 검증은 지시대로 수행하지 않음.
-
-## 커밋 상태
-- 커밋 완료: `Align notab A1 layout and audit save`
-- stage 대상은 `PlantFlow_Support/Core/Commands.cs`, `.plans/REPORT.md`만 포함.
 
 ## 라이브 검증
 1. 수동 빌드 후 `PFSNOTABDETAIL` 실행.
 2. 기대 로그:
-   - `PFSNOTABDETAIL A1 media=... plotArea=(0,0)~(841,594)`
-   - `PFSNOTABDETAIL viewport 1차 생성 완료 ... source=A1-hard`
-   - `PFSNOTABDETAIL titleblock clone normalized=N`
-   - `PFSNOTABDETAIL audit errors=... fixes=...`
+   - `PFSNOTABDETAIL recover-diag reactors src=... clean=...`
+   - `PFSNOTABDETAIL cleanSolid reactors removed=...`
+   - `PFSNOTABDETAIL recover-diag nod=[...]`
+   - `PFSNOTABDETAIL recover-diag preTitleSave=...`
    - `PFSNOTABDETAIL saved path=..._notab.dwg`
-3. 저장 RECOVER 경고가 사라지는지 확인.
-4. 레이아웃 A1 프레임/은선 Main 배치가 맞는지 확인.
+3. RECOVER 경고 소멸 여부 확인.
+   - 소멸: H0(persistent reactor) 확정 가능성 높음.
+   - 잔존: `preTitleSave`/`nod` 로그로 H2(타이틀블록 clone/딕셔너리 반입) 재판정.
