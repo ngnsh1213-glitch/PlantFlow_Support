@@ -1160,6 +1160,22 @@ namespace PlantFlow_Support
         object val = Application.GetSystemVariable("PERSPECTIVE");
         object cmd = Application.GetSystemVariable("CMDNAMES");
         PlantOrthoView.FileDiag("PFSPERSPWATCH PERSPECTIVE -> " + (val == null ? "(null)" : val.ToString()) + " CMDNAMES='" + (cmd == null ? "" : cmd.ToString()) + "'");
+        // 스택 계측: SETVAR가 managed 리액터(우리/서드파티 .NET)에서 오는지 vs 네이티브 UI(뷰큐브 등)
+        // 에서 오는지 판별. managed 발원이면 프레임에 해당 타입/메서드가 찍히고, 네이티브면 이벤트
+        // 디스패치만 얕게 찍힌다. 앞 ~20프레임만 기록.
+        try
+        {
+          string st = System.Environment.StackTrace;
+          if (st != null)
+          {
+            string[] lines = st.Split('\n');
+            int take = System.Math.Min(20, lines.Length);
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            for (int i = 0; i < take; i++) sb.Append(lines[i].Trim()).Append(" | ");
+            PlantOrthoView.FileDiag("PFSPERSPWATCH stack: " + sb.ToString());
+          }
+        }
+        catch (System.Exception sx) { PlantOrthoView.FileDiag("PFSPERSPWATCH stack 예외: " + sx.GetType().Name); }
       }
       catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSPERSPWATCH 핸들러 예외: " + ex.GetType().Name + ": " + ex.Message); }
     }
