@@ -1038,7 +1038,7 @@ namespace PlantFlow_Support
       object savedPerspective = null;
       try { savedPerspective = Application.GetSystemVariable("PERSPECTIVE"); }
       catch (System.Exception px) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp 읽기 예외: " + px.GetType().Name + ": " + px.Message); }
-      PlantOrthoView.FileDiag("PFSNOTABDETAIL persp enter=" + (savedPerspective == null ? "(null)" : savedPerspective.ToString()));
+      PlantOrthoView.FileDiag("PFSNOTABDETAIL persp enter=" + (savedPerspective == null ? "(null)" : savedPerspective.ToString()) + " view={" + this.DescribeActiveViewPerspective(doc) + "}");
 
       Database sourceDb = null;
       try
@@ -1068,7 +1068,7 @@ namespace PlantFlow_Support
         try
         {
           object nowPerspective = Application.GetSystemVariable("PERSPECTIVE");
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL persp exit=" + (nowPerspective == null ? "(null)" : nowPerspective.ToString()) + " restore=" + (savedPerspective == null ? "(null)" : savedPerspective.ToString()));
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL persp exit=" + (nowPerspective == null ? "(null)" : nowPerspective.ToString()) + " restore=" + (savedPerspective == null ? "(null)" : savedPerspective.ToString()) + " view={" + this.DescribeActiveViewPerspective(doc) + "}");
           if (savedPerspective != null && !object.Equals(nowPerspective, savedPerspective))
           {
             Application.SetSystemVariable("PERSPECTIVE", savedPerspective);
@@ -1079,6 +1079,44 @@ namespace PlantFlow_Support
         }
         catch (System.Exception cx) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp 원복 예외: " + cx.GetType().Name + ": " + cx.Message); }
       }
+    }
+
+    // 활성 뷰포트의 '실제' Gs-뷰 상태를 문자열로 기술한다. PERSPECTIVE sysvar와 화면 표시가
+    // 어긋나는 케이스(수동 3DORBIT 잔존 등) 계측용. sysvar만으로는 실제 투영모드를 못 잡는다.
+    private string DescribeActiveViewPerspective(Document doc)
+    {
+      if (doc == null) return "doc=null";
+      try
+      {
+        using (ViewTableRecord vtr = doc.Editor.GetCurrentView())
+        {
+          if (vtr == null) return "vtr=null";
+          // ViewTableRecord은 perspective bool을 직접 노출 안 함 → 렌즈/방향/타깃으로 간접 계측.
+          // perspective 뷰는 통상 lens<=finite + target 거동이 parallel과 달라 값 차이로 식별.
+          return "lens=" + vtr.LensLength.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " dir=" + this.FormatVectorForCommand(vtr.ViewDirection) + " target=" + vtr.Target.ToString();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        return "예외:" + ex.GetType().Name;
+      }
+    }
+
+    // 독립 프로브: 아무 때나 호출해 PERSPECTIVE sysvar + 실제 뷰 perspective를 로그+화면에 찍는다.
+    // 3DORBIT/NETLOAD 전후로 실행해 어느 액션이 뷰를 뒤집는지 before/after 비교하는 데 쓴다.
+    [CommandMethod("PFSPERSPPROBE", CommandFlags.Session)]
+    public void PerspectiveProbeCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null) return;
+      object sv = null;
+      try { sv = Application.GetSystemVariable("PERSPECTIVE"); }
+      catch (System.Exception px) { PlantOrthoView.FileDiag("PFSPERSPPROBE sysvar 예외: " + px.GetType().Name + ": " + px.Message); }
+      string svStr = sv == null ? "(null)" : sv.ToString();
+      string viewStr = this.DescribeActiveViewPerspective(doc);
+      short tileMode = (short)Application.GetSystemVariable("TILEMODE");
+      PlantOrthoView.FileDiag("PFSPERSPPROBE PERSPECTIVE=" + svStr + " TILEMODE=" + tileMode + " view={" + viewStr + "}");
+      doc.Editor.WriteMessage("\nPFSPERSPPROBE PERSPECTIVE=" + svStr + " TILEMODE=" + tileMode + " view={" + viewStr + "}");
     }
 
     [CommandMethod("PFSNOTABBOXTEST", CommandFlags.Session)]
