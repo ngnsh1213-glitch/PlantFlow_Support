@@ -1119,6 +1119,51 @@ namespace PlantFlow_Support
       doc.Editor.WriteMessage("\nPFSPERSPPROBE PERSPECTIVE=" + svStr + " TILEMODE=" + tileMode + " view={" + viewStr + "}");
     }
 
+    // 실시간 감시기: PERSPECTIVE sysvar가 '바뀌는 순간'을 잡아 그때 실행 중인 명령(CMDNAMES)을
+    // 로그로 남긴다. "아무것도 안 했는데 켜진다"의 진짜 트리거(리액터/줌/뷰큐브/오픈 등)를 특정하기 위함.
+    // 토글: 첫 호출=on, 다시 호출=off.
+    private static bool s_perspWatchOn = false;
+    private static Autodesk.AutoCAD.ApplicationServices.SystemVariableChangedEventHandler s_perspWatchHandler = null;
+
+    [CommandMethod("PFSPERSPWATCH", CommandFlags.Session)]
+    public void PerspectiveWatchCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null) return;
+      if (s_perspWatchOn)
+      {
+        try
+        {
+          if (s_perspWatchHandler != null)
+            Autodesk.AutoCAD.ApplicationServices.Application.SystemVariableChanged -= s_perspWatchHandler;
+        }
+        catch (System.Exception ux) { PlantOrthoView.FileDiag("PFSPERSPWATCH off 예외: " + ux.GetType().Name + ": " + ux.Message); }
+        s_perspWatchOn = false;
+        s_perspWatchHandler = null;
+        PlantOrthoView.FileDiag("PFSPERSPWATCH off");
+        doc.Editor.WriteMessage("\nPFSPERSPWATCH off (감시 중지)");
+        return;
+      }
+      s_perspWatchHandler = new Autodesk.AutoCAD.ApplicationServices.SystemVariableChangedEventHandler(Commands.OnSysVarChangedForPersp);
+      Autodesk.AutoCAD.ApplicationServices.Application.SystemVariableChanged += s_perspWatchHandler;
+      s_perspWatchOn = true;
+      PlantOrthoView.FileDiag("PFSPERSPWATCH on");
+      doc.Editor.WriteMessage("\nPFSPERSPWATCH on (PERSPECTIVE 변경 감시 시작)");
+    }
+
+    private static void OnSysVarChangedForPersp(object sender, Autodesk.AutoCAD.ApplicationServices.SystemVariableChangedEventArgs e)
+    {
+      try
+      {
+        if (e == null || string.IsNullOrEmpty(e.Name)) return;
+        if (!string.Equals(e.Name, "PERSPECTIVE", System.StringComparison.OrdinalIgnoreCase)) return;
+        object val = Application.GetSystemVariable("PERSPECTIVE");
+        object cmd = Application.GetSystemVariable("CMDNAMES");
+        PlantOrthoView.FileDiag("PFSPERSPWATCH PERSPECTIVE -> " + (val == null ? "(null)" : val.ToString()) + " CMDNAMES='" + (cmd == null ? "" : cmd.ToString()) + "'");
+      }
+      catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSPERSPWATCH 핸들러 예외: " + ex.GetType().Name + ": " + ex.Message); }
+    }
+
     [CommandMethod("PFSNOTABBOXTEST", CommandFlags.Session)]
     public void NotabBoxTestCommand()
     {
