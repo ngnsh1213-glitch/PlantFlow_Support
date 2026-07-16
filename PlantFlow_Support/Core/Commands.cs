@@ -4774,7 +4774,9 @@ namespace PlantFlow_Support
 
         Type leaderType = leader.GetType();
         Type directionType = leaderType.Assembly.GetType("Autodesk.AutoCAD.DatabaseServices.LeaderDirectionType");
+        bool attachDirHorizontal = this.TrySetNotabTextAttachmentDirection(leader, "leader " + label, textPoint);
         string directionName = "LeftLeader";
+        TextAttachmentType attachType = (TextAttachmentType)6;
         if (directionType != null)
         {
           object leftLeader = Enum.Parse(directionType, directionName);
@@ -4782,7 +4784,7 @@ namespace PlantFlow_Support
             "SetTextAttachmentType",
             new Type[] { typeof(TextAttachmentType), directionType });
           if (method != null)
-            method.Invoke(leader, new object[] { (TextAttachmentType)6, leftLeader });
+            method.Invoke(leader, new object[] { attachType, leftLeader });
           else
             PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment skip: SetTextAttachmentType overload missing text=" + textPoint);
         }
@@ -4791,11 +4793,44 @@ namespace PlantFlow_Support
           PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment skip: LeaderDirectionType missing text=" + textPoint);
         }
 
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment dir=" + directionName + " dogleg=" + this.FormatNumber(dogleg) + " text=" + textPoint);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment attachDir=" + (attachDirHorizontal ? "Horizontal" : "skip") + " attachType=" + ((int)attachType).ToString(System.Globalization.CultureInfo.InvariantCulture) + " dir=" + directionName + " dogleg=" + this.FormatNumber(dogleg) + " text=" + textPoint);
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment 예외: " + ex.GetType().Name + ": " + ex.Message + " text=" + textPoint);
+      }
+    }
+
+    private bool TrySetNotabTextAttachmentDirection(object target, string label, Point3d textPoint)
+    {
+      if (target == null)
+        return false;
+
+      try
+      {
+        Type targetType = target.GetType();
+        Type directionType = targetType.Assembly.GetType("Autodesk.AutoCAD.DatabaseServices.TextAttachmentDirection");
+        if (directionType == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " attachDir skip: TextAttachmentDirection missing text=" + textPoint);
+          return false;
+        }
+
+        System.Reflection.PropertyInfo property = targetType.GetProperty("TextAttachmentDirection");
+        if (property == null || !property.CanWrite)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " attachDir skip: TextAttachmentDirection property missing text=" + textPoint);
+          return false;
+        }
+
+        object horizontal = Enum.Parse(directionType, "AttachmentHorizontal");
+        property.SetValue(target, horizontal, null);
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " attachDir 예외: " + ex.GetType().Name + ": " + ex.Message + " text=" + textPoint);
+        return false;
       }
     }
 
@@ -4812,7 +4847,20 @@ namespace PlantFlow_Support
 
         const string styleName = "ML_PIPETAG_85";
         if (dict.Contains(styleName))
-          return dict.GetAt(styleName);
+        {
+          ObjectId existingId = dict.GetAt(styleName);
+          try
+          {
+            MLeaderStyle existingStyle = tr.GetObject(existingId, OpenMode.ForWrite, false) as MLeaderStyle;
+            if (existingStyle != null)
+              this.TrySetNotabTextAttachmentDirection(existingStyle, "mleader style existing", Point3d.Origin);
+          }
+          catch (System.Exception sx)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL mleader style existing attachDir 예외: " + sx.GetType().Name + ": " + sx.Message);
+          }
+          return existingId;
+        }
 
         MLeaderStyle style = new MLeaderStyle();
         style.ArrowSymbolId = ObjectId.Null;
@@ -4821,6 +4869,7 @@ namespace PlantFlow_Support
         style.Scale = 1.0;
         style.ContentType = (ContentType)2;
         style.TextColor = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)3);
+        this.TrySetNotabTextAttachmentDirection(style, "mleader style new", Point3d.Origin);
         style.TextAttachmentType = (TextAttachmentType)6;
         dict.UpgradeOpen();
         ObjectId id = dict.SetAt(styleName, style);
