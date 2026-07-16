@@ -4611,12 +4611,16 @@ namespace PlantFlow_Support
         }
 
         double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
+        double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
+        double gap = arr + txt * 0.6;
         Point3d anchor = new Point3d(supportPaperExt.MaxPoint.X, supportPaperExt.MinPoint.Y + (supportPaperExt.MaxPoint.Y - supportPaperExt.MinPoint.Y) * 0.25, 0.0);
         Point3d elbow = new Point3d(supportPaperExt.MaxPoint.X + offset, anchor.Y - offset * 0.4, 0.0);
-        Point3d textPoint = new Point3d(elbow.X + offset * 1.5, elbow.Y, 0.0);
+        Point3d textPoint = new Point3d(elbow.X + gap, elbow.Y, 0.0);
         MText content = new MText();
         content.Contents = s_isoSupportDesignation;
         content.TextHeight = txt;
+        content.Attachment = AttachmentPoint.MiddleLeft;
+        content.Location = textPoint;
         if (textStyleId != ObjectId.Null)
           content.TextStyleId = textStyleId;
 
@@ -4627,11 +4631,28 @@ namespace PlantFlow_Support
           return;
         }
 
+        try
+        {
+          leader.TextLocation = textPoint;
+          leader.TextAlignmentType = (TextAlignmentType)0;
+          MText placed = leader.MText;
+          if (placed != null)
+          {
+            placed.Attachment = AttachmentPoint.MiddleLeft;
+            placed.Location = textPoint;
+            leader.MText = placed;
+          }
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout text placement 예외: " + ex.GetType().Name + ": " + ex.Message + " text=" + textPoint);
+        }
+
         if (layerId != ObjectId.Null)
           leader.LayerId = layerId;
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append designation=" + s_isoSupportDesignation + " anchor=" + anchor + " text=" + textPoint);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append designation=" + s_isoSupportDesignation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr));
       }
       catch (System.Exception ex)
       {
