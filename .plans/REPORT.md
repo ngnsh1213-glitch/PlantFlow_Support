@@ -20,4 +20,4 @@
 - 빌드는 프로젝트 규칙에 따라 사용자 명시 요청이 없어 실행하지 않음.
 
 ## 커밋
-- `82317bf` (`Fix notab callout leader attachment`)
+- 코드 반영 커밋: `a1cf13e` (`Fix notab callout leader attachment`)
