@@ -3,46 +3,48 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 47
+- **cycle**: 48
 - **status**: ready
 - **issued_at**: 2026-07-16
-- **title**: N3-0/N3-a — 무탭 뷰포트 스케일 표준화 + WCS→paper 투영 좌표 계측 (치수 미제도)
+- **title**: N3-b/c — 무탭 페이퍼공간 치수 제도(세로 높이 + 가로 총폭/pipeCenter 분할, 실측 mm override)
 - **target**: `PlantFlow_Support/Core/Commands.cs` (그 외 무수정)
 - **plan**: `<appDataDir>\scratch\plan_pfs_notab_n3_20260714.md` (★갱신 섹션)
 
 ## 착수 전
-- cwd `D:\PlantFlow\PlantFlow_Support`. `ConfigureNotabDetailViewport`/`CreateNotabDetailDrawing` 및 신규 투영 헬퍼만. 그 외 무수정.
+- cwd `D:\PlantFlow\PlantFlow_Support`. 무탭 치수 append 신규 메서드 + 진입점만. 그 외 무수정.
 - 빌드 GREEN(MSBuild Debug, 에러0)까지 Codex 확인. 라이브는 사용자.
-- **이번 사이클은 계측 우선 — 치수는 그리지 않는다.** 스케일 표준화 + 페이퍼 좌표 로그까지만.
 
-## 배경
-N3(치수)는 최대 리스크라 계측 선행. 뷰포트는 cycle43 이후 동적 피팅(ViewCenter=(0,0), ViewHeight 계산, **CustomScale 미설정**). 사용자가 **스케일 과대(~1:1.4, 프레임 87%)로 치수·콜아웃 공간 부족** 지적. §9 확정: 유효스케일=`vp.Height/vp.ViewHeight`, `CustomScale` 명시 세팅해야 투영 정합.
+## 배경 — 투영 검증 완료(cycle47)
+cycle47 dim-probe로 서포트의 **페이퍼 좌표**(support-paper rect, pipeCenterX) 정확 산출 검증됨(중심=vpCenter, 크기=실측×배율). 스케일 표준화(1:5 등)+여백도 확정(9893b5b). 이제 그 좌표로 **페이퍼공간에 비연관 치수 제도**.
 
-## 요구 A — N3-0: 스케일 표준화 + CustomScale 명시
-`ComputeNotabViewportFit`(~3924) 또는 `ConfigureNotabDetailViewport`(~3828)에서:
-1. 동적으로 산출한 최소 `viewHeight`(content*(1+pad) 기반)를 **표준배율로 라운딩**: 후보 배율 목록 `{1, 1/2, 1/5, 1/10, 1/20, 1/25, 1/50}`(scale=paper/model) 중, **content가 주석 여백 포함해 뷰포트에 들어가는 가장 큰(=도형이 너무 작지 않은) 표준배율** 선택.
-   - 주석 여백: content가 뷰포트의 **약 55~65%**만 차지하도록(치수선·콜아웃 공간). 즉 `요구 model 크기 = content / 0.6` 정도를 담는 표준배율.
-   - 환경변수 `PFS_NOTAB_TARGET_FILL`(기본 0.6)로 조정.
-2. 선택 표준배율 `stdScale`로 `viewHeight = vpPaperHeight / stdScale` 재설정, `vp.CustomScale = stdScale` **명시 세팅**. (ViewHeight/CustomScale 이중 세팅 정합 주의 — 최종적으로 `vp.CustomScale=stdScale`, `vp.ViewHeight=vpHeight/stdScale` 일관.)
-3. 로그 `PFSNOTABDETAIL viewport scale std=1:<1/stdScale> viewHeight=.. fill=.. content=(W,H) vp=(w,h)`.
+## 재사용 자산 (신규 최소화)
+- 드로잉 구조: `AppendIsoBoundingDimensions`(6039, 특히 6068-6135) = 가로총폭(text=realW)+pipeCenter 분할 left/right+세로(text=realH), 각 `RotatedDimension` + `DimensionText` override + `AppendEntity`. **이 구조를 페이퍼 좌표 인자 버전으로 이식**.
+- 투영: `NotabProjectWcsToPaper`(4051), `LogNotabDimProbe`(4007)의 좌표 계산(4017 supportExt 8코너 투영→paperExt, 4034 support center→pipeCenterX). → **`TryComputeNotabDimPaperGeometry(vp, supportExt, out Extents3d paperExt, out double pipeCenterXPaper)`로 분리**(LogNotabDimProbe는 이 헬퍼 호출로 로그 유지).
+- 리소스: `EnsureIsoAnnotationResources(detailDb, tr, out layerId, out textStyleId, out dimStyleId)`(5991) = AUTO_DIM 레이어+RMS_85 텍스트+STANDARD dimstyle.
+- 레이아웃 BTR: `GetNotabDetailLayoutBlockTableRecordId`(2899) → ForWrite.
+- 실측 텍스트값: 전역 `s_isoRealWidth/Height`(CaptureIsoSelectionMetrics 5851 세팅). **fitWidth/fitHeight(fit content)와 혼동 금지 — 텍스트값은 실측 realW/realH.**
 
-## 요구 B — N3-a: WCS→paper 투영 헬퍼 이식 + 좌표 계측 (치수 미제도)
-`ViewportProjection`(Ortho/OrthoViewportManager.cs:171-218)은 `private sealed`라 재사용 불가 → **동일 로직을 Commands.cs에 이식**:
-1. 헬퍼 `NotabProjectWcsToPaper(Viewport vp, Point3d wcs) → Point3d paper`:
-   - `dcsToWcs = Matrix3d.Rotation(-vp.TwistAngle, viewDir, vp.ViewTarget) * Matrix3d.Displacement(vp.ViewTarget - Point3d.Origin) * Matrix3d.PlaneToWorld(viewDir)` (viewDir=vp.ViewDirection, 퇴화 시 ZAxis). `wcsToDcs = dcsToWcs.Inverse()`.
-   - `dcs = wcs.TransformBy(wcsToDcs)`; `scale = vp.CustomScale`(N3-0서 세팅) 또는 `vp.Height/vp.ViewHeight`; `paperX = vp.CenterPoint.X + (dcs.X - vp.ViewCenter.X)*scale`; `paperY = 동일 Y`. return (paperX,paperY,0).
-2. `ConfigureNotabDetailViewport` 커밋 후(뷰 설정 확정된 vp로), **서포트 extents(supportExt) 8코너 + pipeCenter(=supportExt 중심 또는 파이프 solid 중심)를 페이퍼 투영** → paper rect(minX/maxX/minY/maxY)·pipeCenterX(paper) 산출.
-3. 로그 `PFSNOTABDETAIL dim-probe support-paper=(minX,minY)~(maxX,maxY) pipeCenterX(paper)=.. realW=.. realH=.. scale=.. vpCenter=.. vpTarget=..`.
-   - **치수는 그리지 않는다.** 이 좌표가 라이브에서 뷰포트 도형(원+사각형)과 정렬되는지 육안+로그로 검증하는 게 목적.
+## 요구 — AppendNotabPaperDimensions
+1. **신규 메서드** `AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, double pipeCenterXPaper, double realW, double realH, ObjectId dimStyleId, ObjectId layerId)`:
+   - `AppendIsoBoundingDimensions` 6068-6135 드로잉 구조 복제하되 **좌표=supportPaperExt(페이퍼)**, **분할=pipeCenterXPaper**, **텍스트 override=realW/realH**(가로 분할은 pipeCenter 비율로 leftReal/rightReal).
+   - 가로 총폭(supportPaperExt 상/하 밖), pipeCenter 분할 left/right, 세로 높이(supportPaperExt 좌/우 밖). 각 `DimensionStyle=dimStyleId`, `LayerId=layerId`, `layoutBtr.AppendEntity`+`AddNewlyCreatedDBObject`.
+2. **★치수 크기 = 페이퍼 고정(핵심 보정)**: 기존 `ComputeIsoDimensionSize`(=max(realW,realH)/12≈50mm)는 평면화 1:1용 → **페이퍼(1:5) 도형엔 과대**. 대신 **페이퍼 표준 고정 크기**: 문자높이 `PFS_NOTAB_DIM_TXT`(기본 2.5mm), Dimasz≈문자×1.6, Dimexe/Dimexo≈1.5, Dimgap≈0.6×문자. `ApplyIsoDimensionOverrides` 유사 override를 **고정 mm**로. Dimscale=1(페이퍼 1:1).
+3. **오프셋 배치(겹침 방지, §9 e)**: 치수선을 supportPaperExt **밖**에 페이퍼 mm 적층. 안쪽 치수=도형에서 `3×문자`, 바깥 적층 간격=`2.5×문자`. env `PFS_NOTAB_DIM_OFFSET`(기본=문자×3). 작은치수 안쪽/전체 바깥, 교차 금지. 뷰포트(도형) 위로 겹치지 않게.
+4. **진입점**: `ConfigureNotabDetailViewport(...)` 반환 후(뷰 확정), `SaveAs`(2851-2852) **직전**에 새 트랜잭션:
+   - `EnsureIsoAnnotationResources(detailDb,...)` → dimStyleId/layerId.
+   - `TryComputeNotabDimPaperGeometry(vp, supportExt, out paperExt, out pipeCenterXPaper)`.
+   - `layoutBtr=GetNotabDetailLayoutBlockTableRecordId(detailDb)` ForWrite.
+   - `AppendNotabPaperDimensions(tr, layoutBtr, paperExt, pipeCenterXPaper, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId)`. commit.
+5. 로그 `PFSNOTABDETAIL dim append H=realW V=realH split(L,R) paperExt=.. txt=.. offset=..`.
 
 ## 방어/보존
-- 투영/행렬 try/catch+FileDiag(빈 catch 금지). viewDir 퇴화·CustomScale 0 방어(0이면 Height/ViewHeight 폴백).
-- 클립·held-pipe·persp가드·wireframe·610×489 **무수정**. 이번 변경은 스케일 표준화 + 투영 계측만(치수 없음).
-- supportExt는 `CopyCleanNotabSolids` out으로 이미 있음 → `CreateNotabDetailDrawing`서 투영 단계로 전달.
+- 모든 append/투영 try/catch+FileDiag(빈 catch 금지). paperExt 퇴화·realW/H≤0·pipeCenter 범위밖(분할 skip, §기존 6120 폴백 유지) 방어.
+- 클립·held-pipe·스케일·persp가드·wireframe·610×489 **무수정**. dim-probe 로그도 유지(TryCompute로 분리).
+- 비연관(정의점 스냅샷)이라 detailDb는 저장 산출물=frozen → 문제없음(§9 c).
 
 ## 검증
 - MSBuild Debug GREEN. 변경 주변 20줄 수동 확인.
-- 라이브(RC1-001): 로그 `viewport scale std=1:N`(표준배율), `dim-probe support-paper=.. pipeCenterX=..`. 육안: 스케일 낮아져 도형 작아지고 **주석 여백 확보**, 투영 좌표가 도형과 정렬(다음 N3-b 치수 제도 전제). 어긋나면 좌표 로그로 매핑 교정.
+- 라이브(RC1-001): 로그 `dim append ..`. 육안: **세로 높이(=realH)·가로 총폭(=realW)·pipeCenter 분할 치수가 뷰포트 서포트에 정렬**되고 문자 크기가 페이퍼 적정(과대X)·겹침 없음. env `PFS_NOTAB_DIM_TXT`/`PFS_NOTAB_DIM_OFFSET` 조정.
 
 ## 참고
-- 다음 단계(별도 사이클): N3-b(세로 치수 제도)→N3-c(가로 분할). 치수 헬퍼=AnnotationUtils.cs:29-39/58-68, 텍스트 override 패턴=Commands.cs:5957/5980/6009, DimStyle=참조 OrthoViewportManager:180-192(Dimscale=1).
+- cycle47 커밋 cfa1fb7(투영 계측). 텍스트 override 패턴 6077/6100/6111/6129. DimStyle=STANDARD(EnsureIsoAnnotationResources).
