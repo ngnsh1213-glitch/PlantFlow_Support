@@ -6255,6 +6255,26 @@ namespace PlantFlow_Support
       }
     }
 
+    private class NotabPipeIncludeCandidate
+    {
+      public NotabPipeIncludeCandidate(ObjectId id, double score, string projectionLog, double tolerance, double radius, string lineNo)
+      {
+        this.Id = id;
+        this.Score = score;
+        this.ProjectionLog = projectionLog == null ? string.Empty : projectionLog;
+        this.Tolerance = tolerance;
+        this.Radius = radius;
+        this.LineNo = lineNo == null ? string.Empty : lineNo;
+      }
+
+      public ObjectId Id;
+      public double Score;
+      public string ProjectionLog;
+      public double Tolerance;
+      public double Radius;
+      public string LineNo;
+    }
+
     private double ComputeIsoDimensionSize()
     {
       double baseSize = System.Math.Max(System.Math.Abs(s_isoRealWidth), System.Math.Abs(s_isoRealHeight));
@@ -6435,6 +6455,7 @@ namespace PlantFlow_Support
           BlockTableRecord ms = msId == ObjectId.Null ? null : tr.GetObject(msId, OpenMode.ForRead) as BlockTableRecord;
           int addedPipe = 0, addedSup = 0;
           int pipeCand = 0, pipeIncl = 0, pipeDropLine = 0, pipeDropDist = 0, pipeDropNoTag = 0, pipeFallback = 0;
+          System.Collections.Generic.List<NotabPipeIncludeCandidate> pipeIncludes = new System.Collections.Generic.List<NotabPipeIncludeCandidate>();
           if (ms != null)
           {
             foreach (ObjectId eid in ms)
@@ -6477,13 +6498,18 @@ namespace PlantFlow_Support
                 double radius;
                 if (this.TryGetPipeAxisFromId(tr, eid, ps, out p0, out dir, out radius))
                 {
-                  double distance = this.DistancePointToPipeAxis(supCenter, p0, dir);
                   double tol = radius + contactAllowance;
-                  includePipe = distance <= tol;
+                  double score;
+                  string projectionLog;
+                  includePipe = this.DoesPipeAxisProjectThroughSupport(anchor, p0, dir, tol, out score, out projectionLog);
                   if (!includePipe)
                   {
                     pipeDropDist++;
-                    PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe dropDist id=" + eid + " d=" + this.FormatNumber(distance) + " tol=" + this.FormatNumber(tol) + " radius=" + this.FormatNumber(radius) + " line=" + pipeTag);
+                    PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe dropDist id=" + eid + " " + projectionLog + " tol=" + this.FormatNumber(tol) + " radius=" + this.FormatNumber(radius) + " line=" + pipeTag);
+                  }
+                  else
+                  {
+                    pipeIncludes.Add(new NotabPipeIncludeCandidate(eid, score, projectionLog, tol, radius, pipeTag));
                   }
                 }
                 else
@@ -6496,15 +6522,14 @@ namespace PlantFlow_Support
                     pipeDropDist++;
                     PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe dropFallback id=" + eid + " d=" + this.FormatNumber(distance) + " tol=" + this.FormatNumber(contactAllowance) + " line=" + pipeTag);
                   }
+                  else
+                  {
+                    pipeIncludes.Add(new NotabPipeIncludeCandidate(eid, distance, "fallback d=" + this.FormatNumber(distance), contactAllowance, 0.0, pipeTag));
+                  }
                 }
 
                 if (!includePipe)
                   continue;
-
-                existing.Add(eid);
-                result.Add(eid);
-                addedPipe++;
-                pipeIncl++;
               }
               else if (isSup)
               {
@@ -6517,6 +6542,29 @@ namespace PlantFlow_Support
               {
                 PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include otherPart class=" + cls + " (미포함)");
               }
+            }
+          }
+
+          if (pipeIncludes.Count > 0)
+          {
+            NotabPipeIncludeCandidate best = pipeIncludes[0];
+            for (int i = 1; i < pipeIncludes.Count; i++)
+            {
+              if (pipeIncludes[i].Score < best.Score)
+                best = pipeIncludes[i];
+            }
+
+            existing.Add(best.Id);
+            result.Add(best.Id);
+            addedPipe++;
+            pipeIncl = 1;
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe include id=" + best.Id + " score=" + this.FormatNumber(best.Score) + " " + best.ProjectionLog + " tol=" + this.FormatNumber(best.Tolerance) + " radius=" + this.FormatNumber(best.Radius) + " line=" + best.LineNo + " passCount=" + pipeIncludes.Count);
+            for (int i = 0; i < pipeIncludes.Count; i++)
+            {
+              if (pipeIncludes[i].Id == best.Id)
+                continue;
+              pipeDropDist++;
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe dropAmbiguous id=" + pipeIncludes[i].Id + " score=" + this.FormatNumber(pipeIncludes[i].Score) + " " + pipeIncludes[i].ProjectionLog + " best=" + best.Id);
             }
           }
           tr.Commit();
@@ -6700,6 +6748,89 @@ namespace PlantFlow_Support
       Vector3d v = point - p0;
       Vector3d perpendicular = v - n.MultiplyBy(v.DotProduct(n));
       return perpendicular.Length;
+    }
+
+    private bool DoesPipeAxisProjectThroughSupport(Extents3d supportExt, Point3d p0, Vector3d dir, double tol, out double score, out string projectionLog)
+    {
+      score = double.MaxValue;
+      projectionLog = string.Empty;
+      try
+      {
+        if (dir.Length <= 1e-6)
+        {
+          projectionLog = "projection skip: dir degenerate";
+          return false;
+        }
+
+        Vector3d axis = dir.GetNormal();
+        Vector3d right = axis.CrossProduct(Vector3d.ZAxis);
+        if (right.Length <= 1e-6)
+          right = axis.CrossProduct(Vector3d.YAxis);
+        if (right.Length <= 1e-6)
+        {
+          projectionLog = "projection skip: right degenerate";
+          return false;
+        }
+        right = right.GetNormal();
+
+        Vector3d up = axis.CrossProduct(right);
+        if (up.Length <= 1e-6)
+        {
+          projectionLog = "projection skip: up degenerate";
+          return false;
+        }
+        up = up.GetNormal();
+
+        double minR = 0.0, maxR = 0.0, minU = 0.0, maxU = 0.0;
+        bool hasProjection = false;
+        foreach (Point3d corner in this.GetExtentsCorners(supportExt))
+        {
+          Vector3d v = corner.GetAsVector();
+          double r = v.DotProduct(right);
+          double u = v.DotProduct(up);
+          if (!hasProjection)
+          {
+            minR = maxR = r;
+            minU = maxU = u;
+            hasProjection = true;
+          }
+          else
+          {
+            if (r < minR) minR = r;
+            if (r > maxR) maxR = r;
+            if (u < minU) minU = u;
+            if (u > maxU) maxU = u;
+          }
+        }
+
+        if (!hasProjection)
+        {
+          projectionLog = "projection skip: support corners none";
+          return false;
+        }
+
+        double pr = p0.GetAsVector().DotProduct(right);
+        double pu = p0.GetAsVector().DotProduct(up);
+        double centerR = (minR + maxR) / 2.0;
+        double centerU = (minU + maxU) / 2.0;
+        double dr = pr - centerR;
+        double du = pu - centerU;
+        score = System.Math.Sqrt((dr * dr) + (du * du));
+        bool inside = pr >= minR - tol && pr <= maxR + tol && pu >= minU - tol && pu <= maxU + tol;
+        projectionLog = "rect=(" + this.FormatSignedNumber(minR) + "," + this.FormatSignedNumber(maxR) + "," + this.FormatSignedNumber(minU) + "," + this.FormatSignedNumber(maxU) + ") p0proj=(" + this.FormatSignedNumber(pr) + "," + this.FormatSignedNumber(pu) + ")";
+        return inside;
+      }
+      catch (System.Exception ex)
+      {
+        projectionLog = "projection 예외: " + ex.GetType().Name + ": " + ex.Message;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include projection 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private string FormatSignedNumber(double value)
+    {
+      return value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private double DistancePointToExtents(Point3d point, Extents3d ext)
