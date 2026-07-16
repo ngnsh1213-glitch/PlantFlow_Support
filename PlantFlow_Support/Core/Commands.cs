@@ -4536,6 +4536,7 @@ namespace PlantFlow_Support
         string dimVText = string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? this.FormatNumber(realH) : s_isoSupportProfileHeight;
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, realH, txt, "dimV", dimVText);
         this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt);
+        this.AppendNotabPipeCallout(tr, layoutBtr, db, textStyleId, layerId, pipeCenterXPaper, pipeCenterYPaper, supportPaperExt, txt);
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(supportType) ? "unknown" : supportType) + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
@@ -4614,8 +4615,15 @@ namespace PlantFlow_Support
         double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         double gap = arr + txt * 0.6;
         double h = supportPaperExt.MaxPoint.Y - supportPaperExt.MinPoint.Y;
-        Point3d anchor = new Point3d(supportPaperExt.MaxPoint.X, supportPaperExt.MinPoint.Y + h * 0.55, 0.0);
-        Point3d elbow = new Point3d(supportPaperExt.MaxPoint.X + offset * 2.0, supportPaperExt.MinPoint.Y + h * 0.10, 0.0);
+        double vScale = s_isoRealHeight > 1e-6 ? h / s_isoRealHeight : 0.0;
+        double barRealH;
+        double barPaperH = h * 0.4;
+        if (double.TryParse(s_isoSupportProfileHeight, out barRealH) && barRealH > 1e-6 && vScale > 0.0)
+          barPaperH = barRealH * vScale;
+        if (barPaperH <= 1e-6 || barPaperH > h)
+          barPaperH = h * 0.4;
+        Point3d anchor = new Point3d(supportPaperExt.MaxPoint.X, supportPaperExt.MinPoint.Y + barPaperH * 0.5, 0.0);
+        Point3d elbow = new Point3d(supportPaperExt.MaxPoint.X + offset * 3.0, supportPaperExt.MinPoint.Y + barPaperH * 0.15, 0.0);
         Point3d textPoint = new Point3d(elbow.X + gap, elbow.Y, 0.0);
         MText content = new MText();
         content.Contents = s_isoSupportDesignation;
@@ -4653,11 +4661,93 @@ namespace PlantFlow_Support
           leader.LayerId = layerId;
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append designation=" + s_isoSupportDesignation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr));
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append designation=" + s_isoSupportDesignation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr));
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append 예외: " + ex.GetType().Name + ": " + ex.Message + " designation=" + s_isoSupportDesignation);
+      }
+    }
+
+    private void AppendNotabPipeCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, double pipeCenterXPaper, double pipeCenterYPaper, Extents3d supportPaperExt, double txt)
+    {
+      if (tr == null || layoutBtr == null || db == null)
+        return;
+
+      string pln = string.IsNullOrWhiteSpace(s_isoPipeLineNo) ? string.Empty : s_isoPipeLineNo.Trim();
+      string bop = string.IsNullOrWhiteSpace(s_isoBOP) ? string.Empty : s_isoBOP.Trim();
+      if (string.IsNullOrWhiteSpace(pln) && string.IsNullOrWhiteSpace(bop))
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout skip: PLN/BOP empty");
+        return;
+      }
+
+      try
+      {
+        ObjectId mlStyleId = this.EnsureNotabMLeaderStyle(db, tr);
+        if (mlStyleId == ObjectId.Null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout skip: mleader style null PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop));
+          return;
+        }
+
+        double minX = supportPaperExt.MinPoint.X;
+        double maxX = supportPaperExt.MaxPoint.X;
+        double maxY = supportPaperExt.MaxPoint.Y;
+        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
+        double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
+        double gap = arr + txt * 0.6;
+        Point3d anchor = (!double.IsNaN(pipeCenterXPaper) && !double.IsNaN(pipeCenterYPaper))
+          ? new Point3d(pipeCenterXPaper, pipeCenterYPaper, 0.0)
+          : new Point3d((minX + maxX) / 2.0, maxY, 0.0);
+        double elbowX = double.IsNaN(pipeCenterXPaper) ? anchor.X : pipeCenterXPaper;
+        Point3d elbow = new Point3d(elbowX, maxY + offset, 0.0);
+        Point3d textPoint = new Point3d(elbow.X + gap, elbow.Y, 0.0);
+        string contents = pln;
+        if (!string.IsNullOrWhiteSpace(bop))
+          contents = string.IsNullOrWhiteSpace(contents) ? "B.O.P +" + bop : contents + "\\P" + "B.O.P +" + bop;
+
+        MText content = new MText();
+        content.Contents = contents;
+        content.TextHeight = txt;
+        content.Attachment = AttachmentPoint.MiddleLeft;
+        content.Location = textPoint;
+        if (textStyleId != ObjectId.Null)
+          content.TextStyleId = textStyleId;
+
+        MLeader leader = PSUtil.CreateMLeader(new Point3d[] { anchor, elbow, textPoint }, content, mlStyleId, Matrix3d.Identity);
+        if (leader == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout skip: CreateMLeader null PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop));
+          return;
+        }
+
+        try
+        {
+          leader.TextLocation = textPoint;
+          leader.TextAlignmentType = (TextAlignmentType)0;
+          MText placed = leader.MText;
+          if (placed != null)
+          {
+            placed.Attachment = AttachmentPoint.MiddleLeft;
+            placed.Location = textPoint;
+            leader.MText = placed;
+          }
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout text placement 예외: " + ex.GetType().Name + ": " + ex.Message + " text=" + textPoint);
+        }
+
+        if (layerId != ObjectId.Null)
+          leader.LayerId = layerId;
+        layoutBtr.AppendEntity(leader);
+        tr.AddNewlyCreatedDBObject(leader, true);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop) + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append 예외: " + ex.GetType().Name + ": " + ex.Message + " PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop));
       }
     }
 
