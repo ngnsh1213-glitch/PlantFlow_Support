@@ -1,6 +1,19 @@
 # SESSION — 현재 작업 상태
 
-_최종 갱신: 2026-07-16 (무탭 뷰포트 품질 트랙 완결: 와이어프레임·클립·held-pipe 선택, 다음=N3 치수)_
+_최종 갱신: 2026-07-16 (★N3 치수 핵심 완성: 스케일표준화·투영·치수제도·배관참조. 사용자 全타입 테스트 중. 다음=N4)_
+
+## ★★ N3 무탭 치수 핵심 완성 (2026-07-16, 커밋 cfa1fb7~9576258 = cycle 47~49 + 9893b5b) — 라이브 PASS
+페이퍼공간에 서포트 치수를 비연관으로 직접 제도. 사용자가 이제 **全 서포트 타입 테스트 예정**. 다음 트랙 = **N4(밸룬/라인번호·BOP 콜아웃/BOM)**.
+- **N3-0 스케일 표준화(cfa1fb7, 9893b5b)**: 동적 피팅→표준배율 라운딩(1:1/2/5/10…) + 주석여백. `PFS_NOTAB_TARGET_FILL`(기본0.4=프레임~여백충분). `vp.CustomScale` 명시(투영 정합). RC1=1:5, GD1=1:2. 사용자 "스케일 과대" 해소.
+- **N3-a 투영(cfa1fb7)**: `ViewportProjection`(Ortho, private sealed) 로직 이식 `NotabProjectWcsToPaper`=WCS→paper. 검증: support-paper 중심=vpCenter, 크기=실측×배율. 유효스케일=`vp.Height/vp.ViewHeight`.
+- **N3-b/c 치수 제도(dbb87bf)**: `AppendIsoBoundingDimensions` 구조 재사용, 좌표원천=투영 페이퍼. 가로 총폭·pipeCenter 분할·세로 높이, 텍스트=실측mm override. **★크기=페이퍼 고정(Dimtxt 2.5mm, `PFS_NOTAB_DIM_TXT`)** — 기존 ComputeIsoDimensionSize(real/12≈50mm)는 페이퍼 과대라 회피. Title Block 레이아웃 append, `EnsureIsoAnnotationResources`.
+- **배관 참조 규칙(9576258)**: (1) 가로 분할=**실제 배관중심 X**(서포트중심 아님. `s_isoPipeCenterWcs`=held-pipe p0 전역 캡처→투영). (2) 가로 치수를 **배관 근접 쪽 상/하단** 배치(pipeCenterY<centerY→하단). 세로는 좌측 유지. 라이브 `split=(350,100) side=bottom` 정답. 분할 경계 가드(한쪽<최소→총폭만). 타입 하드코딩 아닌 기하 규칙.
+- **핵심 교훈**: 치수 배치는 타입별 하드코딩 대신 **배관 위치 기하 규칙**(중심 분할·근접 쪽 배치)이 보편. 페이퍼 치수는 뷰포트 스케일 무관 **고정 mm 크기**(Dimscale=1). 비연관=정의점 스냅샷(detailDb frozen). [[pfs-support-held-pipe-bop]]
+- **잔여(N4/후속)**: 밸룬·라인번호/BOP 콜아웃·BOM(기존 AnnotateViewport·SPInfo.AttachmentList 재사용). 全타입 테스트서 나오는 엣지(배관 없는 서포트·특이 형상) 대응.
+
+---
+
+_이전 갱신: 2026-07-16 (무탭 뷰포트 품질 트랙 완결: 와이어프레임·클립·held-pipe 선택)_
 
 ## ★ 무탭 뷰포트 품질 트랙 완결 (2026-07-16, 커밋 999e1f9~b0e5c71 = cycle 43~46) — 라이브 PASS
 추출물 품질 리뷰 3건(비주얼스타일·영역클립·초점)에서 출발해 아래 순차 완결. 다음 트랙 = **N3(치수)**.

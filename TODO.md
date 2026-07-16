@@ -16,10 +16,11 @@ _완료 항목은 여기서 지우고 `CHANGELOG.md`로 옮긴다._
 - [x] 무탭 뷰포트 와이어프레임 기본화(Phase1, 999e1f9). Hidden=PFS_NOTAB_USE_HIDDEN opt-in
 - [x] 무탭 서포트 영역 클립+동적피팅(cycle43, f5473d8): Solid3d Boolean로 관통 파이프 길이 트림+콘텐츠 피팅
 - [x] 무탭 held-pipe 선택=서포트 BOP 표고 매칭(cycle44~46, b0e5c71): 같은 라인 평행 배관 중 잡는 배관만. 라이브 PASS
-- [ ] **[N3 입력] 무탭 동적피팅 스케일 표준화**: 현재 ~1:1.4(비표준·과대, 프레임 87%)→치수선·라인번호/BOP 콜아웃 공간 부족. 표준스케일(1:2/5/10) 라운딩+주석 여백. N3 주석 footprint와 함께 설계
-- [ ] **[별도 트랙] 무탭 2D 평면화 결정**: 뷰포트 유지 vs 진짜 2D 선요소(클립된 solid에 FLATSHOT). N3 설계와 함께 재검토
-- [ ] **N3 치수**: 3D 실측 -> PSDCS 비연관, Main에만 (최대 리스크, 다음). 계획=plan_pfs_notab_n3_20260714.md. ★스케일 표준화+주석여백을 핵심 입력으로
-- [ ] N4(밸룬/BOP/BOM=AnnotateViewport 재사용) -> N5(3부채 코드 소멸)
+- [x] 무탭 스케일 표준화(cycle47, cfa1fb7): 동적→표준배율 라운딩+주석여백. PFS_NOTAB_TARGET_FILL 0.4
+- [x] **N3 치수 핵심(cycle47~49)**: 투영(WCS→paper)+가로총폭/pipeCenter분할/세로 제도+배관참조(분할=실배관중심X, 상/하단=배관근접). 라이브 PASS. 계획=plan_pfs_notab_n3_20260714.md
+- [ ] **N3 全타입 테스트(사용자 진행 중)**: 모든 서포트 타입서 치수/스케일/배관참조 검증. 엣지(배관없는 서포트·특이형상) 대응
+- [ ] **[별도 트랙] 무탭 2D 평면화 결정**: 뷰포트 유지 vs 진짜 2D 선요소(클립된 solid에 FLATSHOT). 재검토
+- [ ] **N4(밸룬/라인번호·BOP 콜아웃/BOM)**: 기존 AnnotateViewport·SPInfo.AttachmentList 재사용 -> N5(3부채 코드 소멸)
 
 ## 미해결 / 후속
 - [ ] test1 뷰 뒤집힘 (content-rotation) 해소

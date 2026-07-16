@@ -1,6 +1,8 @@
 @echo off
 setlocal EnableExtensions
 rem PFS dev loop Tier1: build - deploy - restart 2026 - launch via PowerShell (unicode-safe)
+rem NOTE: PFSNOTABTEST reads env PFS_NOTAB_TEST_TAG (default GD1-001). Set it here to auto-test a specific tag,
+rem       or run PFSNOTABDETAIL in ACAD and pick the support manually to test any type.
 
 set "PROJ=%~dp0PlantFlow_Support.csproj"
 set "SRC=%~dp0bin\Release\PlantFlow_Support.dll"
