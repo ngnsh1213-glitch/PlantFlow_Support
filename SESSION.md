@@ -1,6 +1,17 @@
 # SESSION — 현재 작업 상태
 
-_최종 갱신: 2026-07-14 (무탭 레이아웃·자동포함·자동화 완결, 다음=N3 치수)_
+_최종 갱신: 2026-07-16 (무탭 접촉판정 마진 + perspective 리본 flip 가드 완결, 다음=N3 치수)_
+
+## ★ 무탭 결함 2건 해결 (2026-07-16, 커밋 73b9974·6e01a9b) — 라이브 PASS
+N3 착수 전 라이브 테스트 중 발견된 2건 종결. 다음 트랙 = **N3(치수)** 유지.
+- **결함A — 자동포함 이웃 묻어남**: `AutoIncludeRelatedParts` 마진이 `0.5×서포트 max치수` 비례라 큰 서포트에서 과대(1977mm)→파이프 축 따라 이웃 서포트 쓸어담음. **해결=접촉 판정 고정 tol 150mm**(env `PFS_NOTAB_MARGIN`). 라이브 `margin=150 addedPipe=1 addedSupport=1` 확인. 커밋 73b9974.
+- **결함B — 추출 후 원본 뷰 perspective flip**: 계측(`PFSPERSPWATCH` 스택)으로 **근본원인=AutoCAD 리본 컨트롤 WPF 바인딩**(`RibbonListButton.set_Current→BindingExpression.UpdateSource→SystemVariable.set_Value`)이 파이프라인 그래픽스 갱신 후 유휴 시점에 `PERSPECTIVE=1` 역기입. **우리 코드/LISP/도면 저장뷰 무관**(계측 `persp enter=0 exit=0`). 리본 내부는 수정 불가 → **스코프 제한 방어 가드**(cycle 42, Codex 커밋 6e01a9b): 파이프라인 진입 시 8초 창 무장→창 내 flip 감지 시 1회 복원+Idle one-shot REGEN+즉시 disarm. 재진입/이중구독/핑퐁 방어. 라이브 PASS(`guard 교정 1→0`+Regen 완료, 육안 parallel 유지).
+  - 진단 자산(잔존, 무해): `PFSPERSPPROBE`(즉석 프로브), `PFSPERSPWATCH`(실시간 감시+스택). `pfs_dev_start.scr`에 WATCH/PROBE 연결됨. env `PFS_PERSP_GUARD_SEC`로 창 조정. 커밋 37f7c72·ca80c0f·6ad9e06.
+  - ⚠️ 잠재 영향: perspective 잔존 시 VIEWBASE/-VPOINT 오쏘 경로가 어긋날 여지(무탭 추출 자체는 뷰 무관·무영향). 가드로 증상 제거됨.
+
+---
+
+_이전 갱신: 2026-07-14 (무탭 레이아웃·자동포함·자동화 완결, 다음=N3 치수)_
 
 ## ★ 무탭 레이아웃/워크플로/자동화 완결 (2026-07-14, 커밋 ~4fcf1b1)
 이 세션에서 RECOVER 해결(H5) 이후 아래 전부 라이브 PASS. 다음 트랙 = **N3(치수)**.
