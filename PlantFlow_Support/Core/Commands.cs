@@ -4453,8 +4453,8 @@ namespace PlantFlow_Support
         }
 
         double txt = this.GetEnvDouble("PFS_NOTAB_DIM_TXT", 10.0, 0.5, 50.0);
-        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 15.0, 1.0, 100.0);
-        double stack = this.GetEnvDouble("PFS_NOTAB_DIM_STACK", 15.0, 1.0, 100.0);
+        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
+        double stack = this.GetEnvDouble("PFS_NOTAB_DIM_STACK", 30.0, 1.0, 100.0);
         double centerY = (minY + maxY) / 2.0;
         string supportType = this.GetSupportTypePrefix(s_isoSupportTag);
         string horizontalSide = this.GetNotabHorizontalDimSide(supportType);
@@ -4480,6 +4480,17 @@ namespace PlantFlow_Support
           {
             RotatedDimension dimLeft = PSUtil.CreateHorizontalDimension(new Point3d(minX, horizontalBaseY, 0.0), new Point3d(pipeCenterXPaper, horizontalBaseY, 0.0), new Point3d(minX, splitY, 0.0), Matrix3d.Identity, dimStyleId);
             RotatedDimension dimRight = PSUtil.CreateHorizontalDimension(new Point3d(pipeCenterXPaper, horizontalBaseY, 0.0), new Point3d(maxX, horizontalBaseY, 0.0), new Point3d(pipeCenterXPaper, splitY, 0.0), Matrix3d.Identity, dimStyleId);
+            try
+            {
+              dimLeft.UsingDefaultTextPosition = false;
+              dimLeft.TextPosition = new Point3d((minX + pipeCenterXPaper) / 2.0, splitY, 0.0);
+              dimRight.UsingDefaultTextPosition = false;
+              dimRight.TextPosition = new Point3d((pipeCenterXPaper + maxX) / 2.0, splitY, 0.0);
+            }
+            catch (System.Exception ex)
+            {
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL dim split text position 예외: " + ex.GetType().Name + ": " + ex.Message + " leftMid=" + this.FormatNumber((minX + pipeCenterXPaper) / 2.0) + " rightMid=" + this.FormatNumber((pipeCenterXPaper + maxX) / 2.0) + " splitY=" + this.FormatNumber(splitY));
+            }
             this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimLeft, dimStyleId, layerId, leftReal, txt, "dimSplitL");
             this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimRight, dimStyleId, layerId, rightReal, txt, "dimSplitR");
           }
@@ -4498,12 +4509,35 @@ namespace PlantFlow_Support
         RotatedDimension dimTotal = PSUtil.CreateHorizontalDimension(new Point3d(minX, horizontalBaseY, 0.0), new Point3d(maxX, horizontalBaseY, 0.0), new Point3d(minX, totalY, 0.0), Matrix3d.Identity, dimStyleId);
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimTotal, dimStyleId, layerId, realW, txt, "dimH");
 
-        RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(minX, minY, 0.0), new Point3d(minX, maxY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
+        double dimVTopY = maxY;
+        double barRealH = double.NaN;
+        double barPaperH = double.NaN;
+        double vScale = paperH / realH;
+        bool dimVBarSpan = false;
+        if (double.TryParse(s_isoSupportProfileHeight, out barRealH) && barRealH > 1e-6)
+        {
+          barPaperH = barRealH * vScale;
+          if (barPaperH > 1e-6 && barPaperH <= paperH + 1e-6)
+          {
+            dimVTopY = minY + barPaperH;
+            dimVBarSpan = true;
+          }
+          else
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV bar span fallback: barPaperH invalid barRealH=" + this.FormatNumber(barRealH) + " barPaperH=" + this.FormatNumber(barPaperH) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale));
+          }
+        }
+        else
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV bar span fallback: profile height parse fail value=" + (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) + " paperH=" + this.FormatNumber(paperH) + " realH=" + this.FormatNumber(realH));
+        }
+
+        RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(minX, minY, 0.0), new Point3d(minX, dimVTopY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
         string dimVText = string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? this.FormatNumber(realH) : s_isoSupportProfileHeight;
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, realH, txt, "dimV", dimVText);
         this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt);
 
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(supportType) ? "unknown" : supportType) + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(supportType) ? "unknown" : supportType) + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
       catch (System.Exception ex)
       {
@@ -4576,10 +4610,10 @@ namespace PlantFlow_Support
           return;
         }
 
-        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 15.0, 1.0, 100.0);
-        Point3d anchor = new Point3d(supportPaperExt.MinPoint.X, supportPaperExt.MinPoint.Y + (supportPaperExt.MaxPoint.Y - supportPaperExt.MinPoint.Y) * 0.25, 0.0);
-        Point3d elbow = new Point3d(supportPaperExt.MinPoint.X - offset, anchor.Y - offset * 0.4, 0.0);
-        Point3d textPoint = new Point3d(elbow.X - offset * 1.5, elbow.Y, 0.0);
+        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
+        Point3d anchor = new Point3d(supportPaperExt.MaxPoint.X, supportPaperExt.MinPoint.Y + (supportPaperExt.MaxPoint.Y - supportPaperExt.MinPoint.Y) * 0.25, 0.0);
+        Point3d elbow = new Point3d(supportPaperExt.MaxPoint.X + offset, anchor.Y - offset * 0.4, 0.0);
+        Point3d textPoint = new Point3d(elbow.X + offset * 1.5, elbow.Y, 0.0);
         MText content = new MText();
         content.Contents = s_isoSupportDesignation;
         content.TextHeight = txt;
