@@ -4646,7 +4646,6 @@ namespace PlantFlow_Support
 
         try
         {
-          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "callout", textPoint);
           leader.TextLocation = textPoint;
           leader.TextAlignmentType = (TextAlignmentType)0;
           MText placed = leader.MText;
@@ -4656,6 +4655,7 @@ namespace PlantFlow_Support
             placed.Location = textPoint;
             leader.MText = placed;
           }
+          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "callout", textPoint);
         }
         catch (System.Exception ex)
         {
@@ -4733,7 +4733,6 @@ namespace PlantFlow_Support
 
         try
         {
-          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "pipe callout", textPoint);
           leader.TextLocation = textPoint;
           leader.TextAlignmentType = (TextAlignmentType)0;
           MText placed = leader.MText;
@@ -4743,6 +4742,7 @@ namespace PlantFlow_Support
             placed.Location = textPoint;
             leader.MText = placed;
           }
+          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "pipe callout", textPoint);
         }
         catch (System.Exception ex)
         {
@@ -4774,9 +4774,10 @@ namespace PlantFlow_Support
 
         Type leaderType = leader.GetType();
         Type directionType = leaderType.Assembly.GetType("Autodesk.AutoCAD.DatabaseServices.LeaderDirectionType");
+        string directionName = "LeftLeader";
         if (directionType != null)
         {
-          object leftLeader = Enum.Parse(directionType, "LeftLeader");
+          object leftLeader = Enum.Parse(directionType, directionName);
           System.Reflection.MethodInfo method = leaderType.GetMethod(
             "SetTextAttachmentType",
             new Type[] { typeof(TextAttachmentType), directionType });
@@ -4790,7 +4791,7 @@ namespace PlantFlow_Support
           PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment skip: LeaderDirectionType missing text=" + textPoint);
         }
 
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment dogleg=" + this.FormatNumber(dogleg) + " text=" + textPoint);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment dir=" + directionName + " dogleg=" + this.FormatNumber(dogleg) + " text=" + textPoint);
       }
       catch (System.Exception ex)
       {
