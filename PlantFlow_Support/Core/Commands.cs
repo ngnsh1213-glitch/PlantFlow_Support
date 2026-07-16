@@ -6402,33 +6402,39 @@ namespace PlantFlow_Support
               Entity e = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
               if (e == null) continue;
               try { Extents3d ex = e.GeometricExtents; if (!hasAnchor) { anchor = ex; hasAnchor = true; } else anchor.AddExtents(ex); }
-              catch { }
+              catch (System.Exception exx) { PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include fallback anchor ext 예외 id=" + id + ": " + exx.GetType().Name + ": " + exx.Message); }
             }
           }
           if (!hasAnchor) { tr.Commit(); return selectedIds; }
 
-          // [접촉 판정] 선택 서포트 bbox와 '실제로 맞닿은(교차)' 파트만 포함한다.
-          // 크기비례 마진(0.5*max dim)은 큰 서포트에서 과대해져(예 1977mm) 파이프 축을 따라
-          // 이웃 서포트까지 쓸어담는 결함 → 폐기. 대신 서포트 bbox 자체를 기준으로,
-          // 유볼트가 파이프 위에 살짝 떠 co-located될 여지를 위해 파이프 지름 규격 수준의
-          // 작은 접촉 tol만 부여한다. 이웃 서포트(최근접 수백 mm)는 이 tol에 닿지 않아 배제됨.
-          // env PFS_NOTAB_MARGIN로 튜닝(기본 150mm = GD1 실증값).
-          double margin = 150.0;
-          string marginEnv = System.Environment.GetEnvironmentVariable("PFS_NOTAB_MARGIN");
-          if (!string.IsNullOrWhiteSpace(marginEnv))
-          {
-            double parsedMargin;
-            if (double.TryParse(marginEnv, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedMargin) && parsedMargin >= 0.0)
-              margin = parsedMargin;
-          }
+          double margin = this.GetEnvDouble("PFS_NOTAB_MARGIN", 150.0, 0.0, 10000.0);
+          double contactAllowance = this.GetEnvDouble("PFS_NOTAB_CONTACT_TOL", 20.0, 0.0, 10000.0);
           Extents3d probe = new Extents3d(
             new Point3d(anchor.MinPoint.X - margin, anchor.MinPoint.Y - margin, anchor.MinPoint.Z - margin),
             new Point3d(anchor.MaxPoint.X + margin, anchor.MaxPoint.Y + margin, anchor.MaxPoint.Z + margin));
+          Point3d supCenter = new Point3d(
+            (anchor.MinPoint.X + anchor.MaxPoint.X) / 2.0,
+            (anchor.MinPoint.Y + anchor.MaxPoint.Y) / 2.0,
+            (anchor.MinPoint.Z + anchor.MaxPoint.Z) / 2.0);
 
-          // 2) 모델공간 스캔: probe와 교차하는 Pipe/Support 추가. 기타 Plant 파트는 진단 로그만.
+          PSUtil ps = Commands.PSUtil;
+          if (ps == null)
+            ps = new PSUtil();
+          string supTag = string.Empty;
+          foreach (ObjectId id in selectedIds)
+          {
+            string cls = id.ObjectClass == null ? string.Empty : id.ObjectClass.Name;
+            if (cls.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) < 0)
+              continue;
+            if (this.TryGetPlantLineNumber(ps, id, out supTag))
+              break;
+          }
+
+          // 2) 모델공간 스캔: Pipe는 line tag + 축거리 접촉으로, Support는 기존 bbox 근접으로 포함한다.
           ObjectId msId = this.GetModelSpaceId(db, tr);
           BlockTableRecord ms = msId == ObjectId.Null ? null : tr.GetObject(msId, OpenMode.ForRead) as BlockTableRecord;
           int addedPipe = 0, addedSup = 0;
+          int pipeCand = 0, pipeIncl = 0, pipeDropLine = 0, pipeDropDist = 0, pipeDropNoTag = 0, pipeFallback = 0;
           if (ms != null)
           {
             foreach (ObjectId eid in ms)
@@ -6442,13 +6448,70 @@ namespace PlantFlow_Support
               Entity e = tr.GetObject(eid, OpenMode.ForRead, false) as Entity;
               if (e == null) continue;
               Extents3d ex;
-              try { ex = e.GeometricExtents; } catch { continue; }
-              if (!this.NotabExtentsIntersect(probe, ex)) continue;
-              if (isPipe || isSup)
+              try { ex = e.GeometricExtents; }
+              catch (System.Exception exx)
               {
+                PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include ext skip id=" + eid + ": " + exx.GetType().Name + ": " + exx.Message);
+                continue;
+              }
+
+              if (isPipe)
+              {
+                pipeCand++;
+                if (string.IsNullOrWhiteSpace(supTag))
+                {
+                  pipeDropNoTag++;
+                  continue;
+                }
+
+                string pipeTag;
+                if (!this.TryGetPlantLineNumber(ps, eid, out pipeTag) || !string.Equals(pipeTag, supTag, System.StringComparison.OrdinalIgnoreCase))
+                {
+                  pipeDropLine++;
+                  continue;
+                }
+
+                bool includePipe = false;
+                Point3d p0;
+                Vector3d dir;
+                double radius;
+                if (this.TryGetPipeAxisFromId(tr, eid, ps, out p0, out dir, out radius))
+                {
+                  double distance = this.DistancePointToPipeAxis(supCenter, p0, dir);
+                  double tol = radius + contactAllowance;
+                  includePipe = distance <= tol;
+                  if (!includePipe)
+                  {
+                    pipeDropDist++;
+                    PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe dropDist id=" + eid + " d=" + this.FormatNumber(distance) + " tol=" + this.FormatNumber(tol) + " radius=" + this.FormatNumber(radius) + " line=" + pipeTag);
+                  }
+                }
+                else
+                {
+                  pipeFallback++;
+                  double distance = this.DistancePointToExtents(supCenter, ex);
+                  includePipe = distance <= contactAllowance;
+                  if (!includePipe)
+                  {
+                    pipeDropDist++;
+                    PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe dropFallback id=" + eid + " d=" + this.FormatNumber(distance) + " tol=" + this.FormatNumber(contactAllowance) + " line=" + pipeTag);
+                  }
+                }
+
+                if (!includePipe)
+                  continue;
+
                 existing.Add(eid);
                 result.Add(eid);
-                if (isPipe) addedPipe++; else addedSup++;
+                addedPipe++;
+                pipeIncl++;
+              }
+              else if (isSup)
+              {
+                if (!this.NotabExtentsIntersect(probe, ex)) continue;
+                existing.Add(eid);
+                result.Add(eid);
+                addedSup++;
               }
               else
               {
@@ -6457,7 +6520,7 @@ namespace PlantFlow_Support
             }
           }
           tr.Commit();
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include anchor=" + this.FormatExtents(anchor) + " margin=" + this.FormatNumber(margin) + " addedPipe=" + addedPipe + " addedSupport=" + addedSup);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include anchor=" + this.FormatExtents(anchor) + " margin=" + this.FormatNumber(margin) + " contactTol=" + this.FormatNumber(contactAllowance) + " line=" + (string.IsNullOrWhiteSpace(supTag) ? "(none)" : supTag) + " pipeCand=" + pipeCand + " incl=" + pipeIncl + " dropLine=" + pipeDropLine + " dropDist=" + pipeDropDist + " dropNoTag=" + pipeDropNoTag + " fallback=" + pipeFallback + " addedPipe=" + addedPipe + " addedSupport=" + addedSup);
         }
         return result.ToArray();
       }
@@ -6474,6 +6537,183 @@ namespace PlantFlow_Support
       if (a.MaxPoint.Y < b.MinPoint.Y || a.MinPoint.Y > b.MaxPoint.Y) return false;
       if (a.MaxPoint.Z < b.MinPoint.Z || a.MinPoint.Z > b.MaxPoint.Z) return false;
       return true;
+    }
+
+    private bool TryGetPlantLineNumber(PSUtil ps, ObjectId id, out string lineNo)
+    {
+      lineNo = string.Empty;
+      if (id == ObjectId.Null)
+        return false;
+      if (ps == null || ps.dl_manager == null)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL lineNo skip: dl_manager null id=" + id);
+        return false;
+      }
+
+      string[] candidates = new string[] { "LineNumberTag", "LineNumber", "Line Number" };
+      foreach (string name in candidates)
+      {
+        try
+        {
+          System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection() { name };
+          System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(id, names, true);
+          string value = props != null && props.Count > 0 ? props[0] : string.Empty;
+          if (!string.IsNullOrWhiteSpace(value))
+          {
+            lineNo = value.Trim();
+            return true;
+          }
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL lineNo candidate " + name + " 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+        }
+      }
+
+      return false;
+    }
+
+    private bool TryGetPipeAxisFromId(Transaction tr, ObjectId pipeId, PSUtil ps, out Point3d p0, out Vector3d dir, out double radius)
+    {
+      p0 = Point3d.Origin;
+      dir = Vector3d.XAxis;
+      radius = 0.0;
+      if (tr == null || pipeId == ObjectId.Null)
+        return false;
+
+      try
+      {
+        Part part = tr.GetObject(pipeId, OpenMode.ForRead, false) as Part;
+        if (part == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipeAxis skip: not Part id=" + pipeId);
+          return false;
+        }
+
+        PortCollection ports = part.GetPorts((PortType)7);
+        if (ports == null || ports.Count < 2)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipeAxis skip: ports<2 id=" + pipeId);
+          return false;
+        }
+
+        Point3d? first = null;
+        Point3d? second = null;
+        foreach (Port port in (PnP3dCollection)ports)
+        {
+          if (!first.HasValue)
+          {
+            first = port.Position;
+            continue;
+          }
+          second = port.Position;
+          break;
+        }
+
+        if (!first.HasValue || !second.HasValue)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipeAxis skip: port positions 없음 id=" + pipeId);
+          return false;
+        }
+
+        Vector3d raw = second.Value - first.Value;
+        if (raw.Length <= 1e-6)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipeAxis skip: degenerate id=" + pipeId);
+          return false;
+        }
+
+        p0 = first.Value;
+        dir = raw.GetNormal();
+        radius = this.TryGetPipeRadiusFromProperties(ps, pipeId);
+        if (radius <= 1e-6)
+        {
+          try
+          {
+            Extents3d ext = ((Entity)part).GeometricExtents;
+            double dx = System.Math.Abs(ext.MaxPoint.X - ext.MinPoint.X);
+            double dy = System.Math.Abs(ext.MaxPoint.Y - ext.MinPoint.Y);
+            double dz = System.Math.Abs(ext.MaxPoint.Z - ext.MinPoint.Z);
+            radius = System.Math.Max(1.0, System.Math.Min(dx, System.Math.Min(dy, dz)) / 2.0);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL pipeAxis radius fallback bbox id=" + pipeId + " r=" + this.FormatNumber(radius));
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL pipeAxis radius fallback 예외 id=" + pipeId + ": " + ex.GetType().Name + ": " + ex.Message);
+            radius = 0.0;
+          }
+        }
+
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipeAxis 예외 id=" + pipeId + ": " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private double TryGetPipeRadiusFromProperties(PSUtil ps, ObjectId pipeId)
+    {
+      if (ps == null || ps.dl_manager == null || pipeId == ObjectId.Null)
+        return 0.0;
+
+      string[] candidates = new string[] { "Size", "NominalDiameter", "Nominal Diameter", "Diameter" };
+      foreach (string name in candidates)
+      {
+        try
+        {
+          System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection() { name };
+          System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(pipeId, names, true);
+          string value = props != null && props.Count > 0 ? props[0] : string.Empty;
+          if (string.IsNullOrWhiteSpace(value))
+            continue;
+
+          string digits = System.Text.RegularExpressions.Regex.Replace(value, "[^0-9.]", string.Empty);
+          double parsed;
+          if (!string.IsNullOrWhiteSpace(digits) && double.TryParse(digits, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) && parsed > 0.0)
+          {
+            if (string.Equals(name, "Size", System.StringComparison.OrdinalIgnoreCase))
+            {
+              int nominal = (int)System.Math.Round(parsed);
+              return PSUtil.PipeSize(nominal) / 2.0;
+            }
+
+            return parsed / 2.0;
+          }
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipeRadius candidate " + name + " 예외 id=" + pipeId + ": " + ex.GetType().Name + ": " + ex.Message);
+        }
+      }
+
+      return 0.0;
+    }
+
+    private double DistancePointToPipeAxis(Point3d point, Point3d p0, Vector3d dir)
+    {
+      if (dir.Length <= 1e-6)
+        return double.MaxValue;
+
+      Vector3d n = dir.GetNormal();
+      Vector3d v = point - p0;
+      Vector3d perpendicular = v - n.MultiplyBy(v.DotProduct(n));
+      return perpendicular.Length;
+    }
+
+    private double DistancePointToExtents(Point3d point, Extents3d ext)
+    {
+      double dx = 0.0;
+      if (point.X < ext.MinPoint.X) dx = ext.MinPoint.X - point.X;
+      else if (point.X > ext.MaxPoint.X) dx = point.X - ext.MaxPoint.X;
+      double dy = 0.0;
+      if (point.Y < ext.MinPoint.Y) dy = ext.MinPoint.Y - point.Y;
+      else if (point.Y > ext.MaxPoint.Y) dy = point.Y - ext.MaxPoint.Y;
+      double dz = 0.0;
+      if (point.Z < ext.MinPoint.Z) dz = ext.MinPoint.Z - point.Z;
+      else if (point.Z > ext.MaxPoint.Z) dz = point.Z - ext.MaxPoint.Z;
+      return System.Math.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
     }
 
     private bool TryGetSelectionPipeAxis(Database db, ObjectId[] selectedIds, out Vector3d axis, out ObjectId pipeId)

@@ -1,28 +1,25 @@
 # REPORT - Codex -> Claude
 
-- cycle: 43
+- cycle: 44
 - status: done
 - commit: HEAD (최종 해시는 Codex 완료 보고 참조)
-- title: 무탭 추출물 서포트 영역 클립 + 뷰포트 동적 피팅
+- title: 무탭 배관 포함을 서포트가 실제 잡는 배관으로 한정
 
 ## 변경 요약
 - `PlantFlow_Support/Core/Commands.cs`
-  - `CopyCleanNotabSolids`에서 support solid extents 산출 후 oriented clip box를 생성.
-  - `s_isoPipeAxis` / `s_isoPipeUp` basis 기준 right/up/viewDir 투영 범위에 `PFS_NOTAB_CLIP_MARGIN` 기본 150mm를 적용.
-  - 각 clean `Solid3d` append 및 metadata strip 직후 `BooleanOperationType.BoolIntersect`로 클립.
-  - clip box clone을 solid마다 사용하고, 비교차/empty solid는 erase 후 제외.
-  - Boolean 실패는 로그 후 원본 유지 폴백.
-  - 클립 후 잔존 solid extents만 `solidExt`에 누적하고 `copied` 카운트에 반영.
-  - `ConfigureNotabDetailViewport`의 고정 `CustomScale=0.25` / `ViewCenter=(0,0)`를 제거.
-  - 클립 후 `solidExt` 기준으로 right/up 투영 폭/높이를 계산해 `ViewCenter`와 `ViewHeight`를 동적 설정.
-  - `PFS_NOTAB_FIT_PAD` 기본 0.15로 뷰포트 여백 조정 가능.
+  - `AutoIncludeRelatedParts`의 Pipe 자동 포함 조건을 bbox 교차에서 line tag + 축거리 접촉 판정으로 교체.
+  - 선택 서포트의 `LineNumberTag` / `LineNumber` / `Line Number`를 읽어 기준 라인으로 사용.
+  - 기준 라인이 없으면 Pipe auto-include를 하지 않음.
+  - 후보 Pipe는 같은 라인만 통과하고, 포트 2개로 얻은 중심축과 서포트 bbox 중심 사이 수직거리로 접촉 판정.
+  - 허용값은 `pipeRadius + PFS_NOTAB_CONTACT_TOL`이며 기본 접촉 여유는 20mm.
+  - 축/반경 판정 불가 시 bbox 최근접 거리 폴백을 로그와 함께 사용.
+  - co-located Support 후보 포함은 기존 bbox probe 방식 유지.
+  - `TryGetPlantLineNumber`, `TryGetPipeAxisFromId`, `TryGetPipeRadiusFromProperties`, 거리 계산 헬퍼 추가.
 
 ## 보존 확인
 - 대상 외 파일 수정 없음.
-- 610x489 뷰포트 rect 생성 로직 유지.
-- wireframe 기본 및 `PFS_NOTAB_USE_HIDDEN=1` opt-in 유지.
-- cycle 42 PERSPECTIVE guard, paper reopen/zoom 로직 미수정.
-- `supportExt` fallback은 기존처럼 유지하되, 뷰포트 피팅은 클립 후 `solidExt`를 사용.
+- `CopyCleanNotabSolids` 클립, `ConfigureNotabDetailViewport` 동적 피팅, PERSPECTIVE guard, wireframe 기본, 610x489 viewport 로직 미수정.
+- `dev_test.bat`의 기존 작업트리 변경은 범위 밖이라 건드리지 않음.
 
 ## 검증
 - `dotnet build .\PlantFlow_Support.sln -c Debug`: PASS, 오류 0 / 기존 경고 15
@@ -31,6 +28,5 @@
 
 ## 라이브 확인 포인트
 - `PFS_NOTAB_TEST_TAG=RC1-001` 환경에서 `dev_test.bat` 실행.
-- `C:\Temp\pfs_diag.log`에서 `PFSNOTABDETAIL clip solids=... kept=... trimmed=... dropped=...` 확인.
-- `PFSNOTABDETAIL viewport fit center=... ViewHeight=... content=...` 확인.
-- 육안: 이웃 배관/관통 파이프 장거리 구간이 사라지고 서포트 영역만 610x489 프레임에 맞게 표시되는지 확인.
+- `C:\Temp\pfs_diag.log`에서 `PFSNOTABDETAIL auto-include ... pipeCand=... incl=... dropLine=... dropDist=...` 확인.
+- 육안: 200mm 평행 이웃 배관 원이 사라지고, 서포트가 실제 잡는 배관 1개만 클립/트림되어 표시되는지 확인.
