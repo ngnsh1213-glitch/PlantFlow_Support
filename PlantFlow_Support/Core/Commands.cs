@@ -6257,7 +6257,7 @@ namespace PlantFlow_Support
 
     private class NotabPipeIncludeCandidate
     {
-      public NotabPipeIncludeCandidate(ObjectId id, double score, string projectionLog, double tolerance, double radius, string lineNo)
+      public NotabPipeIncludeCandidate(ObjectId id, double score, string projectionLog, double tolerance, double radius, string lineNo, double pipeCenterZ)
       {
         this.Id = id;
         this.Score = score;
@@ -6265,6 +6265,8 @@ namespace PlantFlow_Support
         this.Tolerance = tolerance;
         this.Radius = radius;
         this.LineNo = lineNo == null ? string.Empty : lineNo;
+        this.PipeCenterZ = pipeCenterZ;
+        this.BopError = double.MaxValue;
       }
 
       public ObjectId Id;
@@ -6273,6 +6275,8 @@ namespace PlantFlow_Support
       public double Tolerance;
       public double Radius;
       public string LineNo;
+      public double PipeCenterZ;
+      public double BopError;
     }
 
     private double ComputeIsoDimensionSize()
@@ -6441,14 +6445,20 @@ namespace PlantFlow_Support
           if (ps == null)
             ps = new PSUtil();
           string supTag = string.Empty;
+          ObjectId supportForBop = ObjectId.Null;
           foreach (ObjectId id in selectedIds)
           {
             string cls = id.ObjectClass == null ? string.Empty : id.ObjectClass.Name;
             if (cls.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) < 0)
               continue;
+            if (supportForBop == ObjectId.Null)
+              supportForBop = id;
             if (this.TryGetPlantLineNumber(ps, id, out supTag))
               break;
           }
+          double supportBop;
+          bool hasBop = this.TryGetSupportBop(ps, supportForBop, out supportBop);
+          double bopTol = this.GetEnvDouble("PFS_NOTAB_BOP_TOL", 10.0, 0.0, 1000.0);
 
           // 2) 모델공간 스캔: Pipe는 line tag + 축거리 접촉으로, Support는 기존 bbox 근접으로 포함한다.
           ObjectId msId = this.GetModelSpaceId(db, tr);
@@ -6509,7 +6519,12 @@ namespace PlantFlow_Support
                   }
                   else
                   {
-                    pipeIncludes.Add(new NotabPipeIncludeCandidate(eid, score, projectionLog, tol, radius, pipeTag));
+                    double pipeCenterZ = p0.Z;
+                    double candidateBop = pipeCenterZ - radius;
+                    NotabPipeIncludeCandidate candidate = new NotabPipeIncludeCandidate(eid, score, projectionLog, tol, radius, pipeTag, pipeCenterZ);
+                    if (hasBop && radius > 1e-6)
+                      candidate.BopError = System.Math.Abs(candidateBop - supportBop);
+                    pipeIncludes.Add(candidate);
                   }
                 }
                 else
@@ -6524,7 +6539,7 @@ namespace PlantFlow_Support
                   }
                   else
                   {
-                    pipeIncludes.Add(new NotabPipeIncludeCandidate(eid, distance, "fallback d=" + this.FormatNumber(distance), contactAllowance, 0.0, pipeTag));
+                    pipeIncludes.Add(new NotabPipeIncludeCandidate(eid, distance, "fallback d=" + this.FormatNumber(distance), contactAllowance, 0.0, pipeTag, double.NaN));
                   }
                 }
 
@@ -6548,23 +6563,43 @@ namespace PlantFlow_Support
           if (pipeIncludes.Count > 0)
           {
             NotabPipeIncludeCandidate best = pipeIncludes[0];
+            bool useBopTieBreak = false;
+            for (int i = 0; i < pipeIncludes.Count; i++)
+            {
+              if (pipeIncludes[i].BopError < double.MaxValue)
+              {
+                useBopTieBreak = true;
+                break;
+              }
+            }
+
             for (int i = 1; i < pipeIncludes.Count; i++)
             {
-              if (pipeIncludes[i].Score < best.Score)
+              if (useBopTieBreak)
+              {
+                if (pipeIncludes[i].BopError + bopTol < best.BopError ||
+                    (System.Math.Abs(pipeIncludes[i].BopError - best.BopError) <= bopTol && pipeIncludes[i].Score < best.Score))
+                  best = pipeIncludes[i];
+              }
+              else if (pipeIncludes[i].Score < best.Score)
+              {
                 best = pipeIncludes[i];
+              }
             }
 
             existing.Add(best.Id);
             result.Add(best.Id);
             addedPipe++;
             pipeIncl = 1;
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe include id=" + best.Id + " score=" + this.FormatNumber(best.Score) + " " + best.ProjectionLog + " tol=" + this.FormatNumber(best.Tolerance) + " radius=" + this.FormatNumber(best.Radius) + " line=" + best.LineNo + " passCount=" + pipeIncludes.Count);
+            if (!useBopTieBreak)
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe BOP 부재 기하폴백 support=" + supportForBop);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe include id=" + best.Id + " reason=" + (useBopTieBreak ? "bop" : "fallback") + " score=" + this.FormatNumber(best.Score) + " bopErr=" + (best.BopError < double.MaxValue ? this.FormatNumber(best.BopError) : "n/a") + " pipeCenterZ=" + (double.IsNaN(best.PipeCenterZ) ? "n/a" : this.FormatNumber(best.PipeCenterZ)) + " radius=" + this.FormatNumber(best.Radius) + " bop=" + (hasBop ? this.FormatNumber(supportBop) : "n/a") + " " + best.ProjectionLog + " tol=" + this.FormatNumber(best.Tolerance) + " bopTol=" + this.FormatNumber(bopTol) + " line=" + best.LineNo + " passCount=" + pipeIncludes.Count);
             for (int i = 0; i < pipeIncludes.Count; i++)
             {
               if (pipeIncludes[i].Id == best.Id)
                 continue;
               pipeDropDist++;
-              PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe dropAmbiguous id=" + pipeIncludes[i].Id + " score=" + this.FormatNumber(pipeIncludes[i].Score) + " " + pipeIncludes[i].ProjectionLog + " best=" + best.Id);
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe dropAmbiguous id=" + pipeIncludes[i].Id + " score=" + this.FormatNumber(pipeIncludes[i].Score) + " bopErr=" + (pipeIncludes[i].BopError < double.MaxValue ? this.FormatNumber(pipeIncludes[i].BopError) : "n/a") + " pipeCenterZ=" + (double.IsNaN(pipeIncludes[i].PipeCenterZ) ? "n/a" : this.FormatNumber(pipeIncludes[i].PipeCenterZ)) + " radius=" + this.FormatNumber(pipeIncludes[i].Radius) + " bop=" + (hasBop ? this.FormatNumber(supportBop) : "n/a") + " " + pipeIncludes[i].ProjectionLog + " best=" + best.Id);
             }
           }
           tr.Commit();
@@ -6616,6 +6651,41 @@ namespace PlantFlow_Support
         {
           PlantOrthoView.FileDiag("PFSNOTABDETAIL lineNo candidate " + name + " 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
         }
+      }
+
+      return false;
+    }
+
+    private bool TryGetSupportBop(PSUtil ps, ObjectId supId, out double bop)
+    {
+      bop = 0.0;
+      if (supId == ObjectId.Null)
+        return false;
+      if (ps == null || ps.dl_manager == null)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL support BOP skip: dl_manager null id=" + supId);
+        return false;
+      }
+
+      try
+      {
+        System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection() { "BOP" };
+        System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(supId, names, true);
+        string raw = props != null && props.Count > 0 ? props[0] : string.Empty;
+        string rounded = this.RoundPropertyValue(raw);
+        double parsed;
+        if (double.TryParse(rounded, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) ||
+            double.TryParse(rounded, out parsed))
+        {
+          bop = parsed;
+          return true;
+        }
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL support BOP parse fail id=" + supId + " raw=" + raw);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL support BOP 예외 id=" + supId + ": " + ex.GetType().Name + ": " + ex.Message);
       }
 
       return false;
