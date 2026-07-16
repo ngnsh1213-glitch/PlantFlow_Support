@@ -3,44 +3,62 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 41
+- **cycle**: 42
 - **status**: ready
-- **issued_at**: 2026-07-14
-- **title**: 뷰포트 크기·위치 교정(도면영역 정합) + #1 페이퍼 초기화면 기본 승격
-- **target**: PlantFlow_Support/Core/Commands.cs
-- **plan**: `<appDataDir>\scratch\plan_pfs_notab_layout_fit_20260714.md`
+- **issued_at**: 2026-07-16
+- **title**: 무탭 추출 후 리본 바인딩發 PERSPECTIVE=1 지연 flip 방어 가드(스코프 제한)
+- **target**: `PlantFlow_Support/Core/Commands.cs` (그 외 무수정)
 
 ## 착수 전
-- cwd `D:\PlantFlow\PlantFlow_Support`. `CreateNotabDetailViewport`/`TryReopenSetNotabPaperSpace` 및 관련만. 그 외 무수정.
-- 빌드 GREEN까지 Codex 확인. 라이브는 사용자.
+- cwd `D:\PlantFlow\PlantFlow_Support`. `Commands.cs`의 무탭/PERSPECTIVE 감시 코드만 손댄다.
+- 빌드 GREEN까지 Codex 확인(MSBuild). 라이브 테스트는 사용자(`dev_test.bat`).
 
-## 배경 (cycle 40 라이브 = #1 성공)
-- #1 reopen 방식 라이브 PASS: 크래시/RECOVER 없음, Title Block 페이퍼 공간으로 열림.
-- 잔여: 뷰포트 크기가 타이틀블록 도면영역과 불일치(현재 640.5×573.5, 도면영역 610×489). LL 오프셋 (30.5,84.5)만큼 큼(640.5−30.5=610, 573.5−84.5=489 정확 일치).
+## 배경 — 근본 원인 계측 완료 (커밋 6ad9e06 등)
+`RunNotabDetailPipeline`(무탭 추출) 실행 중엔 활성 모델 `PERSPECTIVE`가 계속 0(계측 `persp enter=0 exit=0`). 그런데 **파이프라인 완료 ~4초 뒤 유휴 시점**에 `PERSPECTIVE`가 0→1로 바뀐다. 실시간 감시기(`PFSPERSPWATCH`) 스택 계측으로 발원 확정:
 
-## 집도 지시 (2개)
+```
+Autodesk.Windows.RibbonListButton.set_Current(RibbonItem)
+ → RibbonListButtonBindings.TrySetCurrent
+ → WPF BindingExpression.UpdateSource
+ → SystemVariable.set_Value → PERSPECTIVE = 1
+```
 
-### A. 뷰포트 사각형 교정 (`CreateNotabDetailViewport`)
-- 현재 `center=(350.75,371.25) width=640.5 height=573.5`(LL 30.5,84.5)를 아래로 교체:
-  - **CenterPoint=(366, 413.5)**, **Width=610**, **Height=489** (LL=(61,169), UR=(671,658) 유지).
-- 로그: `PFSNOTABDETAIL viewport rect LL=(61,169) size=(610,489) center=(366,413.5)`.
-- ★ B(supportExt target)·C(scale 1:4)는 그대로. 뷰포트 크기만 변경.
+= **AutoCAD 리본 컨트롤의 WPF 데이터 바인딩**이 파이프라인의 그래픽스 갱신에 반응해 유휴 시점에 `PERSPECTIVE=1`을 역기입. **우리 코드/LISP/도면 저장뷰 아님**(QSAVE로 0 저장해도 재발). 리본 바인딩 자체는 AutoCAD 내부라 직접 수정 불가 → **지연 flip을 취소하는 방어 가드**로 증상 제거.
 
-### B. #1 마커 기본 승격 (`TryReopenSetNotabPaperSpace`)
-- 파일 마커 `%TEMP%\pfs_notab_paper.flag` 게이트 **제거** → reopen paper-space를 **항상 적용**(기본 ON).
-  - (cycle 40에서 크래시/RECOVER 없이 검증 완료 = 상시 적용 안전.)
-  - 로그: `PFSNOTABDETAIL paper-reopen tilemode=0 ok`(마커 무관 항상).
-- reopen 흐름(생성자 `new Database(false,true)`, `SaveAs(...SecurityParameters)`, WorkingDatabase 미변경)은 그대로 유지.
+## 요구 사항 (설계)
+기존 정적 감시 인프라(`s_perspWatchHandler` / `OnSysVarChangedForPersp` / `PFSPERSPWATCH`)를 재사용해 **스코프 제한 자동 가드**를 추가한다. `IExtensionApplication`은 없으므로 **리액터를 세션당 1회 지연 설치**한다.
 
-## 검증 (Codex)
-- `dotnet build` GREEN(오류 0). Viewport center/width/height 값·마커 게이트 제거 확인.
-- `git diff --check` PASS. 빈 catch 없음. B/C/E·핵심 흐름 무손상. `pfs_notab_paper.flag` 참조 제거 확인(`rg`).
-- REPORT에 교정 좌표·마커 제거 명시.
+1. **가드 상태 필드**(정적): `s_perspGuardUntilUtc`(DateTime), `s_perspGuardValue`(object, 되돌릴 값), 재진입 방지 `s_perspRestoring`(bool), 지연설치 여부 `s_perspGuardInstalled`(bool).
 
-## 라이브 검증 (사용자, 빌드 후)
-1. `PFSNOTABDETAIL` 실행(마커 불필요) → `Details\GD1-001_notab.dwg` 열기.
-2. 판정:
-   - 열자마자 **Title Block 페이퍼 공간**(크래시/RECOVER 없음).
-   - **뷰포트가 도면영역(초록 프레임 안쪽)에 정합**(610×489, LL 61,169).
-   - 서포트 뷰포트 중앙, 1:4.
-3. PASS → 레이아웃 정합 완결 → **N3(치수) 착수**. 미세 오차 시 좌표 재조정.
+2. **지연 설치 헬퍼** `EnsurePerspGuardInstalled()`: `s_perspGuardInstalled==false`일 때만 `Application.SystemVariableChanged += OnSysVarChangedForPersp` 후 플래그 set. **PFSPERSPWATCH 수동 토글과 중복 구독되지 않도록** 구독 상태를 단일화한다(핸들러는 세션 내 최대 1개만 걸리게; 예: 공용 `s_perspHandlerSubscribed` 플래그 하나로 PFSPERSPWATCH·가드 양쪽이 판단, off 토글은 가드가 필요로 하면 해제 금지). 이중 구독·이중 해제 모두 방어.
+
+3. **가드 무장**: `RunNotabDetailPipeline` 진입부(이미 `savedPerspective` 캡처하는 지점) 직후에
+   - `s_perspGuardValue = savedPerspective;`
+   - `s_perspGuardUntilUtc = DateTime.UtcNow + TimeSpan.FromSeconds(8);` (창 8초, 상수 또는 env `PFS_PERSP_GUARD_SEC`로 조정 가능)
+   - `EnsurePerspGuardInstalled();`
+   - 무장 사실 FileDiag 로깅.
+
+4. **가드 발화**: `OnSysVarChangedForPersp` 핸들러에서 기존 로깅 **뒤에**, 아래 조건 모두 참이면 교정:
+   - `s_perspRestoring == false`
+   - `DateTime.UtcNow <= s_perspGuardUntilUtc` (창 내)
+   - `s_perspGuardValue != null` 이고 현재 `PERSPECTIVE` 값이 `s_perspGuardValue`와 **다름**
+   교정 절차:
+   - `s_perspRestoring = true;` (finally에서 false 복원)
+   - `Application.SetSystemVariable("PERSPECTIVE", s_perspGuardValue);`
+   - REGEN은 **이 핸들러 컨텍스트(WPF 바인딩/유휴)에서 직접 호출 시 재진입 위험** → `Application.Idle`에 **one-shot** 핸들러를 걸어 다음 유휴에 `doc.Editor.Regen()` 후 자기 해제하는 방식으로 지연 실행(직접 Regen 호출 금지). Regen 실패는 catch+FileDiag.
+   - 교정 후 **`s_perspGuardUntilUtc`를 과거로 밀어 즉시 disarm**(리본이 재차 1을 써도 핑퐁 방지, 1회 교정 원칙). FileDiag `가드 교정 X->Y` 기록.
+   - `SetSystemVariable`이 다시 `SystemVariableChanged`를 재귀 발화하므로 `s_perspRestoring` 가드로 재진입 무시.
+
+5. **범위 밖 flip 보존**: 창(8초) 밖의 `PERSPECTIVE` 변경(사용자가 의도적으로 3DORBIT/설정)은 **건드리지 않는다**. 가드는 오직 "파이프라인 직후 창 내 리본發 flip"만 취소.
+
+## 방어적 프로그래밍
+- 모든 이벤트/SetSystemVariable/Regen은 try/catch + FileDiag(빈 catch 금지).
+- 재진입(`s_perspRestoring`)·이중구독·NRE(doc null) 방어.
+
+## 검증
+- MSBuild Debug GREEN(에러 0).
+- 계측 로그 기대: 다음 `dev_test` 런에서 `PFSPERSPWATCH PERSPECTIVE -> 1` 발화 시 곧바로 `가드 교정 1->0` + 다음 유휴 REGEN, 최종 화면 parallel 유지. 창 밖 수동 flip은 유지되는지 사용자 확인.
+
+## 참고 (현재 파일 상태)
+- `RunNotabDetailPipeline`: PERSPECTIVE 저장/finally 복원 + `DescribeActiveViewPerspective` 뷰 로깅 이미 존재(커밋 37f7c72). finally의 기존 복원은 명령 종료 시점이라 **지연 flip을 못 잡음** — 이번 가드가 그 공백(유휴 시점)을 메운다. 기존 finally 로직은 유지.
+- `PFSPERSPWATCH`/`OnSysVarChangedForPersp`/스택 로깅: 커밋 6ad9e06.
