@@ -2846,7 +2846,7 @@ namespace PlantFlow_Support
         }
 
         if (!skipViewport && viewportId != ObjectId.Null)
-          this.ConfigureNotabDetailViewport(detailDb, viewportId, solidExt, "clipped-solid");
+          this.ConfigureNotabDetailViewport(detailDb, viewportId, solidExt, supportExt, "clipped-solid");
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         detailDb.SaveAs(savedPath, DwgVersion.Current);
@@ -3825,7 +3825,7 @@ namespace PlantFlow_Support
       return false;
     }
 
-    private bool ConfigureNotabDetailViewport(Database db, ObjectId viewportId, Extents3d targetExt, string targetSource)
+    private bool ConfigureNotabDetailViewport(Database db, ObjectId viewportId, Extents3d targetExt, Extents3d supportExt, string targetSource)
     {
       if (db == null || viewportId == ObjectId.Null)
         return false;
@@ -3855,12 +3855,16 @@ namespace PlantFlow_Support
           double viewHeight;
           double fitWidth;
           double fitHeight;
-          this.ComputeNotabViewportFit(targetExt, target, viewRight, viewUp, vp.Width, vp.Height, out viewCenter, out viewHeight, out fitWidth, out fitHeight);
+          double stdScale;
+          double targetFill;
+          double actualFill;
+          this.ComputeNotabViewportFit(targetExt, target, viewRight, viewUp, vp.Width, vp.Height, out viewCenter, out viewHeight, out fitWidth, out fitHeight, out stdScale, out targetFill, out actualFill);
 
           vp.ViewTarget = target;
           vp.ViewDirection = viewDir;
           vp.ViewCenter = viewCenter;
           vp.ViewHeight = viewHeight;
+          vp.CustomScale = stdScale;
           vp.TwistAngle = twist;
           // 기본=와이어프레임(0-A 육안 채택). Hidden 은선제거는 opt-in(PFS_NOTAB_USE_HIDDEN=1).
           // 미적용 시 뷰포트는 기본 2D 와이어프레임으로 렌더된다(VisualStyleId 미지정).
@@ -3879,10 +3883,12 @@ namespace PlantFlow_Support
 
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") src=" + (string.IsNullOrWhiteSpace(targetSource) ? "fallback" : targetSource));
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport fit center=(" + this.FormatNumber(viewCenter.X) + "," + this.FormatNumber(viewCenter.Y) + ") ViewHeight=" + this.FormatNumber(viewHeight) + " content=(" + this.FormatNumber(fitWidth) + "," + this.FormatNumber(fitHeight) + ") vp=(" + this.FormatNumber(vp.Width) + "," + this.FormatNumber(vp.Height) + ")");
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport scale std=1:" + this.FormatNumber(1.0 / stdScale) + " viewHeight=" + this.FormatNumber(viewHeight) + " fill=" + this.FormatNumber(actualFill) + " targetFill=" + this.FormatNumber(targetFill) + " content=(" + this.FormatNumber(fitWidth) + "," + this.FormatNumber(fitHeight) + ") vp=(" + this.FormatNumber(vp.Width) + "," + this.FormatNumber(vp.Height) + ")");
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport viewDir=" + this.FormatVectorForCommand(viewDir) + " target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") twist=" + this.FormatNumber(twist) + " hidden=" + hiddenOk + " shadePlot=" + shadeOk + " fit=dynamic");
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 2차 view설정 직전");
           tr.Commit();
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 2차 view설정 완료");
+          this.LogNotabDimProbe(db, viewportId, supportExt, fitWidth, fitHeight);
           return true;
         }
       }
@@ -3921,12 +3927,15 @@ namespace PlantFlow_Support
       }
     }
 
-    private void ComputeNotabViewportFit(Extents3d ext, Point3d target, Vector3d right, Vector3d up, double viewportWidth, double viewportHeight, out Point2d viewCenter, out double viewHeight, out double contentWidth, out double contentHeight)
+    private void ComputeNotabViewportFit(Extents3d ext, Point3d target, Vector3d right, Vector3d up, double viewportWidth, double viewportHeight, out Point2d viewCenter, out double viewHeight, out double contentWidth, out double contentHeight, out double stdScale, out double targetFill, out double actualFill)
     {
       viewCenter = new Point2d(0.0, 0.0);
       viewHeight = 100.0;
       contentWidth = 0.0;
       contentHeight = 0.0;
+      stdScale = 1.0;
+      targetFill = this.GetEnvDouble("PFS_NOTAB_TARGET_FILL", 0.6, 0.1, 0.95);
+      actualFill = 0.0;
 
       try
       {
@@ -3957,17 +3966,128 @@ namespace PlantFlow_Support
 
         contentWidth = System.Math.Max(maxR - minR, 1.0);
         contentHeight = System.Math.Max(maxU - minU, 1.0);
-        double pad = this.GetEnvDouble("PFS_NOTAB_FIT_PAD", 0.15, 0.0, 2.0);
         double aspect = (viewportWidth > 1e-6 && viewportHeight > 1e-6) ? viewportWidth / viewportHeight : 1.0;
         viewCenter = new Point2d((minR + maxR) / 2.0, (minU + maxU) / 2.0);
-        viewHeight = System.Math.Max(contentHeight * (1.0 + pad), (contentWidth * (1.0 + pad)) / aspect);
+        double requiredViewHeight = System.Math.Max(contentHeight / targetFill, (contentWidth / targetFill) / aspect);
+        double maxScale = viewportHeight > 1e-6 && requiredViewHeight > 1e-6 ? viewportHeight / requiredViewHeight : 1.0;
+        stdScale = this.SelectNotabStandardScale(maxScale);
+        viewHeight = viewportHeight > 1e-6 && stdScale > 1e-9 ? viewportHeight / stdScale : requiredViewHeight;
         if (viewHeight <= 1e-6)
           viewHeight = 100.0;
+        actualFill = System.Math.Max(contentHeight / viewHeight, contentWidth / (viewHeight * aspect));
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport fit 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
+    }
+
+    private double SelectNotabStandardScale(double maxScale)
+    {
+      double[] scales = new double[] { 1.0, 0.5, 0.2, 0.1, 0.05, 0.04, 0.02 };
+      if (maxScale <= 1e-9)
+        return scales[scales.Length - 1];
+
+      for (int i = 0; i < scales.Length; i++)
+      {
+        if (scales[i] <= maxScale + 1e-9)
+          return scales[i];
+      }
+
+      return scales[scales.Length - 1];
+    }
+
+    private void LogNotabDimProbe(Database db, ObjectId viewportId, Extents3d supportExt, double realW, double realH)
+    {
+      if (db == null || viewportId == ObjectId.Null)
+        return;
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          Viewport vp = tr.GetObject(viewportId, OpenMode.ForRead, false) as Viewport;
+          if (vp == null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL dim-probe skip: viewport null id=" + viewportId);
+            tr.Commit();
+            return;
+          }
+
+          Point3d[] corners = this.GetExtentsCorners(supportExt);
+          Extents3d paperExt = new Extents3d();
+          bool hasPaper = false;
+          for (int i = 0; i < corners.Length; i++)
+          {
+            Point3d paper = this.NotabProjectWcsToPaper(vp, corners[i]);
+            if (!hasPaper)
+            {
+              paperExt = new Extents3d(paper, paper);
+              hasPaper = true;
+            }
+            else
+            {
+              paperExt.AddPoint(paper);
+            }
+          }
+
+          Point3d supportCenter = new Point3d(
+            (supportExt.MinPoint.X + supportExt.MaxPoint.X) / 2.0,
+            (supportExt.MinPoint.Y + supportExt.MaxPoint.Y) / 2.0,
+            (supportExt.MinPoint.Z + supportExt.MaxPoint.Z) / 2.0);
+          Point3d pipePaper = this.NotabProjectWcsToPaper(vp, supportCenter);
+          double scale = this.GetNotabViewportScale(vp);
+
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL dim-probe support-paper=" + (hasPaper ? this.FormatExtents(paperExt) : "none") + " pipeCenterX(paper)=" + this.FormatNumber(pipePaper.X) + " realW=" + this.FormatNumber(realW) + " realH=" + this.FormatNumber(realH) + " scale=" + this.FormatNumber(scale) + " vpCenter=(" + this.FormatNumber(vp.CenterPoint.X) + "," + this.FormatNumber(vp.CenterPoint.Y) + ") vpTarget=(" + this.FormatNumber(vp.ViewTarget.X) + "," + this.FormatNumber(vp.ViewTarget.Y) + "," + this.FormatNumber(vp.ViewTarget.Z) + ")");
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL dim-probe 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private Point3d NotabProjectWcsToPaper(Viewport vp, Point3d wcs)
+    {
+      if (vp == null)
+        return Point3d.Origin;
+
+      try
+      {
+        Vector3d viewDir = vp.ViewDirection;
+        if (viewDir.Length < 1e-9)
+          viewDir = Vector3d.ZAxis;
+
+        Point3d viewTarget = vp.ViewTarget;
+        Matrix3d dcsToWcs =
+          Matrix3d.Rotation(-vp.TwistAngle, viewDir, viewTarget) *
+          Matrix3d.Displacement(viewTarget - Point3d.Origin) *
+          Matrix3d.PlaneToWorld(viewDir);
+        Matrix3d wcsToDcs = dcsToWcs.Inverse();
+
+        Point3d dcs = wcs.TransformBy(wcsToDcs);
+        double scale = this.GetNotabViewportScale(vp);
+        double paperX = vp.CenterPoint.X + (dcs.X - vp.ViewCenter.X) * scale;
+        double paperY = vp.CenterPoint.Y + (dcs.Y - vp.ViewCenter.Y) * scale;
+        return new Point3d(paperX, paperY, 0.0);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL project 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return Point3d.Origin;
+      }
+    }
+
+    private double GetNotabViewportScale(Viewport vp)
+    {
+      if (vp == null)
+        return 1.0;
+      if (vp.CustomScale > 1e-9)
+        return vp.CustomScale;
+      if (vp.Height > 1e-9 && vp.ViewHeight > 1e-9)
+        return vp.Height / vp.ViewHeight;
+      return 1.0;
     }
 
     private void GetNotabViewBasis(out Vector3d viewDir, out Vector3d up, out Vector3d right)

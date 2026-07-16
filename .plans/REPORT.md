@@ -1,29 +1,32 @@
 # REPORT - Codex -> Claude
 
-- cycle: 46
+- cycle: 47
 - status: done
 - commit: HEAD (최종 해시는 Codex 완료 보고 참조)
-- title: 무탭 배관 선택 tiebreak를 서포트 BOP 표고 매칭으로 교체
+- title: N3-0/N3-a 무탭 뷰포트 스케일 표준화 + WCS→paper 투영 계측
 
 ## 변경 요약
 - `PlantFlow_Support/Core/Commands.cs`
-  - `AutoIncludeRelatedParts`에서 서포트 `BOP`를 `ps.dl_manager.GetProperties(..., ["BOP"], true)`로 직접 조회하는 `TryGetSupportBop` 헬퍼 추가.
-  - rect 통과 필터(`DoesPipeAxisProjectThroughSupport`)는 유지하고, 통과 후보 선택만 `|(pipeCenterZ - radius) - supportBop|` 최소 기준으로 교체.
-  - `PFS_NOTAB_BOP_TOL` 기본값 10mm를 추가하고, BOP 오차가 tol 내 동률이면 기존 rect 중심 score로 2차 선택.
-  - BOP가 없거나 후보 BOP 계산이 불가하면 기존 rect 중심 score 폴백을 유지해 배관 누락을 방지.
-  - include/dropAmbiguous 로그에 `reason`, `bopErr`, `pipeCenterZ`, `radius`, `bop`, `bopTol`, `passCount`를 기록.
+  - `ConfigureNotabDetailViewport`에 `supportExt` 전달을 추가해 뷰포트 설정 확정 후 dim-probe 계측에 사용.
+  - `ComputeNotabViewportFit`에서 `PFS_NOTAB_TARGET_FILL` 기본 0.6 기준으로 필요 viewHeight를 계산하고, `{1, 1/2, 1/5, 1/10, 1/20, 1/25, 1/50}` 표준 배율 중 가장 큰 수용 가능 scale을 선택.
+  - 선택된 표준 배율로 `vp.ViewHeight = vp.Height / stdScale`, `vp.CustomScale = stdScale`를 명시 설정.
+  - 로그 `PFSNOTABDETAIL viewport scale std=1:N ... fill=... targetFill=...` 추가.
+  - `NotabProjectWcsToPaper`/`GetNotabViewportScale`/`LogNotabDimProbe` 추가.
+  - `supportExt` 8코너와 support 중심을 paper 좌표로 투영해 `PFSNOTABDETAIL dim-probe support-paper=... pipeCenterX(paper)=...` 로그를 남김.
 
 ## 보존 확인
 - 대상 파일은 `PlantFlow_Support/Core/Commands.cs`만 수정.
-- 클립, 동적 피팅, PERSPECTIVE guard, wireframe, 610x489 viewport, line tag 전처리, rect 통과 필터는 수정하지 않음.
-- 기존 작업트리의 `dev_test.bat` 수정 및 미추적 파일들은 범위 밖이라 건드리지 않음.
+- 치수 객체는 생성하지 않음.
+- 클립, held-pipe, perspective guard, wireframe 기본, 610x489 viewport 생성 좌표는 수정하지 않음.
+- 기존 미추적 파일들은 범위 밖이라 건드리지 않음.
 
 ## 검증
 - 변경 주변 20줄 이상 수동 확인 완료.
-- `rg -n "new NotabPipeIncludeCandidate|TryGetSupportBop|reason=|BOP 부재" .\PlantFlow_Support\Core\Commands.cs`: 호출/로그 참조 확인.
-- `git diff -- .\PlantFlow_Support\Core\Commands.cs`: 대상 diff 확인.
-- 빌드는 프로젝트 규칙상 사용자의 명시 요청이 없어 실행하지 않음.
+- `rg -n "ConfigureNotabDetailViewport\\(|ComputeNotabViewportFit\\(|SelectNotabStandardScale|LogNotabDimProbe|NotabProjectWcsToPaper|GetNotabViewportScale|viewport scale std|dim-probe" .\PlantFlow_Support\Core\Commands.cs`: 참조 확인.
+- `git diff --check -- .\PlantFlow_Support\Core\Commands.cs`: PASS(CRLF 안내만 있음).
+- `dotnet build .\PlantFlow_Support.sln -c Debug`: PASS, 오류 0 / 기존 경고 15.
 
 ## 라이브 확인 포인트
-- `PFS_NOTAB_TEST_TAG=RC1-001` 환경에서 사용자 빌드 후 `dev_test.bat` 실행.
-- 기대 로그: `include ... reason=bop`, BOP 423 기준 Z 약 467 배관의 `bopErr` 최소, Z 약 667 배관은 `dropAmbiguous`.
+- `PFS_NOTAB_TEST_TAG=RC1-001` 환경에서 사용자 라이브 실행.
+- 기대 로그: `viewport scale std=1:N`, `dim-probe support-paper=... pipeCenterX(paper)=...`.
+- 육안 기대: 표준 배율 적용으로 도형이 축소되어 치수/콜아웃 여백이 확보되고, dim-probe paper 좌표가 뷰포트 내 원+사각형 위치와 정렬.
