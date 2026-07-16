@@ -3,62 +3,47 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 42
+- **cycle**: 43
 - **status**: ready
 - **issued_at**: 2026-07-16
-- **title**: 무탭 추출 후 리본 바인딩發 PERSPECTIVE=1 지연 flip 방어 가드(스코프 제한)
+- **title**: 무탭 추출물 서포트 영역 클립(Solid3d Boolean) + 뷰포트 동적 피팅 (Phase 2)
 - **target**: `PlantFlow_Support/Core/Commands.cs` (그 외 무수정)
+- **plan**: `<appDataDir>\scratch\plan_pfs_notab_viewport_review_20260716.md`
 
 ## 착수 전
-- cwd `D:\PlantFlow\PlantFlow_Support`. `Commands.cs`의 무탭/PERSPECTIVE 감시 코드만 손댄다.
-- 빌드 GREEN까지 Codex 확인(MSBuild). 라이브 테스트는 사용자(`dev_test.bat`).
+- cwd `D:\PlantFlow\PlantFlow_Support`. `CopyCleanNotabSolids` / `ConfigureNotabDetailViewport` 및 신규 헬퍼만. 그 외 무수정.
+- 빌드 GREEN(MSBuild Debug, 에러0)까지 Codex 확인. 라이브는 사용자(`dev_test.bat`, 태그=`PFS_NOTAB_TEST_TAG`).
 
-## 배경 — 근본 원인 계측 완료 (커밋 6ad9e06 등)
-`RunNotabDetailPipeline`(무탭 추출) 실행 중엔 활성 모델 `PERSPECTIVE`가 계속 0(계측 `persp enter=0 exit=0`). 그런데 **파이프라인 완료 ~4초 뒤 유휴 시점**에 `PERSPECTIVE`가 0→1로 바뀐다. 실시간 감시기(`PFSPERSPWATCH`) 스택 계측으로 발원 확정:
+## 배경 — 0-B 실측(RC1-001) + 참조 근거
+- 마진 고정(150)으로 이웃 **서포트**는 배제(addedSupport=0) 성공. 그러나 **이웃 배관(200mm 간격) + 관통 파이프 전체 길이(Y 10m)** 가 뷰에 그대로 노출. 사용자 요구=**서포트 영역(bbox)만 잘라내기**.
+- 참조 프로젝트(레거시 OrthoGen, `C:\Users\HT노승환\Documents\PlantFlow_Support`)는 서포트 영역 박스로 3중 클립: ①쿼리박스(`NewQueryByBox`) ②앞뒤 클립(`m_frontClip=boxSize/2,m_backClip=+boxSize`) ③클립솔리드(`NewDwgSetClipper(cubeSolid, GetClipInlateBy())`). 무탭은 OrthoGen 없음 → **Solid3d Boolean으로 등가 구현**.
 
-```
-Autodesk.Windows.RibbonListButton.set_Current(RibbonItem)
- → RibbonListButtonBindings.TrySetCurrent
- → WPF BindingExpression.UpdateSource
- → SystemVariable.set_Value → PERSPECTIVE = 1
-```
+## 요구 1 — 서포트 영역 클립 (Solid3d Boolean Intersection)
+`CopyCleanNotabSolids`(라인 ~3272) **내부**에서, `supportExt` 산출 후 각 `clean` solid를 append·metadata strip한 **직후** 클립한다. **클립 후 ext만 `solidExt`에 누적**(기존 out 파라미터 정합 유지).
 
-= **AutoCAD 리본 컨트롤의 WPF 데이터 바인딩**이 파이프라인의 그래픽스 갱신에 반응해 유휴 시점에 `PERSPECTIVE=1`을 역기입. **우리 코드/LISP/도면 저장뷰 아님**(QSAVE로 0 저장해도 재발). 리본 바인딩 자체는 AutoCAD 내부라 직접 수정 불가 → **지연 flip을 취소하는 방어 가드**로 증상 제거.
+1. **oriented 클립 박스**(WCS AABB 아님 — 축 정합 필수): basis `viewDir=s_isoPipeAxis`(정규화, invalid 시 XAxis), `up=s_isoPipeUp`(정규화), `right=up×viewDir`. `supportExt` 8코너(`GetExtentsCorners` 재사용)를 이 basis에 dot 투영해 right/up/viewDir 각 축의 min/max 산출 → 인플레이트 마진(기본 co-loc 마진급, env `PFS_NOTAB_CLIP_MARGIN`, 기본 예: 100~150mm) 적용. **viewDir(깊이) 방향은 서포트 깊이+소폭 마진으로 제한**(관통 파이프 길이 트림 핵심). 이 basis로 `Solid3d.CreateBox` 후 basis 회전+중심 이동 Matrix3d로 배치(oriented box).
+   - 접촉 선필터(Gemini): 클립 대상은 **서포트 bbox(인플레이트)와 실제 교차하는 solid만**. 비교차 solid는 Boolean 없이 제외(파편·부하 방지).
+2. **Boolean INTERSECT**: solid마다 클립박스 **복제본**(`clipBox.Clone()`)을 인자로 `solid.BooleanOperation(BooleanOperationType.Intersection, clipCopy)`. 원본 clipBox 재사용 금지(소비됨→eInvalidInput).
+   - **empty 결과 처리**: `eNoIntersection` 등 예외 try/catch, 연산 후 `Volume<=1e-9` 또는 `IsNull` → 해당 solid는 detailDb에서 **Erase/제외**(빈 solid 도면 유입 금지)+로그. `copied` 카운트는 유효 잔존만.
+3. 클립박스 자체·복제본·중간 solid는 DB에 append하지 않는다(최종 유효 solid만 유지). 클립박스는 계산용 transient → 사용 후 Dispose.
+4. 방어: 각 Boolean try/catch+FileDiag(빈 catch 금지), 실패 시 해당 solid는 **클립 없이 원본 유지**(안전 폴백)+로그. 로그 예: `PFSNOTABDETAIL clip solids=N kept=K trimmed=T dropped=D marginDepth=..`.
 
-## 요구 사항 (설계)
-기존 정적 감시 인프라(`s_perspWatchHandler` / `OnSysVarChangedForPersp` / `PFSPERSPWATCH`)를 재사용해 **스코프 제한 자동 가드**를 추가한다. `IExtensionApplication`은 없으므로 **리액터를 세션당 1회 지연 설치**한다.
+## 요구 2 — 뷰포트 동적 피팅
+`ConfigureNotabDetailViewport`(라인 ~3584)의 고정 `CustomScale=0.25` + `ViewCenter=(0,0)`를 **클립 후 콘텐츠에 맞춘 동적 피팅**으로 교체.
+- basis(`dir/up/right`, twist는 `ComputeNotabViewportTwist` 동일)로, **클립 후 solidExt(또는 supportExt) 8코너를 `(corner - ViewTarget)` 기준 right/up에 투영**해 min/max→ 폭 w, 높이 h 산출.
+- `ViewCenter=(cx,cy)`(투영 중심), `ViewHeight = max(h*(1+pad), w*(1+pad)/aspect)`. aspect=뷰포트 Width/Height(현 610×489 유지). pad=여백(기본 예: 0.15, env `PFS_NOTAB_FIT_PAD`).
+- `CustomScale`은 제거하거나 ViewHeight와 정합되게(표준스케일 라운딩은 선택). ViewCenter(0,0) 제거.
+- 재사용 후보: `GetExtentsCorners`, `CaptureIsoSelectionMetrics`의 dot 투영 패턴.
 
-1. **가드 상태 필드**(정적): `s_perspGuardUntilUtc`(DateTime), `s_perspGuardValue`(object, 되돌릴 값), 재진입 방지 `s_perspRestoring`(bool), 지연설치 여부 `s_perspGuardInstalled`(bool).
-
-2. **지연 설치 헬퍼** `EnsurePerspGuardInstalled()`: `s_perspGuardInstalled==false`일 때만 `Application.SystemVariableChanged += OnSysVarChangedForPersp` 후 플래그 set. **PFSPERSPWATCH 수동 토글과 중복 구독되지 않도록** 구독 상태를 단일화한다(핸들러는 세션 내 최대 1개만 걸리게; 예: 공용 `s_perspHandlerSubscribed` 플래그 하나로 PFSPERSPWATCH·가드 양쪽이 판단, off 토글은 가드가 필요로 하면 해제 금지). 이중 구독·이중 해제 모두 방어.
-
-3. **가드 무장**: `RunNotabDetailPipeline` 진입부(이미 `savedPerspective` 캡처하는 지점) 직후에
-   - `s_perspGuardValue = savedPerspective;`
-   - `s_perspGuardUntilUtc = DateTime.UtcNow + TimeSpan.FromSeconds(8);` (창 8초, 상수 또는 env `PFS_PERSP_GUARD_SEC`로 조정 가능)
-   - `EnsurePerspGuardInstalled();`
-   - 무장 사실 FileDiag 로깅.
-
-4. **가드 발화**: `OnSysVarChangedForPersp` 핸들러에서 기존 로깅 **뒤에**, 아래 조건 모두 참이면 교정:
-   - `s_perspRestoring == false`
-   - `DateTime.UtcNow <= s_perspGuardUntilUtc` (창 내)
-   - `s_perspGuardValue != null` 이고 현재 `PERSPECTIVE` 값이 `s_perspGuardValue`와 **다름**
-   교정 절차:
-   - `s_perspRestoring = true;` (finally에서 false 복원)
-   - `Application.SetSystemVariable("PERSPECTIVE", s_perspGuardValue);`
-   - REGEN은 **이 핸들러 컨텍스트(WPF 바인딩/유휴)에서 직접 호출 시 재진입 위험** → `Application.Idle`에 **one-shot** 핸들러를 걸어 다음 유휴에 `doc.Editor.Regen()` 후 자기 해제하는 방식으로 지연 실행(직접 Regen 호출 금지). Regen 실패는 catch+FileDiag.
-   - 교정 후 **`s_perspGuardUntilUtc`를 과거로 밀어 즉시 disarm**(리본이 재차 1을 써도 핑퐁 방지, 1회 교정 원칙). FileDiag `가드 교정 X->Y` 기록.
-   - `SetSystemVariable`이 다시 `SystemVariableChanged`를 재귀 발화하므로 `s_perspRestoring` 가드로 재진입 무시.
-
-5. **범위 밖 flip 보존**: 창(8초) 밖의 `PERSPECTIVE` 변경(사용자가 의도적으로 3DORBIT/설정)은 **건드리지 않는다**. 가드는 오직 "파이프라인 직후 창 내 리본發 flip"만 취소.
-
-## 방어적 프로그래밍
-- 모든 이벤트/SetSystemVariable/Regen은 try/catch + FileDiag(빈 catch 금지).
-- 재진입(`s_perspRestoring`)·이중구독·NRE(doc null) 방어.
+## 충돌/보존 (Codex 확인)
+- persp 가드(cycle 42)·`TryReopenSetNotabPaperSpace`·paper-zoom과 무충돌. reopen paper-zoom은 페이퍼 초기화면용이라 디테일 viewport의 ViewTarget/Center/Height 미변경. **610×489 viewport 크기 판별 로직 유지**.
+- 기존 wireframe 기본(Phase1, `PFS_NOTAB_USE_HIDDEN` opt-in) 유지.
 
 ## 검증
-- MSBuild Debug GREEN(에러 0).
-- 계측 로그 기대: 다음 `dev_test` 런에서 `PFSPERSPWATCH PERSPECTIVE -> 1` 발화 시 곧바로 `가드 교정 1->0` + 다음 유휴 REGEN, 최종 화면 parallel 유지. 창 밖 수동 flip은 유지되는지 사용자 확인.
+- MSBuild Debug GREEN(에러0). 변경 주변 20줄 수동 확인.
+- 라이브 기대(RC1-001, `PFS_NOTAB_TEST_TAG=RC1-001`): 로그 `clip solids/kept/trimmed/dropped`, 이웃 배관 소멸·관통 파이프 길이 트림, `viewport fit ViewHeight/center=..`. 육안: 서포트 영역만 프레임에 꽉 참.
+- env: `PFS_NOTAB_CLIP_MARGIN`, `PFS_NOTAB_FIT_PAD` 조정 가능.
 
-## 참고 (현재 파일 상태)
-- `RunNotabDetailPipeline`: PERSPECTIVE 저장/finally 복원 + `DescribeActiveViewPerspective` 뷰 로깅 이미 존재(커밋 37f7c72). finally의 기존 복원은 명령 종료 시점이라 **지연 flip을 못 잡음** — 이번 가드가 그 공백(유휴 시점)을 메운다. 기존 finally 로직은 유지.
-- `PFSPERSPWATCH`/`OnSysVarChangedForPersp`/스택 로깅: 커밋 6ad9e06.
+## 참고 (현재 상태)
+- Phase1 커밋 999e1f9(와이어프레임 기본). 마진 접촉판정 73b9974. persp 가드 6e01a9b.
+- `s_isoPipeAxis`/`s_isoPipeUp`/`s_isoRealWidth/Height`는 `RunNotabDetailPipeline` 진입부에서 세팅됨(클립/피팅에서 참조 가능).

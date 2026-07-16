@@ -11,6 +11,11 @@ _완료 항목은 여기서 지우고 `CHANGELOG.md`로 옮긴다._
 - [x] 서포트만 선택시 파이프+유볼트 자동포함: AutoIncludeRelatedParts(서포트 bbox+margin150 교차 Pipe/Support). 유볼트=AcPpDb3dSupport. PASS
 - [x] 초기화면 zoom extents: reopen 오버올 뷰포트(활성화前 Number=-1이라 dims 판별) 뷰를 페이퍼 extents로. PASS
 - [x] dev 완전 자동화: dev_test.bat=SECURELOAD0+NETLOAD+PFSNOTABTEST(태그 자동선택), Claude가 C:\Temp\pfs_diag.log 직접 read
+- [x] 무탭 자동포함 접촉판정(마진 크기비례→고정150, 73b9974). 이웃 서포트 배제
+- [x] 무탭 perspective flip 방어 가드(리본 바인딩發, cycle42 6e01a9b). 계측=PFSPERSPWATCH+스택
+- [x] 무탭 뷰포트 와이어프레임 기본화(Phase1, 999e1f9). Hidden=PFS_NOTAB_USE_HIDDEN opt-in
+- [ ] **무탭 서포트 영역 클립+동적피팅(Phase2, cycle43 HANDOFF ready)**: Solid3d Boolean으로 서포트 bbox만 잘라내기(이웃 배관·관통 길이 제거)+뷰포트 콘텐츠 피팅. 근거=참조 OrthoGen 3중클립. 계획=plan_pfs_notab_viewport_review_20260716.md
+- [ ] **[별도 트랙] 무탭 2D 평면화 결정**: 뷰포트 유지 vs 진짜 2D 선요소(클립된 solid에 FLATSHOT). N3 설계와 함께 재검토
 - [ ] **N3 치수**: 3D 실측 -> PSDCS 비연관, Main에만 (최대 리스크, 다음). 계획=plan_pfs_notab_n3_20260714.md
 - [ ] N4(밸룬/BOP/BOM=AnnotateViewport 재사용) -> N5(3부채 코드 소멸)
 
