@@ -3934,7 +3934,7 @@ namespace PlantFlow_Support
       contentWidth = 0.0;
       contentHeight = 0.0;
       stdScale = 1.0;
-      targetFill = this.GetEnvDouble("PFS_NOTAB_TARGET_FILL", 0.6, 0.1, 0.95);
+      targetFill = this.GetEnvDouble("PFS_NOTAB_TARGET_FILL", 0.4, 0.1, 0.95);
       actualFill = 0.0;
 
       try
