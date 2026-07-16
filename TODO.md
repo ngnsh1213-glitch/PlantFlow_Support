@@ -14,9 +14,11 @@ _완료 항목은 여기서 지우고 `CHANGELOG.md`로 옮긴다._
 - [x] 무탭 자동포함 접촉판정(마진 크기비례→고정150, 73b9974). 이웃 서포트 배제
 - [x] 무탭 perspective flip 방어 가드(리본 바인딩發, cycle42 6e01a9b). 계측=PFSPERSPWATCH+스택
 - [x] 무탭 뷰포트 와이어프레임 기본화(Phase1, 999e1f9). Hidden=PFS_NOTAB_USE_HIDDEN opt-in
-- [ ] **무탭 서포트 영역 클립+동적피팅(Phase2, cycle43 HANDOFF ready)**: Solid3d Boolean으로 서포트 bbox만 잘라내기(이웃 배관·관통 길이 제거)+뷰포트 콘텐츠 피팅. 근거=참조 OrthoGen 3중클립. 계획=plan_pfs_notab_viewport_review_20260716.md
+- [x] 무탭 서포트 영역 클립+동적피팅(cycle43, f5473d8): Solid3d Boolean로 관통 파이프 길이 트림+콘텐츠 피팅
+- [x] 무탭 held-pipe 선택=서포트 BOP 표고 매칭(cycle44~46, b0e5c71): 같은 라인 평행 배관 중 잡는 배관만. 라이브 PASS
+- [ ] **[N3 입력] 무탭 동적피팅 스케일 표준화**: 현재 ~1:1.4(비표준·과대, 프레임 87%)→치수선·라인번호/BOP 콜아웃 공간 부족. 표준스케일(1:2/5/10) 라운딩+주석 여백. N3 주석 footprint와 함께 설계
 - [ ] **[별도 트랙] 무탭 2D 평면화 결정**: 뷰포트 유지 vs 진짜 2D 선요소(클립된 solid에 FLATSHOT). N3 설계와 함께 재검토
-- [ ] **N3 치수**: 3D 실측 -> PSDCS 비연관, Main에만 (최대 리스크, 다음). 계획=plan_pfs_notab_n3_20260714.md
+- [ ] **N3 치수**: 3D 실측 -> PSDCS 비연관, Main에만 (최대 리스크, 다음). 계획=plan_pfs_notab_n3_20260714.md. ★스케일 표준화+주석여백을 핵심 입력으로
 - [ ] N4(밸룬/BOP/BOM=AnnotateViewport 재사용) -> N5(3부채 코드 소멸)
 
 ## 미해결 / 후속
