@@ -4614,6 +4614,8 @@ namespace PlantFlow_Support
         double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
         double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         double gap = arr + txt * 0.6;
+        double mdx = this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DX", 0.0, -2000.0, 2000.0);
+        double mdy = this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DY", 0.0, -2000.0, 2000.0);
         double h = supportPaperExt.MaxPoint.Y - supportPaperExt.MinPoint.Y;
         double vScale = s_isoRealHeight > 1e-6 ? h / s_isoRealHeight : 0.0;
         double barRealH;
@@ -4625,6 +4627,8 @@ namespace PlantFlow_Support
         Point3d anchor = new Point3d(supportPaperExt.MaxPoint.X, supportPaperExt.MinPoint.Y + barPaperH * 0.5, 0.0);
         Point3d elbow = new Point3d(supportPaperExt.MaxPoint.X + offset * 3.0, supportPaperExt.MinPoint.Y + barPaperH * 0.15, 0.0);
         Point3d textPoint = new Point3d(elbow.X + gap, elbow.Y, 0.0);
+        elbow = new Point3d(elbow.X + mdx, elbow.Y + mdy, 0.0);
+        textPoint = new Point3d(textPoint.X + mdx, textPoint.Y + mdy, 0.0);
         MText content = new MText();
         content.Contents = s_isoSupportDesignation;
         content.TextHeight = txt;
@@ -4661,7 +4665,7 @@ namespace PlantFlow_Support
           leader.LayerId = layerId;
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append designation=" + s_isoSupportDesignation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr));
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append designation=" + s_isoSupportDesignation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
       }
       catch (System.Exception ex)
       {
@@ -4697,12 +4701,16 @@ namespace PlantFlow_Support
         double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
         double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         double gap = arr + txt * 0.6;
+        double pdx = this.GetEnvDouble("PFS_NOTAB_PIPE_CALLOUT_DX", 0.0, -2000.0, 2000.0);
+        double pdy = this.GetEnvDouble("PFS_NOTAB_PIPE_CALLOUT_DY", 0.0, -2000.0, 2000.0);
         Point3d anchor = (!double.IsNaN(pipeCenterXPaper) && !double.IsNaN(pipeCenterYPaper))
           ? new Point3d(pipeCenterXPaper, pipeCenterYPaper, 0.0)
           : new Point3d((minX + maxX) / 2.0, maxY, 0.0);
         double elbowX = double.IsNaN(pipeCenterXPaper) ? anchor.X : pipeCenterXPaper;
         Point3d elbow = new Point3d(elbowX, maxY + offset, 0.0);
         Point3d textPoint = new Point3d(elbow.X + gap, elbow.Y, 0.0);
+        elbow = new Point3d(elbow.X + pdx, elbow.Y + pdy, 0.0);
+        textPoint = new Point3d(textPoint.X + pdx, textPoint.Y + pdy, 0.0);
         string contents = pln;
         if (!string.IsNullOrWhiteSpace(bop))
           contents = string.IsNullOrWhiteSpace(contents) ? "B.O.P +" + bop : contents + "\\P" + "B.O.P +" + bop;
@@ -4743,7 +4751,7 @@ namespace PlantFlow_Support
           leader.LayerId = layerId;
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop) + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop) + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " pdx=" + this.FormatNumber(pdx) + " pdy=" + this.FormatNumber(pdy));
       }
       catch (System.Exception ex)
       {
