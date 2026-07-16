@@ -4613,8 +4613,9 @@ namespace PlantFlow_Support
         double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
         double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         double gap = arr + txt * 0.6;
-        Point3d anchor = new Point3d(supportPaperExt.MaxPoint.X, supportPaperExt.MinPoint.Y + (supportPaperExt.MaxPoint.Y - supportPaperExt.MinPoint.Y) * 0.25, 0.0);
-        Point3d elbow = new Point3d(supportPaperExt.MaxPoint.X + offset, anchor.Y - offset * 0.4, 0.0);
+        double h = supportPaperExt.MaxPoint.Y - supportPaperExt.MinPoint.Y;
+        Point3d anchor = new Point3d(supportPaperExt.MaxPoint.X, supportPaperExt.MinPoint.Y + h * 0.55, 0.0);
+        Point3d elbow = new Point3d(supportPaperExt.MaxPoint.X + offset * 2.0, supportPaperExt.MinPoint.Y + h * 0.10, 0.0);
         Point3d textPoint = new Point3d(elbow.X + gap, elbow.Y, 0.0);
         MText content = new MText();
         content.Contents = s_isoSupportDesignation;
