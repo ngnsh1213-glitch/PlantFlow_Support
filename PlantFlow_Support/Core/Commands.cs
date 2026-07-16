@@ -20,6 +20,8 @@ namespace PlantFlow_Support
     private static Vector3d s_isoPipeUp;
     private static bool s_isoPipeAxisValid;
     private static ObjectId s_isoPipeId;
+    private static Point3d s_isoPipeCenterWcs;
+    private static bool s_isoPipeCenterValid;
     private static double s_isoRealWidth;
     private static double s_isoRealHeight;
     private static bool s_isoRealSizeValid;
@@ -1013,6 +1015,8 @@ namespace PlantFlow_Support
       s_isoPipeAxis = Vector3d.XAxis;
       s_isoPipeUp = Vector3d.ZAxis;
       s_isoPipeId = ObjectId.Null;
+      s_isoPipeCenterWcs = Point3d.Origin;
+      s_isoPipeCenterValid = false;
       s_isoRealWidth = 0.0;
       s_isoRealHeight = 0.0;
       s_isoRealSizeValid = false;
@@ -1030,6 +1034,7 @@ namespace PlantFlow_Support
       s_isoPipeAxisValid = this.TryGetSelectionPipeAxis(doc.Database, selectedIds, out pipeAxis, out pipeId);
       s_isoPipeId = pipeId;
       s_isoPipeAxis = s_isoPipeAxisValid ? pipeAxis : Vector3d.XAxis;
+      this.CaptureNotabPipeCenter(doc.Database, s_isoPipeId);
       this.CaptureIsoSelectionMetrics(doc.Database, selectedIds);
 
       // [방어] 파이프라인이 사이드DB/Plant explode 부작용으로 활성 뷰를 Perspective로 뒤집는
@@ -1892,6 +1897,8 @@ namespace PlantFlow_Support
       s_isoPipeAxis = Vector3d.XAxis;
       s_isoPipeUp = Vector3d.ZAxis;
       s_isoPipeId = ObjectId.Null;
+      s_isoPipeCenterWcs = Point3d.Origin;
+      s_isoPipeCenterValid = false;
       s_isoRealWidth = 0.0;
       s_isoRealHeight = 0.0;
       s_isoRealSizeValid = false;
@@ -3985,6 +3992,46 @@ namespace PlantFlow_Support
       }
     }
 
+    private void CaptureNotabPipeCenter(Database db, ObjectId pipeId)
+    {
+      s_isoPipeCenterWcs = Point3d.Origin;
+      s_isoPipeCenterValid = false;
+      if (db == null || pipeId == ObjectId.Null)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe center skip: db/id invalid id=" + pipeId);
+        return;
+      }
+
+      try
+      {
+        PSUtil ps = Commands.PSUtil;
+        if (ps == null) ps = new PSUtil();
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          Point3d p0;
+          Vector3d dir;
+          double radius;
+          if (this.TryGetPipeAxisFromId(tr, pipeId, ps, out p0, out dir, out radius))
+          {
+            s_isoPipeCenterWcs = p0;
+            s_isoPipeCenterValid = true;
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe center captured wcs=(" + this.FormatNumber(p0.X) + "," + this.FormatNumber(p0.Y) + "," + this.FormatNumber(p0.Z) + ") id=" + pipeId);
+          }
+          else
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe center invalid id=" + pipeId);
+          }
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        s_isoPipeCenterWcs = Point3d.Origin;
+        s_isoPipeCenterValid = false;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe center 예외 id=" + pipeId + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
     private double SelectNotabStandardScale(double maxScale)
     {
       double[] scales = new double[] { 1.0, 0.5, 0.2, 0.1, 0.05, 0.04, 0.02 };
@@ -4019,10 +4066,11 @@ namespace PlantFlow_Support
 
           Extents3d paperExt;
           double pipeCenterXPaper;
-          bool hasPaper = this.TryComputeNotabDimPaperGeometry(vp, supportExt, out paperExt, out pipeCenterXPaper);
+          double pipeCenterYPaper;
+          bool hasPaper = this.TryComputeNotabDimPaperGeometry(vp, supportExt, out paperExt, out pipeCenterXPaper, out pipeCenterYPaper);
           double scale = this.GetNotabViewportScale(vp);
 
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL dim-probe support-paper=" + (hasPaper ? this.FormatExtents(paperExt) : "none") + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " realW=" + this.FormatNumber(realW) + " realH=" + this.FormatNumber(realH) + " scale=" + this.FormatNumber(scale) + " vpCenter=(" + this.FormatNumber(vp.CenterPoint.X) + "," + this.FormatNumber(vp.CenterPoint.Y) + ") vpTarget=(" + this.FormatNumber(vp.ViewTarget.X) + "," + this.FormatNumber(vp.ViewTarget.Y) + "," + this.FormatNumber(vp.ViewTarget.Z) + ")");
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL dim-probe support-paper=" + (hasPaper ? this.FormatExtents(paperExt) : "none") + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " realW=" + this.FormatNumber(realW) + " realH=" + this.FormatNumber(realH) + " scale=" + this.FormatNumber(scale) + " vpCenter=(" + this.FormatNumber(vp.CenterPoint.X) + "," + this.FormatNumber(vp.CenterPoint.Y) + ") vpTarget=(" + this.FormatNumber(vp.ViewTarget.X) + "," + this.FormatNumber(vp.ViewTarget.Y) + "," + this.FormatNumber(vp.ViewTarget.Z) + ")");
           tr.Commit();
         }
       }
@@ -4032,10 +4080,11 @@ namespace PlantFlow_Support
       }
     }
 
-    private bool TryComputeNotabDimPaperGeometry(Viewport vp, Extents3d supportExt, out Extents3d paperExt, out double pipeCenterXPaper)
+    private bool TryComputeNotabDimPaperGeometry(Viewport vp, Extents3d supportExt, out Extents3d paperExt, out double pipeCenterXPaper, out double pipeCenterYPaper)
     {
       paperExt = new Extents3d();
       pipeCenterXPaper = double.NaN;
+      pipeCenterYPaper = double.NaN;
       if (vp == null)
         return false;
 
@@ -4062,7 +4111,20 @@ namespace PlantFlow_Support
           (supportExt.MinPoint.Y + supportExt.MaxPoint.Y) / 2.0,
           (supportExt.MinPoint.Z + supportExt.MaxPoint.Z) / 2.0);
         Point3d pipePaper = this.NotabProjectWcsToPaper(vp, supportCenter);
+        if (s_isoPipeCenterValid)
+        {
+          try
+          {
+            pipePaper = this.NotabProjectWcsToPaper(vp, s_isoPipeCenterWcs);
+          }
+          catch (System.Exception px)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe center project 예외: " + px.GetType().Name + ": " + px.Message);
+            pipePaper = this.NotabProjectWcsToPaper(vp, supportCenter);
+          }
+        }
         pipeCenterXPaper = pipePaper.X;
+        pipeCenterYPaper = pipePaper.Y;
         return hasPaper;
       }
       catch (System.Exception ex)
@@ -4133,7 +4195,8 @@ namespace PlantFlow_Support
 
           Extents3d supportPaperExt;
           double pipeCenterXPaper;
-          if (!this.TryComputeNotabDimPaperGeometry(vp, supportExt, out supportPaperExt, out pipeCenterXPaper))
+          double pipeCenterYPaper;
+          if (!this.TryComputeNotabDimPaperGeometry(vp, supportExt, out supportPaperExt, out pipeCenterXPaper, out pipeCenterYPaper))
           {
             PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append skip: paper geometry 실패");
             tr.Commit();
@@ -4153,7 +4216,7 @@ namespace PlantFlow_Support
           ObjectId textStyleId;
           ObjectId dimStyleId;
           this.EnsureIsoAnnotationResources(db, tr, out layerId, out textStyleId, out dimStyleId);
-          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, pipeCenterXPaper, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId);
+          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, pipeCenterXPaper, pipeCenterYPaper, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId);
           tr.Commit();
         }
       }
@@ -4163,7 +4226,7 @@ namespace PlantFlow_Support
       }
     }
 
-    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, double pipeCenterXPaper, double realW, double realH, ObjectId dimStyleId, ObjectId layerId)
+    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double realW, double realH, ObjectId dimStyleId, ObjectId layerId)
     {
       if (tr == null || layoutBtr == null)
         return;
@@ -4190,34 +4253,51 @@ namespace PlantFlow_Support
         double txt = this.GetEnvDouble("PFS_NOTAB_DIM_TXT", 2.5, 0.5, 20.0);
         double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", txt * 3.0, txt, 100.0);
         double stack = txt * 2.5;
-        double splitY = maxY + offset;
-        double totalY = splitY + stack;
+        double centerY = (minY + maxY) / 2.0;
+        bool horizontalBottom = !double.IsNaN(pipeCenterYPaper) && pipeCenterYPaper < centerY - 1e-6;
+        double horizontalBaseY = horizontalBottom ? minY : maxY;
+        double splitY = horizontalBottom ? minY - offset : maxY + offset;
+        double totalY = horizontalBottom ? splitY - stack : splitY + stack;
         double verticalX = minX - offset;
         double leftReal = double.NaN;
         double rightReal = double.NaN;
+        double splitGuardLimit = System.Math.Min(txt * 2.0, txt * 1.6 * 2.0);
+        bool splitGuard = false;
 
         bool splitOk = !double.IsNaN(pipeCenterXPaper) && pipeCenterXPaper > minX + 1e-6 && pipeCenterXPaper < maxX - 1e-6;
         if (splitOk)
         {
           leftReal = realW * (pipeCenterXPaper - minX) / paperW;
           rightReal = realW - leftReal;
-          RotatedDimension dimLeft = PSUtil.CreateHorizontalDimension(new Point3d(minX, maxY, 0.0), new Point3d(pipeCenterXPaper, maxY, 0.0), new Point3d(minX, splitY, 0.0), Matrix3d.Identity, dimStyleId);
-          RotatedDimension dimRight = PSUtil.CreateHorizontalDimension(new Point3d(pipeCenterXPaper, maxY, 0.0), new Point3d(maxX, maxY, 0.0), new Point3d(pipeCenterXPaper, splitY, 0.0), Matrix3d.Identity, dimStyleId);
-          this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimLeft, dimStyleId, layerId, leftReal, txt, "dimSplitL");
-          this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimRight, dimStyleId, layerId, rightReal, txt, "dimSplitR");
+          double leftPaper = pipeCenterXPaper - minX;
+          double rightPaper = maxX - pipeCenterXPaper;
+          splitGuard = leftPaper < splitGuardLimit || rightPaper < splitGuardLimit;
+          if (!splitGuard)
+          {
+            RotatedDimension dimLeft = PSUtil.CreateHorizontalDimension(new Point3d(minX, horizontalBaseY, 0.0), new Point3d(pipeCenterXPaper, horizontalBaseY, 0.0), new Point3d(minX, splitY, 0.0), Matrix3d.Identity, dimStyleId);
+            RotatedDimension dimRight = PSUtil.CreateHorizontalDimension(new Point3d(pipeCenterXPaper, horizontalBaseY, 0.0), new Point3d(maxX, horizontalBaseY, 0.0), new Point3d(pipeCenterXPaper, splitY, 0.0), Matrix3d.Identity, dimStyleId);
+            this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimLeft, dimStyleId, layerId, leftReal, txt, "dimSplitL");
+            this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimRight, dimStyleId, layerId, rightReal, txt, "dimSplitR");
+          }
+          else
+          {
+            leftReal = double.NaN;
+            rightReal = double.NaN;
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append split guard centerX=" + this.FormatNumber(pipeCenterXPaper) + " leftPaper=" + this.FormatNumber(leftPaper) + " rightPaper=" + this.FormatNumber(rightPaper) + " limit=" + this.FormatNumber(splitGuardLimit));
+          }
         }
         else
         {
           PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append split skip centerX=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " paperMinX=" + this.FormatNumber(minX) + " paperMaxX=" + this.FormatNumber(maxX));
         }
 
-        RotatedDimension dimTotal = PSUtil.CreateHorizontalDimension(new Point3d(minX, maxY, 0.0), new Point3d(maxX, maxY, 0.0), new Point3d(minX, totalY, 0.0), Matrix3d.Identity, dimStyleId);
+        RotatedDimension dimTotal = PSUtil.CreateHorizontalDimension(new Point3d(minX, horizontalBaseY, 0.0), new Point3d(maxX, horizontalBaseY, 0.0), new Point3d(minX, totalY, 0.0), Matrix3d.Identity, dimStyleId);
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimTotal, dimStyleId, layerId, realW, txt, "dimH");
 
         RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(minX, minY, 0.0), new Point3d(minX, maxY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, realH, txt, "dimV");
 
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset));
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset));
       }
       catch (System.Exception ex)
       {

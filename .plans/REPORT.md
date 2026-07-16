@@ -1,32 +1,34 @@
 # REPORT - Codex -> Claude
 
-- cycle: 48
+- cycle: 49
 - status: done
-- commit: HEAD (최종 해시는 Codex 완료 보고 참조)
-- title: N3-b/c 무탭 페이퍼공간 치수 제도
+- commit: 최종 HEAD 해시는 Codex 완료 보고 참조
+- title: 무탭 가로치수 배관 중심 기준화
 
 ## 변경 요약
 - `PlantFlow_Support/Core/Commands.cs`
-  - `LogNotabDimProbe`의 paper 좌표 계산을 `TryComputeNotabDimPaperGeometry`로 분리해 dim-probe와 치수 append가 같은 투영 결과를 사용.
-  - `CreateNotabDetailDrawing`에서 뷰포트 설정 완료 후, SaveAs 직전 `AppendNotabPaperDimensions(detailDb, viewportId, supportExt)`를 호출.
-  - 새 트랜잭션에서 `EnsureIsoAnnotationResources`로 AUTO_DIM/DimStyle 리소스를 확보하고 Title Block layout BTR에 비연관 `RotatedDimension`을 append.
-  - 페이퍼 좌표 기준으로 가로 총폭, pipeCenter 좌/우 분할, 세로 높이 치수를 생성하고 텍스트는 `s_isoRealWidth/s_isoRealHeight` 실측 mm 값으로 override.
-  - 치수 문자는 `PFS_NOTAB_DIM_TXT` 기본 2.5mm, offset은 `PFS_NOTAB_DIM_OFFSET` 기본 `txt*3`으로 페이퍼 고정 크기 적용.
-  - 로그 `PFSNOTABDETAIL dim append H=... V=... split=(L,R) paperExt=... txt=... offset=...` 추가.
+  - `s_isoPipeCenterWcs/s_isoPipeCenterValid` 전역을 추가하고 NOTAB 진입 시 초기화.
+  - held pipe 확정 직후 원본 DB에서 `TryGetPipeAxisFromId`로 배관 축상 중심 WCS를 캡처.
+  - `TryComputeNotabDimPaperGeometry`가 배관 중심 WCS를 paper 좌표로 투영해 `pipeCenterX/Y`를 반환하도록 확장.
+  - 가로 분할 기준을 support bbox center가 아니라 실제 배관 중심 X paper 좌표로 교체.
+  - 가로 치수는 배관 paper Y가 support 중심보다 아래면 하단, 아니면 상단에 배치.
+  - 분할 폭이 `min(txt*2, Dimasz*2)` 미만이면 분할 치수를 생략하고 총폭만 생성.
+  - `dim append` 로그에 `side`, `pipeCenterX/Y`, `centerY`, `splitGuard`를 추가.
 
 ## 보존 확인
 - 대상 파일은 `PlantFlow_Support/Core/Commands.cs`만 수정.
-- 클립, held-pipe, 스케일 표준화, perspective guard, wireframe 기본, 610x489 viewport 생성 좌표는 수정하지 않음.
-- 기존 dim-probe 로그 유지.
-- 기존 `dev_test.bat` 수정과 미추적 파일들은 범위 밖이라 건드리지 않음.
+- 세로 치수는 기존 `verticalX=minX-offset` 및 `CreateVerticalDimension` 좌표를 유지.
+- 클립, held-pipe 선택, 스케일, perspective guard, wireframe 경로는 수정하지 않음.
+- 범위 밖 기존 변경(`dev_test.bat`, 미추적 파일들)은 건드리지 않음.
+- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_cycle49` 생성(커밋 제외).
 
 ## 검증
 - 변경 주변 20줄 이상 수동 확인 완료.
-- `rg -n "AppendNotabPaperDimensions|TryComputeNotabDimPaperGeometry|ApplyNotabPaperDimensionOverrides|dim append" .\PlantFlow_Support\Core\Commands.cs`: 참조 확인.
-- `git diff --check -- .\PlantFlow_Support\Core\Commands.cs`: PASS(CRLF 안내만 있음).
-- `dotnet build .\PlantFlow_Support.sln -c Debug`: PASS, 오류 0 / 기존 경고 15.
+- `rg -n "TryComputeNotabDimPaperGeometry|AppendNotabPaperDimensions\\(|s_isoPipeCenter|pipeCenterYPaper|splitGuard" PlantFlow_Support\\Core\\Commands.cs`: 참조 확인.
+- `git diff --check -- PlantFlow_Support\\Core\\Commands.cs`: PASS(CRLF 안내만 있음).
+- 빌드: 프로젝트 규칙상 사용자 명시 요청이 없어 실행하지 않음.
 
 ## 라이브 확인 포인트
-- `PFS_NOTAB_TEST_TAG=RC1-001` 환경에서 사용자 라이브 실행.
-- 기대 로그: `PFSNOTABDETAIL dim append ...`.
-- 육안 기대: 세로 높이, 가로 총폭, pipeCenter 분할 치수가 뷰포트 서포트와 정렬되고 문자 크기가 페이퍼에서 과대하지 않음.
+- `PFS_NOTAB_TEST_TAG=RC1-001` 라이브 실행.
+- 기대 로그: `PFSNOTABDETAIL dim append ... side=bottom ... pipeCenterX(paper)=... pipeCenterY(paper)=... splitGuard=False`.
+- 기대 형상: 분할 값이 225/225가 아니라 실제 배관 중심 비율로 나오고, RC1 가로 치수가 하단에 배치되며 세로 치수는 좌측 유지.
