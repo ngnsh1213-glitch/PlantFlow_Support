@@ -4646,6 +4646,7 @@ namespace PlantFlow_Support
 
         try
         {
+          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "callout", textPoint);
           leader.TextLocation = textPoint;
           leader.TextAlignmentType = (TextAlignmentType)0;
           MText placed = leader.MText;
@@ -4732,6 +4733,7 @@ namespace PlantFlow_Support
 
         try
         {
+          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "pipe callout", textPoint);
           leader.TextLocation = textPoint;
           leader.TextAlignmentType = (TextAlignmentType)0;
           MText placed = leader.MText;
@@ -4756,6 +4758,43 @@ namespace PlantFlow_Support
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append 예외: " + ex.GetType().Name + ": " + ex.Message + " PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop));
+      }
+    }
+
+    private void ApplyNotabCalloutNearEdgeAttachment(MLeader leader, double gap, string label, Point3d textPoint)
+    {
+      if (leader == null)
+        return;
+
+      try
+      {
+        double dogleg = Math.Max(1.0, Math.Min(5.0, gap * 0.3));
+        leader.EnableDogleg = true;
+        leader.DoglegLength = dogleg;
+
+        Type leaderType = leader.GetType();
+        Type directionType = leaderType.Assembly.GetType("Autodesk.AutoCAD.DatabaseServices.LeaderDirectionType");
+        if (directionType != null)
+        {
+          object leftLeader = Enum.Parse(directionType, "LeftLeader");
+          System.Reflection.MethodInfo method = leaderType.GetMethod(
+            "SetTextAttachmentType",
+            new Type[] { typeof(TextAttachmentType), directionType });
+          if (method != null)
+            method.Invoke(leader, new object[] { (TextAttachmentType)6, leftLeader });
+          else
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment skip: SetTextAttachmentType overload missing text=" + textPoint);
+        }
+        else
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment skip: LeaderDirectionType missing text=" + textPoint);
+        }
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment dogleg=" + this.FormatNumber(dogleg) + " text=" + textPoint);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment 예외: " + ex.GetType().Name + ": " + ex.Message + " text=" + textPoint);
       }
     }
 
