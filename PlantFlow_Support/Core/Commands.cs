@@ -3612,17 +3612,19 @@ namespace PlantFlow_Support
           vp.ViewCenter = new Point2d(0.0, 0.0);
           vp.TwistAngle = twist;
           vp.CustomScale = DetailViewScale;
-          bool skipHidden = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_SKIP_HIDDEN"), "1", System.StringComparison.OrdinalIgnoreCase);
+          // 기본=와이어프레임(0-A 육안 채택). Hidden 은선제거는 opt-in(PFS_NOTAB_USE_HIDDEN=1).
+          // 미적용 시 뷰포트는 기본 2D 와이어프레임으로 렌더된다(VisualStyleId 미지정).
+          bool useHidden = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_USE_HIDDEN"), "1", System.StringComparison.OrdinalIgnoreCase);
           bool hiddenOk = false;
           bool shadeOk = false;
-          if (skipHidden)
-          {
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL hidden skip(env)");
-          }
-          else
+          if (useHidden)
           {
             hiddenOk = this.TryApplyHiddenVisualStyle(db, tr, vp);
             shadeOk = this.TrySetViewportShadePlotHidden(vp);
+          }
+          else
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL wireframe(기본, hidden skip)");
           }
 
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") src=" + (string.IsNullOrWhiteSpace(targetSource) ? "fallback" : targetSource));
