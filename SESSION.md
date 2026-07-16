@@ -1,6 +1,38 @@
 # SESSION — 현재 작업 상태
 
-_최종 갱신: 2026-07-16 (★N3 치수 핵심 완성: 스케일표준화·투영·치수제도·배관참조. 사용자 全타입 테스트 중. 다음=N4)_
+_최종 갱신: 2026-07-16 (세션 이관: N3 치수 정련 중. cycle51 발행됨-미집도. 사용자 全타입 테스트 진행)_
+
+## ★이관 스레드 상태 (2026-07-16, 다음 세션 시작점)
+### ① 진행 중 트랙 + 직전 실측
+- **트랙 = N3 치수 정련**(핵심 제도는 완성 cycle47~49, 지금은 표기 다듬기). 무탭 엔진 = 서포트 detail 자동생성(와이어프레임 뷰포트+클립+held-pipe BOP선택+페이퍼 비연관 치수). **다중선택 배치 = `PFSNOTABBATCH`(cycle50) 완성**.
+- **직전 실측(cycle49 라이브)**: 가로 치수 `split=(350,100) side=bottom`, 세로 176, 배관중심 분할·상/하단 배치 PASS. 설정=글자2.5/화살표4/오프셋7.5/적층6.25.
+- **BI 부재규격 규명(이번 세션 핵심)**: 서포트 속성 `BI="BPn+BF"`(BPn 1L/2C/3H/4FB + BF). `BI=17`→BPn1(앵글)+BF7→`SHAPE.py profile[7]={F:75,T:9}`=`HANTEC.DetailProfile("17")="75x75x9"` 일치. 즉 앵글 75×75×9(사용자말 "70"은 근사). 읽기=`PSUtil.GetSupportDimension(id)→SupportParams["BI"]`. 멤버 정의=`PlantFlow_Support\Support\member\MEMBER.py`+`library\SHAPE.py`.
+
+### ② 대기 중 액션 (무엇의 결과를 기다리나)
+- **cycle51 발행됨(HANDOFF `f1abe34`), 미집도**. 사용자가 Codex에 `1` 입력 → 집도 → `2`로 나에게 통보 → 내가 리뷰·빌드검증.
+- 사용자가 **全 서포트 타입 `PFSNOTABBATCH` 테스트 후, 가로 치수 상/하단을 타입별로 어떻게 원하는지 데이터 제공 예정** → (1) per-type 테이블 채움.
+
+### ③ cycle51 요구 (미집도 내용)
+- **(2a) 세로 치수 텍스트=앵글 F높이 `75`**(DetailProfile 첫숫자 파싱, 176=앵글+유볼트+배관 합산이라 무의미→대체).
+- **(2b) 별도 지시선(MLeader) 콜아웃 `L-75×75×9`** 부재 옆(=`PSUtil.CreateMLeader`+`EnsureMLeaderStyles` 재사용). 높이(치수)와 규격(콜아웃) 분리.
+- **설정**: 글자10/화살표10(Dimasz txt×1.6 분리)/오프셋15/적층15.
+- **(1) 가로 위치 타입별 스캐폴드**: `GetNotabHorizontalDimSide(type)` 테이블(GD1·RC1=하단, 미등록=현 배관근접). type=SupportName의 `-`앞 prefix.
+
+### ④ 다음 결정 분기
+- cycle51 집도 PASS(세로75+콜아웃+설정+가로스캐폴드) → 사용자 全타입 테스트 → 타입별 가로위치 데이터 수령 → (1) 테이블 완성 → **N3 종결**.
+- cycle51 FAIL(콜아웃 위치/MLeader 이슈) → 로그로 앵커/스타일 교정.
+- N3 종결 후 → **N4(밸룬/라인번호·BOP 콜아웃/BOM = AnnotateViewport·SPInfo.AttachmentList 재사용)** → N5(3부채 코드 소멸).
+
+### 관련 파일·경로
+- 계획: `<appDataDir>\scratch\plan_pfs_notab_n3_20260714.md`(★갱신 섹션), `plan_pfs_notab_viewport_review_20260716.md`.
+- 핸드오프: `.plans/HANDOFF.md`(cycle51 ready), `.plans/REPORT.md`(cycle50 done).
+- 코드: `PlantFlow_Support/Core/Commands.cs` — 치수=`AppendNotabPaperDimensions`(~4419)/`AppendNotabPaperDimensionEntity`(~4507)/`ApplyNotabPaperDimensionOverrides`(~4519), 투영=`NotabProjectWcsToPaper`, 배치=`PFSNOTABBATCH`. BI=`PSUtil.GetSupportDimension`, `HANTEC.DetailProfile`(Ortho/HANTEC.cs:1894), MLeader=`PSUtil.CreateMLeader`/`OrthoViewportManager.EnsureMLeaderStyles`(662).
+- 로그: `C:\Temp\pfs_diag.log`(런마커 `RUN START`). dev: `dev_test.bat`(태그 env `PFS_NOTAB_TEST_TAG`, 없으면 GD1-001; 또는 ACAD서 `PFSNOTABDETAIL`/`PFSNOTABBATCH` 수동선택). env 조정: `PFS_NOTAB_TARGET_FILL`(0.4)/`DIM_TXT`/`DIM_OFFSET`/`CLIP_MARGIN`/`BOP_TOL`/`CONTACT_TOL`/`USE_HIDDEN`.
+- ⚠️ 미푸시 커밋 2개(cycle51 handoff). 작업트리에 무관 삭제(D PDF)·untracked 노이즈 있음(스테이징 안 함).
+
+---
+
+_이전 갱신: 2026-07-16 (★N3 치수 핵심 완성: 스케일표준화·투영·치수제도·배관참조. 사용자 全타입 테스트 중. 다음=N4)_
 
 ## ★★ N3 무탭 치수 핵심 완성 (2026-07-16, 커밋 cfa1fb7~9576258 = cycle 47~49 + 9893b5b) — 라이브 PASS
 페이퍼공간에 서포트 치수를 비연관으로 직접 제도. 사용자가 이제 **全 서포트 타입 테스트 예정**. 다음 트랙 = **N4(밸룬/라인번호·BOP 콜아웃/BOM)**.
