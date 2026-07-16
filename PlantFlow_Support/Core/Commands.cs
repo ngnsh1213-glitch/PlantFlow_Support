@@ -946,6 +946,79 @@ namespace PlantFlow_Support
       this.RunNotabDetailPipeline(doc, psr.Value.GetObjectIds());
     }
 
+    [CommandMethod("PFSNOTABBATCH", CommandFlags.Session)]
+    public void NotabDetailBatchCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      PlantOrthoView.FileDiag("========== PFSNOTABBATCH RUN START ==========");
+
+      Editor ed = doc.Editor;
+      PromptSelectionResult psr = ed.GetSelection();
+      if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABBATCH 선택 취소/빈 선택");
+        ed.WriteMessage("\nPFSNOTABBATCH: 선택 없음");
+        return;
+      }
+
+      System.Collections.Generic.List<ObjectId> supportIds = this.CollectSelectedSupportIds(doc.Database, psr.Value.GetObjectIds());
+      if (supportIds.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABBATCH support 없음 selected=" + psr.Value.Count);
+        ed.WriteMessage("\nPFSNOTABBATCH: 선택된 서포트 없음");
+        return;
+      }
+
+      int okCount = 0;
+      int failCount = 0;
+      System.Collections.Generic.List<string> failTags = new System.Collections.Generic.List<string>();
+      for (int i = 0; i < supportIds.Count; i++)
+      {
+        ObjectId supportId = supportIds[i];
+        string tag = this.GetSupportNameForLog(doc.Database, supportId);
+        PlantOrthoView.FileDiag("PFSNOTABBATCH [" + (i + 1) + "/" + supportIds.Count + "] tag=" + tag + " 처리");
+        ed.WriteMessage("\nPFSNOTABBATCH [" + (i + 1) + "/" + supportIds.Count + "] " + tag);
+
+        bool ok = false;
+        try
+        {
+          ok = this.RunNotabDetailPipeline(doc, new ObjectId[] { supportId });
+        }
+        catch (System.Exception ex)
+        {
+          ok = false;
+          PlantOrthoView.FileDiag("PFSNOTABBATCH 반복 예외 tag=" + tag + " id=" + supportId + ": " + ex.GetType().Name + ": " + ex.Message);
+        }
+
+        if (ok)
+        {
+          okCount++;
+        }
+        else
+        {
+          failCount++;
+          failTags.Add(tag);
+        }
+      }
+
+      try
+      {
+        System.GC.Collect();
+        System.GC.WaitForPendingFinalizers();
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABBATCH GC 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      string failLog = failTags.Count == 0 ? string.Empty : string.Join(",", failTags.ToArray());
+      PlantOrthoView.FileDiag("PFSNOTABBATCH done total=" + supportIds.Count + " ok=" + okCount + " fail=" + failCount + " fails=[" + failLog + "]");
+      ed.WriteMessage("\nPFSNOTABBATCH done total=" + supportIds.Count + " ok=" + okCount + " fail=" + failCount + (failTags.Count == 0 ? string.Empty : " fails=[" + failLog + "]"));
+    }
+
     // 자동 테스트(dev 원클릭): SupportName 태그로 서포트를 찾아 선택 없이 추출한다.
     // env PFS_NOTAB_TEST_TAG로 태그 지정, 기본 "GD1-001". 파이프/유볼트는 AutoIncludeRelatedParts가 자동 추가.
     [CommandMethod("PFSNOTABTEST", CommandFlags.Session)]
@@ -1009,7 +1082,79 @@ namespace PlantFlow_Support
       return ObjectId.Null;
     }
 
-    private void RunNotabDetailPipeline(Document doc, ObjectId[] selectedIds)
+    private System.Collections.Generic.List<ObjectId> CollectSelectedSupportIds(Database db, ObjectId[] selectedIds)
+    {
+      System.Collections.Generic.List<ObjectId> supportIds = new System.Collections.Generic.List<ObjectId>();
+      if (db == null || selectedIds == null || selectedIds.Length == 0)
+        return supportIds;
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          for (int i = 0; i < selectedIds.Length; i++)
+          {
+            ObjectId id = selectedIds[i];
+            if (id == ObjectId.Null)
+              continue;
+
+            try
+            {
+              string cls = id.ObjectClass == null ? string.Empty : id.ObjectClass.Name;
+              if (cls.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) < 0)
+                continue;
+
+              DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
+              if (obj != null)
+                supportIds.Add(id);
+            }
+            catch (System.Exception ex)
+            {
+              PlantOrthoView.FileDiag("PFSNOTABBATCH support filter 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+            }
+          }
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABBATCH support collect 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return supportIds;
+    }
+
+    private string GetSupportNameForLog(Database db, ObjectId supportId)
+    {
+      if (db == null || supportId == ObjectId.Null)
+        return "(invalid)";
+
+      string fallback = "SUPPORT_" + supportId.Handle.ToString();
+      try
+      {
+        PSUtil ps = Commands.PSUtil;
+        if (ps == null) ps = new PSUtil();
+        if (ps == null || ps.dl_manager == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABBATCH SupportName skip: dl_manager null id=" + supportId);
+          return fallback;
+        }
+
+        System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection() { "SupportName" };
+        System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(supportId, names, true);
+        string tag = props != null && props.Count > 0 ? props[0] : string.Empty;
+        if (!string.IsNullOrWhiteSpace(tag))
+          return tag;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABBATCH SupportName 예외 id=" + supportId + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return fallback;
+    }
+
+    private bool RunNotabDetailPipeline(Document doc, ObjectId[] selectedIds)
     {
       s_isoPipeAxisValid = false;
       s_isoPipeAxis = Vector3d.XAxis;
@@ -1058,11 +1203,13 @@ namespace PlantFlow_Support
         this.TryReopenSetNotabPaperSpace(savedPath);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL done selected=" + selectedIds.Length + " solids=" + solidIds.Count + " axis=" + this.FormatVectorForCommand(s_isoPipeAxis) + " up=" + this.FormatVectorForCommand(s_isoPipeUp) + " saved=" + savedPath);
         ed.WriteMessage("\nPFSNOTABDETAIL saved=" + savedPath);
+        return true;
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL 예외: " + ex.GetType().Name + ": " + ex.Message);
         ed.WriteMessage("\nPFSNOTABDETAIL error: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
       }
       finally
       {
@@ -2773,9 +2920,9 @@ namespace PlantFlow_Support
 
       string tag = s_isoSupportTag;
       if (string.IsNullOrWhiteSpace(tag) && !string.IsNullOrWhiteSpace(s_isoShortDesc))
-        tag = s_isoShortDesc + "_" + System.DateTime.Now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+        tag = s_isoShortDesc + "_" + this.GetNotabPrimarySupportHandle(sourceDb, solidIds);
       if (string.IsNullOrWhiteSpace(tag))
-        tag = "SUPPORT_" + System.DateTime.Now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+        tag = "SUPPORT_" + this.GetNotabPrimarySupportHandle(sourceDb, solidIds);
       string safeTag = this.SanitizeIsoFileName(tag);
 
       Database detailDb = null;
@@ -2869,6 +3016,49 @@ namespace PlantFlow_Support
         if (detailDb != null)
           detailDb.Dispose();
       }
+    }
+
+    private string GetNotabPrimarySupportHandle(Database db, System.Collections.Generic.List<ObjectId> ids)
+    {
+      string fallback = System.DateTime.Now.ToString("yyyyMMddHHmmssfff", System.Globalization.CultureInfo.InvariantCulture);
+      if (db == null || ids == null || ids.Count == 0)
+        return fallback;
+
+      try
+      {
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          for (int i = 0; i < ids.Count; i++)
+          {
+            ObjectId id = ids[i];
+            if (id == ObjectId.Null)
+              continue;
+
+            try
+            {
+              string cls = id.ObjectClass == null ? string.Empty : id.ObjectClass.Name;
+              DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
+              string typeName = obj == null ? string.Empty : obj.GetType().Name;
+              if (cls.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) >= 0 || typeName.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) >= 0)
+              {
+                tr.Commit();
+                return id.Handle.ToString();
+              }
+            }
+            catch (System.Exception ex)
+            {
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL support handle scan 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+            }
+          }
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL support handle fallback 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return fallback;
     }
 
     private ObjectId EnsureNotabDetailLayout(Database db, Transaction tr)
