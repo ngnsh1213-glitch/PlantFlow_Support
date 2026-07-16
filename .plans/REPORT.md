@@ -1,43 +1,30 @@
-# REPORT — Codex → Claude
+# REPORT - Codex -> Claude
 
-- cycle: 40
+- cycle: 42
 - status: done
 - commit: HEAD (최종 해시는 Codex 완료 보고 참조)
-- title: #1 페이퍼 초기화면 — reopen side DB 보강
+- title: 무탭 추출 후 리본 바인딩 PERSPECTIVE 지연 flip 방어 가드
 
 ## 변경 요약
 - `PlantFlow_Support/Core/Commands.cs`
-  - `TryReopenSetNotabPaperSpace(string savedPath)` 보강.
-  - reopen DB 생성자를 `new Database(false, false)`에서 `new Database(false, true)`로 변경.
-  - paper-space 상태 저장을 2인자 `SaveAs(savedPath, DwgVersion.Current)`에서 `SaveAs(savedPath, true, DwgVersion.Current, reopenDb.SecurityParameters)`로 변경.
-
-## reopen 흐름
-- 마커: `%TEMP%\pfs_notab_paper.flag`
-- 마커 없음: no-op, 로그 없음.
-- 마커 있음:
-  - `new Database(false, true)`
-  - `ReadDwgFile(savedPath, FileShare.ReadWrite, true, null)`
-  - `CloseInput(true)`
-  - `TileMode = false`
-  - `SaveAs(savedPath, true, DwgVersion.Current, reopenDb.SecurityParameters)`
-  - `Dispose()` in `finally`
-- 성공 로그: `PFSNOTABDETAIL paper-reopen tilemode=0 ok`
-- 실패 로그: `PFSNOTABDETAIL paper-reopen 예외: <...>`
+  - `RunNotabDetailPipeline` 진입 시 저장한 `PERSPECTIVE` 값을 기준으로 8초 가드를 무장.
+  - 기존 `PFSPERSPWATCH` / `OnSysVarChangedForPersp` 이벤트 인프라를 재사용하도록 공용 구독 플래그를 추가.
+  - 수동 watch 토글과 자동 가드가 `SystemVariableChanged` 핸들러를 중복 구독하지 않도록 방어.
+  - 가드 창 안에서 `PERSPECTIVE`가 저장값과 달라지면 1회만 `SetSystemVariable`로 복원하고 즉시 disarm.
+  - 복원 후 `Editor.Regen()`은 이벤트 컨텍스트에서 직접 호출하지 않고 `Application.Idle` one-shot 핸들러로 지연 실행.
+  - `PFS_PERSP_GUARD_SEC` 환경변수로 가드 창 조정 가능. 유효하지 않은 값은 로그 후 기본 8초 유지.
 
 ## 보존 확인
-- reopen helper 내부에서 `HostApplicationServices.WorkingDatabase` 미변경.
-- `TryApplyNotabPaperInit` / `paper-init` 잔존 없음.
-- A/B/C/E 유지: fixedRect viewport, supportExt target, scale 1:4, sourceDb 조기 Dispose 유지.
-- `CreateIsoDetailDrawing` / `PFSVBISO*` / `PFSNOTABBOX*` 집도 없음.
+- 대상 외 파일 수정 없음.
+- 기존 finally의 명령 종료 시점 `PERSPECTIVE` 원복 로직 유지.
+- 기존 스택 계측 로그 유지 후 가드 교정만 추가.
+- 창 밖 변경, 저장값 null, 재진입 중 변경은 교정하지 않음.
 
 ## 검증
-- 백업 생성: `PlantFlow_Support/Core/Commands.cs.codex_bak_20260714_cycle40_reopenfix`
-- `dotnet build`: PASS, 오류 0 / 기존 경고 15
-- `git diff --check -- PlantFlow_Support/Core/Commands.cs`: PASS, CRLF 경고만 있음
-- `rg "TryApplyNotabPaperInit|paper-init|new Database\\(false, false\\)"`: 잔존 없음
-- `rg "reopenDb = new Database\\(false, true\\)|reopenDb.SaveAs\\(savedPath, true, DwgVersion.Current, reopenDb.SecurityParameters\\)"`: 적용 확인
+- `dotnet build .\PlantFlow_Support.sln -c Debug`: PASS, 오류 0 / 기존 경고 15
+- 변경 주변 20줄 이상 수동 확인 완료.
 
 ## 라이브 확인 포인트
-- 1차: 마커 없이 `PFSNOTABDETAIL` 실행, `paper-reopen` 로그 없음 + 크래시/RECOVER 없음 확인.
-- 2차: `%TEMP%\pfs_notab_paper.flag` 생성 후 `PFSNOTABDETAIL` 실행, `paper-reopen tilemode=0 ok` 로그와 크래시 없음 확인.
-- 저장 파일을 열 때 페이퍼 공간(Title Block)으로 뜨는지 확인.
+- `dev_test.bat` 실행 후 `C:\Temp\pfs_diag.log`에서 `PFSNOTABDETAIL persp guard armed` 확인.
+- 지연 flip 재현 시 `PFSPERSPWATCH PERSPECTIVE -> 1` 뒤 `PFSNOTABDETAIL persp guard 교정 1 -> 0` 및 `Regen Idle 예약/완료` 로그 확인.
+- 8초 창 밖 수동 `PERSPECTIVE` 변경은 유지되는지 사용자 라이브 확인 필요.

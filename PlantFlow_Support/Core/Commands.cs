@@ -1039,6 +1039,7 @@ namespace PlantFlow_Support
       try { savedPerspective = Application.GetSystemVariable("PERSPECTIVE"); }
       catch (System.Exception px) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp 읽기 예외: " + px.GetType().Name + ": " + px.Message); }
       PlantOrthoView.FileDiag("PFSNOTABDETAIL persp enter=" + (savedPerspective == null ? "(null)" : savedPerspective.ToString()) + " view={" + this.DescribeActiveViewPerspective(doc) + "}");
+      Commands.ArmPerspGuard(savedPerspective);
 
       Database sourceDb = null;
       try
@@ -1124,6 +1125,11 @@ namespace PlantFlow_Support
     // 토글: 첫 호출=on, 다시 호출=off.
     private static bool s_perspWatchOn = false;
     private static Autodesk.AutoCAD.ApplicationServices.SystemVariableChangedEventHandler s_perspWatchHandler = null;
+    private static bool s_perspHandlerSubscribed = false;
+    private static bool s_perspGuardInstalled = false;
+    private static System.DateTime s_perspGuardUntilUtc = System.DateTime.MinValue;
+    private static object s_perspGuardValue = null;
+    private static bool s_perspRestoring = false;
 
     [CommandMethod("PFSPERSPWATCH", CommandFlags.Session)]
     public void PerspectiveWatchCommand()
@@ -1134,21 +1140,84 @@ namespace PlantFlow_Support
       {
         try
         {
-          if (s_perspWatchHandler != null)
+          if (s_perspHandlerSubscribed && s_perspWatchHandler != null && !s_perspGuardInstalled)
+          {
             Autodesk.AutoCAD.ApplicationServices.Application.SystemVariableChanged -= s_perspWatchHandler;
+            s_perspHandlerSubscribed = false;
+          }
+          else if (s_perspGuardInstalled)
+          {
+            PlantOrthoView.FileDiag("PFSPERSPWATCH off: 가드 구독 유지");
+          }
         }
         catch (System.Exception ux) { PlantOrthoView.FileDiag("PFSPERSPWATCH off 예외: " + ux.GetType().Name + ": " + ux.Message); }
         s_perspWatchOn = false;
-        s_perspWatchHandler = null;
         PlantOrthoView.FileDiag("PFSPERSPWATCH off");
         doc.Editor.WriteMessage("\nPFSPERSPWATCH off (감시 중지)");
         return;
       }
-      s_perspWatchHandler = new Autodesk.AutoCAD.ApplicationServices.SystemVariableChangedEventHandler(Commands.OnSysVarChangedForPersp);
-      Autodesk.AutoCAD.ApplicationServices.Application.SystemVariableChanged += s_perspWatchHandler;
+      Commands.EnsurePerspHandlerSubscribed("PFSPERSPWATCH");
       s_perspWatchOn = true;
       PlantOrthoView.FileDiag("PFSPERSPWATCH on");
       doc.Editor.WriteMessage("\nPFSPERSPWATCH on (PERSPECTIVE 변경 감시 시작)");
+    }
+
+    private static void EnsurePerspGuardInstalled()
+    {
+      if (s_perspGuardInstalled)
+        return;
+
+      s_perspGuardInstalled = true;
+      Commands.EnsurePerspHandlerSubscribed("guard");
+      PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard installed");
+    }
+
+    private static void EnsurePerspHandlerSubscribed(string reason)
+    {
+      try
+      {
+        if (s_perspWatchHandler == null)
+          s_perspWatchHandler = new Autodesk.AutoCAD.ApplicationServices.SystemVariableChangedEventHandler(Commands.OnSysVarChangedForPersp);
+
+        if (s_perspHandlerSubscribed)
+        {
+          PlantOrthoView.FileDiag("PFSPERSPWATCH subscribe skip reason=" + reason);
+          return;
+        }
+
+        Autodesk.AutoCAD.ApplicationServices.Application.SystemVariableChanged += s_perspWatchHandler;
+        s_perspHandlerSubscribed = true;
+        PlantOrthoView.FileDiag("PFSPERSPWATCH subscribed reason=" + reason);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSPERSPWATCH subscribe 예외 reason=" + reason + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private static void ArmPerspGuard(object savedPerspective)
+    {
+      try
+      {
+        s_perspGuardValue = savedPerspective;
+        double seconds = 8.0;
+        string env = System.Environment.GetEnvironmentVariable("PFS_PERSP_GUARD_SEC");
+        if (!string.IsNullOrWhiteSpace(env))
+        {
+          double parsed;
+          if (double.TryParse(env, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) && parsed > 0.0)
+            seconds = parsed;
+          else
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard env 무시 PFS_PERSP_GUARD_SEC=" + env);
+        }
+        s_perspGuardUntilUtc = System.DateTime.UtcNow.AddSeconds(seconds);
+        Commands.EnsurePerspGuardInstalled();
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard armed seconds=" + seconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + " value=" + (savedPerspective == null ? "(null)" : savedPerspective.ToString()));
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard arm 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
     }
 
     private static void OnSysVarChangedForPersp(object sender, Autodesk.AutoCAD.ApplicationServices.SystemVariableChangedEventArgs e)
@@ -1176,8 +1245,83 @@ namespace PlantFlow_Support
           }
         }
         catch (System.Exception sx) { PlantOrthoView.FileDiag("PFSPERSPWATCH stack 예외: " + sx.GetType().Name); }
+        Commands.TryRestorePerspGuard(val);
       }
       catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSPERSPWATCH 핸들러 예외: " + ex.GetType().Name + ": " + ex.Message); }
+    }
+
+    private static void TryRestorePerspGuard(object currentValue)
+    {
+      if (s_perspRestoring)
+        return;
+      if (s_perspGuardValue == null)
+        return;
+      if (System.DateTime.UtcNow > s_perspGuardUntilUtc)
+        return;
+      if (object.Equals(currentValue, s_perspGuardValue))
+        return;
+
+      object fromValue = currentValue;
+      object toValue = s_perspGuardValue;
+      try
+      {
+        s_perspRestoring = true;
+        Application.SetSystemVariable("PERSPECTIVE", toValue);
+        s_perspGuardUntilUtc = System.DateTime.MinValue;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 교정 " + (fromValue == null ? "(null)" : fromValue.ToString()) + " -> " + toValue);
+        Commands.SchedulePerspGuardRegen();
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 교정 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+      finally
+      {
+        s_perspRestoring = false;
+      }
+    }
+
+    private static void SchedulePerspGuardRegen()
+    {
+      System.EventHandler idleHandler = null;
+      idleHandler = delegate(object idleSender, System.EventArgs idleArgs)
+      {
+        try
+        {
+          Autodesk.AutoCAD.ApplicationServices.Application.Idle -= idleHandler;
+        }
+        catch (System.Exception ux)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard Idle 해제 예외: " + ux.GetType().Name + ": " + ux.Message);
+        }
+
+        try
+        {
+          Document doc = Application.DocumentManager == null ? null : Application.DocumentManager.MdiActiveDocument;
+          if (doc == null || doc.Editor == null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard Regen skip: doc/editor null");
+            return;
+          }
+
+          doc.Editor.Regen();
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard Regen 완료");
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard Regen 예외: " + ex.GetType().Name + ": " + ex.Message);
+        }
+      };
+
+      try
+      {
+        Autodesk.AutoCAD.ApplicationServices.Application.Idle += idleHandler;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard Regen Idle 예약");
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard Idle 예약 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
     }
 
     [CommandMethod("PFSNOTABBOXTEST", CommandFlags.Session)]
