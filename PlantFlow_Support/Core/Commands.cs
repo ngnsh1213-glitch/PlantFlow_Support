@@ -31,6 +31,10 @@ namespace PlantFlow_Support
     private static string s_isoSupportTag;
     private static string s_isoDesignStd;
     private static string s_isoShortDesc;
+    private static string s_isoSupportBI;
+    private static string s_isoSupportProfile;
+    private static string s_isoSupportDesignation;
+    private static string s_isoSupportProfileHeight;
     private static Document s_isoOpenPendingTempDoc;
     private static Document s_isoOpenPendingOriginalDoc;
     private static int s_isoOpenSecondIdleAttempts;
@@ -1171,6 +1175,10 @@ namespace PlantFlow_Support
       s_isoSupportTag = string.Empty;
       s_isoDesignStd = string.Empty;
       s_isoShortDesc = string.Empty;
+      s_isoSupportBI = string.Empty;
+      s_isoSupportProfile = string.Empty;
+      s_isoSupportDesignation = string.Empty;
+      s_isoSupportProfileHeight = string.Empty;
 
       Editor ed = doc.Editor;
       selectedIds = this.AutoIncludeRelatedParts(doc.Database, selectedIds);
@@ -2055,6 +2063,10 @@ namespace PlantFlow_Support
       s_isoSupportTag = string.Empty;
       s_isoDesignStd = string.Empty;
       s_isoShortDesc = string.Empty;
+      s_isoSupportBI = string.Empty;
+      s_isoSupportProfile = string.Empty;
+      s_isoSupportDesignation = string.Empty;
+      s_isoSupportProfileHeight = string.Empty;
       Editor ed = doc.Editor;
       PromptSelectionResult psr = ed.GetSelection();
       if (psr.Status != PromptStatus.OK || psr.Value == null || psr.Value.Count == 0)
@@ -4406,7 +4418,7 @@ namespace PlantFlow_Support
           ObjectId textStyleId;
           ObjectId dimStyleId;
           this.EnsureIsoAnnotationResources(db, tr, out layerId, out textStyleId, out dimStyleId);
-          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, pipeCenterXPaper, pipeCenterYPaper, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId);
+          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, pipeCenterXPaper, pipeCenterYPaper, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId, textStyleId, db);
           tr.Commit();
         }
       }
@@ -4416,7 +4428,7 @@ namespace PlantFlow_Support
       }
     }
 
-    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double realW, double realH, ObjectId dimStyleId, ObjectId layerId)
+    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double realW, double realH, ObjectId dimStyleId, ObjectId layerId, ObjectId textStyleId, Database db)
     {
       if (tr == null || layoutBtr == null)
         return;
@@ -4440,11 +4452,13 @@ namespace PlantFlow_Support
           return;
         }
 
-        double txt = this.GetEnvDouble("PFS_NOTAB_DIM_TXT", 2.5, 0.5, 20.0);
-        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", txt * 3.0, txt, 100.0);
-        double stack = txt * 2.5;
+        double txt = this.GetEnvDouble("PFS_NOTAB_DIM_TXT", 10.0, 0.5, 50.0);
+        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 15.0, 1.0, 100.0);
+        double stack = this.GetEnvDouble("PFS_NOTAB_DIM_STACK", 15.0, 1.0, 100.0);
         double centerY = (minY + maxY) / 2.0;
-        bool horizontalBottom = !double.IsNaN(pipeCenterYPaper) && pipeCenterYPaper < centerY - 1e-6;
+        string supportType = this.GetSupportTypePrefix(s_isoSupportTag);
+        string horizontalSide = this.GetNotabHorizontalDimSide(supportType);
+        bool horizontalBottom = string.Equals(horizontalSide, "bottom", System.StringComparison.OrdinalIgnoreCase) || (string.Equals(horizontalSide, "auto", System.StringComparison.OrdinalIgnoreCase) && !double.IsNaN(pipeCenterYPaper) && pipeCenterYPaper < centerY - 1e-6);
         double horizontalBaseY = horizontalBottom ? minY : maxY;
         double splitY = horizontalBottom ? minY - offset : maxY + offset;
         double totalY = horizontalBottom ? splitY - stack : splitY + stack;
@@ -4485,9 +4499,11 @@ namespace PlantFlow_Support
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimTotal, dimStyleId, layerId, realW, txt, "dimH");
 
         RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(minX, minY, 0.0), new Point3d(minX, maxY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
-        this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, realH, txt, "dimV");
+        string dimVText = string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? this.FormatNumber(realH) : s_isoSupportProfileHeight;
+        this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, realH, txt, "dimV", dimVText);
+        this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt);
 
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset));
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(supportType) ? "unknown" : supportType) + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
       catch (System.Exception ex)
       {
@@ -4497,6 +4513,11 @@ namespace PlantFlow_Support
 
     private void AppendNotabPaperDimensionEntity(Transaction tr, BlockTableRecord layoutBtr, RotatedDimension dim, ObjectId dimStyleId, ObjectId layerId, double realValue, double txt, string label)
     {
+      this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dim, dimStyleId, layerId, realValue, txt, label, null);
+    }
+
+    private void AppendNotabPaperDimensionEntity(Transaction tr, BlockTableRecord layoutBtr, RotatedDimension dim, ObjectId dimStyleId, ObjectId layerId, double realValue, double txt, string label, string dimensionTextOverride)
+    {
       if (tr == null || layoutBtr == null || dim == null)
         return;
 
@@ -4504,7 +4525,7 @@ namespace PlantFlow_Support
       {
         dim.DimensionStyle = dimStyleId;
         this.ApplyNotabPaperDimensionOverrides(dim, txt, label);
-        dim.DimensionText = this.FormatNumber(realValue);
+        dim.DimensionText = string.IsNullOrWhiteSpace(dimensionTextOverride) ? this.FormatNumber(realValue) : dimensionTextOverride;
         if (layerId != ObjectId.Null)
           dim.LayerId = layerId;
         layoutBtr.AppendEntity(dim);
@@ -4523,8 +4544,9 @@ namespace PlantFlow_Support
 
       try
       {
+        double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         dim.Dimtxt = txt;
-        dim.Dimasz = txt * 1.6;
+        dim.Dimasz = arr;
         dim.Dimexe = 1.5;
         dim.Dimexo = 1.5;
         dim.Dimgap = txt * 0.6;
@@ -4536,6 +4558,113 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " paper dim override 예외: " + ex.GetType().Name + ": " + ex.Message + " txt=" + this.FormatNumber(txt));
       }
+    }
+
+    private void AppendNotabProfileCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt)
+    {
+      if (tr == null || layoutBtr == null || db == null)
+        return;
+      if (string.IsNullOrWhiteSpace(s_isoSupportDesignation))
+        return;
+
+      try
+      {
+        ObjectId mlStyleId = this.EnsureNotabMLeaderStyle(db, tr);
+        if (mlStyleId == ObjectId.Null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout skip: mleader style null designation=" + s_isoSupportDesignation);
+          return;
+        }
+
+        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 15.0, 1.0, 100.0);
+        Point3d anchor = new Point3d(supportPaperExt.MinPoint.X, supportPaperExt.MinPoint.Y + (supportPaperExt.MaxPoint.Y - supportPaperExt.MinPoint.Y) * 0.25, 0.0);
+        Point3d elbow = new Point3d(supportPaperExt.MinPoint.X - offset, anchor.Y - offset * 0.4, 0.0);
+        Point3d textPoint = new Point3d(elbow.X - offset * 1.5, elbow.Y, 0.0);
+        MText content = new MText();
+        content.Contents = s_isoSupportDesignation;
+        content.TextHeight = txt;
+        if (textStyleId != ObjectId.Null)
+          content.TextStyleId = textStyleId;
+
+        MLeader leader = PSUtil.CreateMLeader(new Point3d[] { anchor, elbow, textPoint }, content, mlStyleId, Matrix3d.Identity);
+        if (leader == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout skip: CreateMLeader null designation=" + s_isoSupportDesignation);
+          return;
+        }
+
+        if (layerId != ObjectId.Null)
+          leader.LayerId = layerId;
+        layoutBtr.AppendEntity(leader);
+        tr.AddNewlyCreatedDBObject(leader, true);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append designation=" + s_isoSupportDesignation + " anchor=" + anchor + " text=" + textPoint);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append 예외: " + ex.GetType().Name + ": " + ex.Message + " designation=" + s_isoSupportDesignation);
+      }
+    }
+
+    private ObjectId EnsureNotabMLeaderStyle(Database db, Transaction tr)
+    {
+      if (db == null || tr == null)
+        return ObjectId.Null;
+
+      try
+      {
+        DBDictionary dict = tr.GetObject(db.MLeaderStyleDictionaryId, OpenMode.ForRead) as DBDictionary;
+        if (dict == null)
+          return ObjectId.Null;
+
+        const string styleName = "ML_PIPETAG_85";
+        if (dict.Contains(styleName))
+          return dict.GetAt(styleName);
+
+        MLeaderStyle style = new MLeaderStyle();
+        style.ArrowSymbolId = ObjectId.Null;
+        style.ArrowSize = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
+        style.LeaderLineColor = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)1);
+        style.Scale = 1.0;
+        style.ContentType = (ContentType)2;
+        style.TextColor = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)3);
+        style.TextAttachmentType = (TextAttachmentType)6;
+        dict.UpgradeOpen();
+        ObjectId id = dict.SetAt(styleName, style);
+        tr.AddNewlyCreatedDBObject(style, true);
+        return id;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL mleader style 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return ObjectId.Null;
+      }
+    }
+
+    private string GetSupportTypePrefix(string supportName)
+    {
+      if (string.IsNullOrWhiteSpace(supportName))
+        return string.Empty;
+
+      try
+      {
+        string trimmed = supportName.Trim();
+        int dash = trimmed.IndexOf('-');
+        return dash > 0 ? trimmed.Substring(0, dash) : trimmed;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL support type parse 예외 name=" + supportName + ": " + ex.GetType().Name + ": " + ex.Message);
+        return string.Empty;
+      }
+    }
+
+    private string GetNotabHorizontalDimSide(string supportType)
+    {
+      // 사용자 全타입 실측 후 확장할 타입별 위치 테이블.
+      if (string.Equals(supportType, "GD1", System.StringComparison.OrdinalIgnoreCase) || string.Equals(supportType, "RC1", System.StringComparison.OrdinalIgnoreCase))
+        return "bottom";
+
+      return "auto";
     }
 
     private void GetNotabViewBasis(out Vector3d viewDir, out Vector3d up, out Vector3d right)
@@ -6306,6 +6435,7 @@ namespace PlantFlow_Support
       }
 
       this.CaptureIsoSupportProperties(supportId, s_isoPipeId);
+      this.CaptureIsoSupportProfile(supportId);
       PlantOrthoView.FileDiag("PFSVBISOCLONE PLN=" + s_isoPipeLineNo + " BOP=" + s_isoBOP + " size=" + s_isoSize + " realW=" + this.FormatNumber(s_isoRealWidth) + " realH=" + this.FormatNumber(s_isoRealHeight) + " basisRight=" + this.FormatVectorForCommand(right) + " basisUp=" + this.FormatVectorForCommand(up) + " valid=" + s_isoRealSizeValid);
     }
 
@@ -6368,6 +6498,94 @@ namespace PlantFlow_Support
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSVBISOCLONE props 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void CaptureIsoSupportProfile(ObjectId supportId)
+    {
+      s_isoSupportBI = string.Empty;
+      s_isoSupportProfile = string.Empty;
+      s_isoSupportDesignation = string.Empty;
+      s_isoSupportProfileHeight = string.Empty;
+
+      if (supportId == ObjectId.Null)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE profile skip: supportId null");
+        return;
+      }
+
+      try
+      {
+        PSUtil ps = Commands.PSUtil;
+        if (ps == null)
+          ps = new PSUtil();
+        if (ps == null)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE profile skip: PSUtil null");
+          return;
+        }
+
+        System.Collections.Generic.Dictionary<string, string> dims = ps.GetSupportDimension(supportId);
+        if (dims == null || !dims.ContainsKey("BI") || string.IsNullOrWhiteSpace(dims["BI"]))
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE profile skip: BI 없음 id=" + supportId);
+          return;
+        }
+
+        string bi = dims["BI"].Trim().Replace("_", string.Empty);
+        string profile = HANTEC.DetailProfile(bi);
+        if (string.IsNullOrWhiteSpace(profile))
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE profile skip: DetailProfile empty BI=" + bi);
+          return;
+        }
+
+        string height = this.GetFirstProfileToken(profile);
+        string prefix = this.GetSupportProfilePrefix(bi);
+        s_isoSupportBI = bi;
+        s_isoSupportProfile = profile;
+        s_isoSupportDesignation = string.IsNullOrWhiteSpace(prefix) ? profile.Replace("x", "×") : prefix + "-" + profile.Replace("x", "×");
+        s_isoSupportProfileHeight = height;
+        PlantOrthoView.FileDiag("PFSVBISOCLONE profile BI=" + s_isoSupportBI + " profile=" + s_isoSupportProfile + " height=" + s_isoSupportProfileHeight + " designation=" + s_isoSupportDesignation);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE profile 예외 id=" + supportId + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private string GetFirstProfileToken(string profile)
+    {
+      if (string.IsNullOrWhiteSpace(profile))
+        return string.Empty;
+
+      try
+      {
+        string normalized = profile.Replace('×', 'x');
+        string[] parts = normalized.Split(new char[] { 'x', 'X' }, System.StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 0 ? parts[0].Trim() : string.Empty;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE profile height parse 예외 profile=" + profile + ": " + ex.GetType().Name + ": " + ex.Message);
+        return string.Empty;
+      }
+    }
+
+    private string GetSupportProfilePrefix(string bi)
+    {
+      if (string.IsNullOrWhiteSpace(bi))
+        return string.Empty;
+
+      switch (bi.Trim()[0])
+      {
+        case '1': return "L";
+        case '2': return "C";
+        case '3': return "H";
+        case '4': return "FB";
+        default:
+          PlantOrthoView.FileDiag("PFSVBISOCLONE profile prefix unknown BI=" + bi);
+          return string.Empty;
       }
     }
 

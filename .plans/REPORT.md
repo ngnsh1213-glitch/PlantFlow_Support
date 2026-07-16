@@ -1,34 +1,33 @@
 # REPORT - Codex -> Claude
 
-- cycle: 50
+- cycle: 51
 - status: done
-- commit: 최종 HEAD 해시는 Codex 완료 보고 참조
-- title: 무탭 다중선택 배치 추출 명령 PFSNOTABBATCH
+- commit: 최종 HEAD 참조
+- title: 무탭 치수 개선 - 세로 F값, 부재 콜아웃, 치수 크기, 타입별 가로 위치 스캐폴드
 
 ## 변경 요약
 - `PlantFlow_Support/Core/Commands.cs`
-  - 신규 명령 `PFSNOTABBATCH`를 추가.
-  - 선택셋에서 `ObjectClass.Name`에 `Support`가 포함된 ObjectId만 수집.
-  - 수집된 서포트를 직렬 반복하며 각 서포트마다 `RunNotabDetailPipeline(doc, new[] { supportId })`를 호출.
-  - 반복별 `[i/N] tag=<SupportName>` 로그와 최종 `total/ok/fail/fails` 요약 로그를 추가.
-  - 개별 서포트 실패가 배치 전체를 중단하지 않도록 반복 단위 try/catch를 추가.
-  - `RunNotabDetailPipeline` 반환형을 `void`에서 `bool`로 변경하고, 저장 성공 시 `true`, 내부 catch 진입 시 `false`를 반환.
-  - SupportName이 비어 있는 저장 태그 fallback을 초 단위 timestamp에서 support handle 기반으로 변경해 무명 다중 배치의 파일명 충돌을 완화.
+  - `PFS_NOTAB_DIM_TXT` 기본값을 10.0, `PFS_NOTAB_DIM_OFFSET` 기본값을 15.0, `PFS_NOTAB_DIM_STACK` 기본값을 15.0으로 조정.
+  - `PFS_NOTAB_DIM_ARR` 환경변수(기본 10.0)를 추가해 치수 화살표 크기를 텍스트 크기와 분리.
+  - `PSUtil.GetSupportDimension(id)["BI"]`와 `HANTEC.DetailProfile(BI)`로 부재 프로파일을 캐시하고, dimV 텍스트를 프로파일 첫 숫자(F, 예: `75`)로 override.
+  - 프로파일 prefix 매핑(1=L, 2=C, 3=H, 4=FB)으로 `L-75×75×9` 형태의 MLeader 콜아웃을 페이퍼공간 `AUTO_DIM` 레이어에 추가.
+  - SupportName 첫 `-` 앞 prefix로 support type을 구하고, `GD1`/`RC1`은 가로 치수 하단 강제, 나머지는 기존 배관 근접 auto 로직을 유지.
+  - 로그에 `dimV(F)=...`, `callout=...`, `BI=...`, `sideMode=...`, `type=...`, `stack=...`를 추가.
 
 ## 보존 확인
-- 대상 파일은 `PlantFlow_Support/Core/Commands.cs`만 수정.
-- 단일 `PFSNOTABDETAIL`/`PFSNOTABTEST` 동작은 반환값 무시 형태로 유지.
-- `RunNotabDetailPipeline` 내부 클립, held-pipe, 치수, 스케일, perspective guard, wireframe 흐름은 반환형 외에는 변경하지 않음.
-- 범위 밖 기존 미추적 파일들은 건드리지 않음.
-- 백업: `PlantFlow_Support/Core/Commands.cs.codex_bak_cycle50` 생성(커밋 제외).
+- 핸드오프 지정 대상인 `PlantFlow_Support/Core/Commands.cs`만 코드 수정.
+- 클립, held-pipe 선택, 스케일, perspective guard, wireframe, 투영 행렬 로직은 변경하지 않음.
+- 기존 작업트리의 미추적/삭제 항목은 건드리지 않음.
+- BI/DetailProfile 실패 시 예외를 로그로 남기고 기존 realH 세로 치수 텍스트로 폴백.
 
 ## 검증
 - 변경 주변 20줄 이상 수동 확인 완료.
-- `rg -n "PFSNOTABBATCH|RunNotabDetailPipeline|CollectSelectedSupportIds|GetSupportNameForLog|GetNotabPrimarySupportHandle" PlantFlow_Support\\Core\\Commands.cs`: 참조 확인.
-- `git diff --check -- PlantFlow_Support\\Core\\Commands.cs`: PASS(CRLF 안내만 있음).
-- 빌드: 프로젝트 규칙상 사용자 명시 요청이 없어 실행하지 않음.
+- `rg -n "dimV\\(F\\)|callout append|profile BI|sideMode|PFS_NOTAB_DIM_STACK|PFS_NOTAB_DIM_ARR" PlantFlow_Support\\Core\\Commands.cs`: 참조 확인.
+- `git diff -- PlantFlow_Support\\Core\\Commands.cs`: 지정 변경만 확인.
+- 빌드: 프로젝트 규칙상 사용자 명시 요청 없는 빌드 실행 금지라 미실행.
 
 ## 라이브 확인 포인트
-- 여러 서포트를 선택한 뒤 `PFSNOTABBATCH` 실행.
-- 기대 로그: `PFSNOTABBATCH [i/N] tag=... 처리`, 최종 `done total=N ok=K fail=M fails=[...]`.
-- 기대 파일: `Details\\<tag>_notab.dwg`가 서포트별로 생성되고, 실패 항목은 목록으로만 보고되며 다음 항목 처리가 계속됨.
+- `PFSNOTABDETAIL` 또는 `PFSNOTABBATCH` 실행 후 세로 치수 텍스트가 `75` 같은 프로파일 F값으로 표시되는지 확인.
+- 부재 옆 MLeader 콜아웃이 `L-75×75×9` 형태로 생성되는지 확인.
+- 글자/화살표 10, 오프셋/적층 15 적용 확인.
+- `GD1`/`RC1` 가로 치수는 하단, 미등록 타입은 기존 auto 규칙 유지 확인.
