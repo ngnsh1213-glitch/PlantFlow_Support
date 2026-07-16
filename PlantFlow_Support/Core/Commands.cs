@@ -2846,7 +2846,7 @@ namespace PlantFlow_Support
         }
 
         if (!skipViewport && viewportId != ObjectId.Null)
-          this.ConfigureNotabDetailViewport(detailDb, viewportId, supportExt, supportExtSource);
+          this.ConfigureNotabDetailViewport(detailDb, viewportId, solidExt, "clipped-solid");
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         detailDb.SaveAs(savedPath, DwgVersion.Current);
@@ -3288,6 +3288,17 @@ namespace PlantFlow_Support
         bool hasSupportExt = this.TryGetNotabSupportSolidExtents(sourceDb, sourceTr, out supportExt);
         if (hasSupportExt)
           supportExtSource = "support";
+        NotabClipBox clipBox = null;
+        if (hasSupportExt)
+          clipBox = this.CreateNotabClipBox(supportExt);
+        else
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL clip skip: supportExt 없음");
+
+        int clipCandidates = 0;
+        int clipKept = 0;
+        int clipTrimmed = 0;
+        int clipDropped = 0;
+        int clipFallback = 0;
 
         foreach (ObjectId solidId in solidIds)
         {
@@ -3309,6 +3320,25 @@ namespace PlantFlow_Support
               clean.LayerId = layerId;
             this.TryStripCleanSolidMetadata(clean);
 
+            bool keepSolid = true;
+            bool clipped = false;
+            if (clipBox != null)
+            {
+              clipCandidates++;
+              keepSolid = this.TryClipNotabSolidToBox(clean, clipBox, out clipped);
+              if (!keepSolid)
+              {
+                clipDropped++;
+                try { clean.Erase(); }
+                catch (System.Exception exErase) { PlantOrthoView.FileDiag("PFSNOTABDETAIL clip erase 예외 id=" + clean.ObjectId + ": " + exErase.GetType().Name + ": " + exErase.Message); }
+                continue;
+              }
+              if (clipped)
+                clipTrimmed++;
+              else
+                clipFallback++;
+            }
+
             Extents3d ext = clean.GeometricExtents;
             if (!hasExt)
             {
@@ -3320,11 +3350,17 @@ namespace PlantFlow_Support
               solidExt.AddExtents(ext);
             }
             copied++;
+            clipKept++;
           }
           catch (System.Exception ex)
           {
             PlantOrthoView.FileDiag("PFSNOTABDETAIL cleanSolid skip id=" + solidId + ": " + ex.GetType().Name + ": " + ex.Message);
           }
+        }
+        if (clipBox != null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL clip solids=" + clipCandidates + " kept=" + clipKept + " trimmed=" + clipTrimmed + " dropped=" + clipDropped + " fallback=" + clipFallback + " margin=" + this.FormatNumber(clipBox.Margin) + " ext=" + (hasExt ? this.FormatExtents(solidExt) : "none"));
+          clipBox.Dispose();
         }
         sourceTr.Commit();
       }
@@ -3388,6 +3424,214 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL supportExt scan 예외: " + ex.GetType().Name + ": " + ex.Message);
         return false;
+      }
+    }
+
+    private NotabClipBox CreateNotabClipBox(Extents3d supportExt)
+    {
+      double margin = this.GetEnvDouble("PFS_NOTAB_CLIP_MARGIN", 150.0, 0.0, 10000.0);
+      Vector3d viewDir;
+      Vector3d up;
+      Vector3d right;
+      this.GetNotabViewBasis(out viewDir, out up, out right);
+
+      double minR = 0.0, maxR = 0.0, minU = 0.0, maxU = 0.0, minD = 0.0, maxD = 0.0;
+      bool hasProjection = false;
+      foreach (Point3d corner in this.GetExtentsCorners(supportExt))
+      {
+        Vector3d v = corner.GetAsVector();
+        double r = v.DotProduct(right);
+        double u = v.DotProduct(up);
+        double d = v.DotProduct(viewDir);
+        if (!hasProjection)
+        {
+          minR = maxR = r;
+          minU = maxU = u;
+          minD = maxD = d;
+          hasProjection = true;
+        }
+        else
+        {
+          if (r < minR) minR = r;
+          if (r > maxR) maxR = r;
+          if (u < minU) minU = u;
+          if (u > maxU) maxU = u;
+          if (d < minD) minD = d;
+          if (d > maxD) maxD = d;
+        }
+      }
+
+      if (!hasProjection)
+        return null;
+
+      minR -= margin;
+      maxR += margin;
+      minU -= margin;
+      maxU += margin;
+      minD -= margin;
+      maxD += margin;
+
+      double width = System.Math.Max(maxR - minR, 1.0);
+      double height = System.Math.Max(maxU - minU, 1.0);
+      double depth = System.Math.Max(maxD - minD, 1.0);
+      Point3d center = Point3d.Origin
+        + right.MultiplyBy((minR + maxR) / 2.0)
+        + up.MultiplyBy((minU + maxU) / 2.0)
+        + viewDir.MultiplyBy((minD + maxD) / 2.0);
+
+      Solid3d box = null;
+      try
+      {
+        box = new Solid3d();
+        box.CreateBox(width, height, depth);
+        Matrix3d transform = Matrix3d.AlignCoordinateSystem(
+          Point3d.Origin, Vector3d.XAxis, Vector3d.YAxis, Vector3d.ZAxis,
+          center, right, up, viewDir);
+        box.TransformBy(transform);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL clip box size=(" + this.FormatNumber(width) + "," + this.FormatNumber(height) + "," + this.FormatNumber(depth) + ") center=(" + this.FormatNumber(center.X) + "," + this.FormatNumber(center.Y) + "," + this.FormatNumber(center.Z) + ") margin=" + this.FormatNumber(margin));
+        return new NotabClipBox(box, right, up, viewDir, minR, maxR, minU, maxU, minD, maxD, margin);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL clip box 예외: " + ex.GetType().Name + ": " + ex.Message);
+        if (box != null)
+          box.Dispose();
+        return null;
+      }
+    }
+
+    private bool TryClipNotabSolidToBox(Solid3d solid, NotabClipBox clipBox, out bool clipped)
+    {
+      clipped = false;
+      if (solid == null || clipBox == null || clipBox.Box == null)
+        return true;
+
+      Extents3d beforeExt;
+      try
+      {
+        beforeExt = solid.GeometricExtents;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL clip ext pre 예외 id=" + solid.ObjectId + ": " + ex.GetType().Name + ": " + ex.Message);
+        return true;
+      }
+
+      if (!this.NotabProjectedExtentsIntersect(beforeExt, clipBox))
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL clip drop prefilter id=" + solid.ObjectId + " ext=" + this.FormatExtents(beforeExt));
+        return false;
+      }
+
+      Solid3d clipCopy = null;
+      try
+      {
+        clipCopy = clipBox.Box.Clone() as Solid3d;
+        if (clipCopy == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL clip fallback: clip clone null id=" + solid.ObjectId);
+          return true;
+        }
+
+        solid.BooleanOperation(BooleanOperationType.BoolIntersect, clipCopy);
+        clipped = true;
+
+        if (this.IsNotabSolidEmpty(solid))
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL clip drop empty id=" + solid.ObjectId);
+          return false;
+        }
+
+        return true;
+      }
+      catch (Autodesk.AutoCAD.Runtime.Exception aex)
+      {
+        string status = aex.ErrorStatus.ToString();
+        if (status.IndexOf("NoIntersection", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL clip drop boolean id=" + solid.ObjectId + ": " + status + " " + aex.Message);
+          return false;
+        }
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL clip fallback id=" + solid.ObjectId + ": " + status + " " + aex.Message);
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL clip fallback id=" + solid.ObjectId + ": " + ex.GetType().Name + ": " + ex.Message);
+        return true;
+      }
+      finally
+      {
+        if (clipCopy != null)
+        {
+          try { clipCopy.Dispose(); }
+          catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSNOTABDETAIL clip copy dispose 예외: " + ex.GetType().Name + ": " + ex.Message); }
+        }
+      }
+    }
+
+    private bool NotabProjectedExtentsIntersect(Extents3d ext, NotabClipBox clipBox)
+    {
+      double minR = 0.0, maxR = 0.0, minU = 0.0, maxU = 0.0, minD = 0.0, maxD = 0.0;
+      bool hasProjection = false;
+      foreach (Point3d corner in this.GetExtentsCorners(ext))
+      {
+        Vector3d v = corner.GetAsVector();
+        double r = v.DotProduct(clipBox.Right);
+        double u = v.DotProduct(clipBox.Up);
+        double d = v.DotProduct(clipBox.ViewDir);
+        if (!hasProjection)
+        {
+          minR = maxR = r;
+          minU = maxU = u;
+          minD = maxD = d;
+          hasProjection = true;
+        }
+        else
+        {
+          if (r < minR) minR = r;
+          if (r > maxR) maxR = r;
+          if (u < minU) minU = u;
+          if (u > maxU) maxU = u;
+          if (d < minD) minD = d;
+          if (d > maxD) maxD = d;
+        }
+      }
+
+      if (!hasProjection)
+        return false;
+      if (maxR < clipBox.MinR || minR > clipBox.MaxR) return false;
+      if (maxU < clipBox.MinU || minU > clipBox.MaxU) return false;
+      if (maxD < clipBox.MinD || minD > clipBox.MaxD) return false;
+      return true;
+    }
+
+    private bool IsNotabSolidEmpty(Solid3d solid)
+    {
+      if (solid == null)
+        return true;
+
+      try
+      {
+        double volume = solid.MassProperties.Volume;
+        if (volume <= 1e-9)
+          return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL clip volume skip id=" + solid.ObjectId + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      try
+      {
+        Extents3d ext = solid.GeometricExtents;
+        return ext.MinPoint.DistanceTo(ext.MaxPoint) <= 1e-9;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL clip ext post 예외 id=" + solid.ObjectId + ": " + ex.GetType().Name + ": " + ex.Message);
+        return true;
       }
     }
 
@@ -3598,20 +3842,26 @@ namespace PlantFlow_Support
             return false;
           }
 
-          const double DetailViewScale = 0.25;
           Point3d target = new Point3d(
             (targetExt.MinPoint.X + targetExt.MaxPoint.X) / 2.0,
             (targetExt.MinPoint.Y + targetExt.MaxPoint.Y) / 2.0,
             (targetExt.MinPoint.Z + targetExt.MaxPoint.Z) / 2.0);
-          Vector3d viewDir = s_isoPipeAxisValid && s_isoPipeAxis.Length > 1e-6 ? s_isoPipeAxis.GetNormal() : Vector3d.XAxis;
-          Vector3d viewUp = s_isoPipeUp.Length > 1e-6 ? s_isoPipeUp.GetNormal() : Vector3d.ZAxis;
+          Vector3d viewDir;
+          Vector3d viewUp;
+          Vector3d viewRight;
+          this.GetNotabViewBasis(out viewDir, out viewUp, out viewRight);
           double twist = this.ComputeNotabViewportTwist(viewDir, viewUp);
+          Point2d viewCenter;
+          double viewHeight;
+          double fitWidth;
+          double fitHeight;
+          this.ComputeNotabViewportFit(targetExt, target, viewRight, viewUp, vp.Width, vp.Height, out viewCenter, out viewHeight, out fitWidth, out fitHeight);
 
           vp.ViewTarget = target;
           vp.ViewDirection = viewDir;
-          vp.ViewCenter = new Point2d(0.0, 0.0);
+          vp.ViewCenter = viewCenter;
+          vp.ViewHeight = viewHeight;
           vp.TwistAngle = twist;
-          vp.CustomScale = DetailViewScale;
           // 기본=와이어프레임(0-A 육안 채택). Hidden 은선제거는 opt-in(PFS_NOTAB_USE_HIDDEN=1).
           // 미적용 시 뷰포트는 기본 2D 와이어프레임으로 렌더된다(VisualStyleId 미지정).
           bool useHidden = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_USE_HIDDEN"), "1", System.StringComparison.OrdinalIgnoreCase);
@@ -3628,7 +3878,8 @@ namespace PlantFlow_Support
           }
 
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") src=" + (string.IsNullOrWhiteSpace(targetSource) ? "fallback" : targetSource));
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport viewDir=" + this.FormatVectorForCommand(viewDir) + " target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") twist=" + this.FormatNumber(twist) + " hidden=" + hiddenOk + " shadePlot=" + shadeOk + " scale=1:4");
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport fit center=(" + this.FormatNumber(viewCenter.X) + "," + this.FormatNumber(viewCenter.Y) + ") ViewHeight=" + this.FormatNumber(viewHeight) + " content=(" + this.FormatNumber(fitWidth) + "," + this.FormatNumber(fitHeight) + ") vp=(" + this.FormatNumber(vp.Width) + "," + this.FormatNumber(vp.Height) + ")");
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport viewDir=" + this.FormatVectorForCommand(viewDir) + " target=(" + this.FormatNumber(target.X) + "," + this.FormatNumber(target.Y) + "," + this.FormatNumber(target.Z) + ") twist=" + this.FormatNumber(twist) + " hidden=" + hiddenOk + " shadePlot=" + shadeOk + " fit=dynamic");
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 2차 view설정 직전");
           tr.Commit();
           PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport 2차 view설정 완료");
@@ -3668,6 +3919,101 @@ namespace PlantFlow_Support
         PlantOrthoView.FileDiag("PFSNOTABDETAIL twist 계산 예외: " + ex.GetType().Name + ": " + ex.Message);
         return 0.0;
       }
+    }
+
+    private void ComputeNotabViewportFit(Extents3d ext, Point3d target, Vector3d right, Vector3d up, double viewportWidth, double viewportHeight, out Point2d viewCenter, out double viewHeight, out double contentWidth, out double contentHeight)
+    {
+      viewCenter = new Point2d(0.0, 0.0);
+      viewHeight = 100.0;
+      contentWidth = 0.0;
+      contentHeight = 0.0;
+
+      try
+      {
+        double minR = 0.0, maxR = 0.0, minU = 0.0, maxU = 0.0;
+        bool hasProjection = false;
+        foreach (Point3d corner in this.GetExtentsCorners(ext))
+        {
+          Vector3d v = corner - target;
+          double r = v.DotProduct(right);
+          double u = v.DotProduct(up);
+          if (!hasProjection)
+          {
+            minR = maxR = r;
+            minU = maxU = u;
+            hasProjection = true;
+          }
+          else
+          {
+            if (r < minR) minR = r;
+            if (r > maxR) maxR = r;
+            if (u < minU) minU = u;
+            if (u > maxU) maxU = u;
+          }
+        }
+
+        if (!hasProjection)
+          return;
+
+        contentWidth = System.Math.Max(maxR - minR, 1.0);
+        contentHeight = System.Math.Max(maxU - minU, 1.0);
+        double pad = this.GetEnvDouble("PFS_NOTAB_FIT_PAD", 0.15, 0.0, 2.0);
+        double aspect = (viewportWidth > 1e-6 && viewportHeight > 1e-6) ? viewportWidth / viewportHeight : 1.0;
+        viewCenter = new Point2d((minR + maxR) / 2.0, (minU + maxU) / 2.0);
+        viewHeight = System.Math.Max(contentHeight * (1.0 + pad), (contentWidth * (1.0 + pad)) / aspect);
+        if (viewHeight <= 1e-6)
+          viewHeight = 100.0;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL viewport fit 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void GetNotabViewBasis(out Vector3d viewDir, out Vector3d up, out Vector3d right)
+    {
+      viewDir = s_isoPipeAxisValid && s_isoPipeAxis.Length > 1e-6 ? s_isoPipeAxis.GetNormal() : Vector3d.XAxis;
+      up = s_isoPipeUp.Length > 1e-6 ? s_isoPipeUp.GetNormal() : Vector3d.ZAxis;
+      up = up - viewDir.MultiplyBy(up.DotProduct(viewDir));
+      if (up.Length <= 1e-6)
+        up = Vector3d.ZAxis - viewDir.MultiplyBy(Vector3d.ZAxis.DotProduct(viewDir));
+      if (up.Length <= 1e-6)
+        up = Vector3d.YAxis - viewDir.MultiplyBy(Vector3d.YAxis.DotProduct(viewDir));
+      if (up.Length <= 1e-6)
+        up = Vector3d.ZAxis;
+      up = up.GetNormal();
+
+      right = up.CrossProduct(viewDir);
+      if (right.Length <= 1e-6)
+        right = Vector3d.XAxis;
+      else
+        right = right.GetNormal();
+
+      up = viewDir.CrossProduct(right);
+      if (up.Length > 1e-6)
+        up = up.GetNormal();
+    }
+
+    private double GetEnvDouble(string name, double fallback, double minValue, double maxValue)
+    {
+      try
+      {
+        string raw = System.Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(raw))
+          return fallback;
+
+        double parsed;
+        if (double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) && parsed >= minValue && parsed <= maxValue)
+          return parsed;
+
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL env 무시 " + name + "=" + raw + " range=" + this.FormatNumber(minValue) + "~" + this.FormatNumber(maxValue));
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL env 읽기 예외 " + name + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      return fallback;
     }
 
     private bool TryApplyHiddenVisualStyle(Database db, Transaction tr, Viewport vp)
@@ -5868,6 +6214,45 @@ namespace PlantFlow_Support
       public double Radius;
       public double CenterX;
       public double CenterY;
+    }
+
+    private class NotabClipBox : System.IDisposable
+    {
+      public NotabClipBox(Solid3d box, Vector3d right, Vector3d up, Vector3d viewDir, double minR, double maxR, double minU, double maxU, double minD, double maxD, double margin)
+      {
+        this.Box = box;
+        this.Right = right;
+        this.Up = up;
+        this.ViewDir = viewDir;
+        this.MinR = minR;
+        this.MaxR = maxR;
+        this.MinU = minU;
+        this.MaxU = maxU;
+        this.MinD = minD;
+        this.MaxD = maxD;
+        this.Margin = margin;
+      }
+
+      public Solid3d Box;
+      public Vector3d Right;
+      public Vector3d Up;
+      public Vector3d ViewDir;
+      public double MinR;
+      public double MaxR;
+      public double MinU;
+      public double MaxU;
+      public double MinD;
+      public double MaxD;
+      public double Margin;
+
+      public void Dispose()
+      {
+        if (this.Box != null)
+        {
+          this.Box.Dispose();
+          this.Box = null;
+        }
+      }
     }
 
     private double ComputeIsoDimensionSize()
