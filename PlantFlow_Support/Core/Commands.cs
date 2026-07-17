@@ -7543,6 +7543,10 @@ namespace PlantFlow_Support
           Extents3d supContactBox = new Extents3d(
             new Point3d(anchor.MinPoint.X - supTol, anchor.MinPoint.Y - supTol, anchor.MinPoint.Z - supTol),
             new Point3d(anchor.MaxPoint.X + supTol, anchor.MaxPoint.Y + supTol, anchor.MaxPoint.Z + supTol));
+          double pipeReach = this.GetEnvDouble("PFS_NOTAB_PIPE_REACH", 300.0, 0.0, 100000.0);
+          Extents3d pipeReachBox = new Extents3d(
+            new Point3d(anchor.MinPoint.X - pipeReach, anchor.MinPoint.Y - pipeReach, anchor.MinPoint.Z - pipeReach),
+            new Point3d(anchor.MaxPoint.X + pipeReach, anchor.MaxPoint.Y + pipeReach, anchor.MaxPoint.Z + pipeReach));
           Point3d supCenter = new Point3d(
             (anchor.MinPoint.X + anchor.MaxPoint.X) / 2.0,
             (anchor.MinPoint.Y + anchor.MaxPoint.Y) / 2.0,
@@ -7606,6 +7610,13 @@ namespace PlantFlow_Support
                 if (!this.TryGetPlantLineNumber(ps, eid, out pipeTag) || !string.Equals(pipeTag, supTag, System.StringComparison.OrdinalIgnoreCase))
                 {
                   pipeDropLine++;
+                  continue;
+                }
+
+                if (!this.NotabExtentsIntersect(pipeReachBox, ex))
+                {
+                  pipeDropDist++;
+                  PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include pipe dropFar id=" + eid + " ext=" + this.FormatExtents(ex) + " pipeReach=" + this.FormatNumber(pipeReach) + " line=" + pipeTag);
                   continue;
                 }
 
@@ -7715,7 +7726,7 @@ namespace PlantFlow_Support
             }
           }
           tr.Commit();
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include anchor=" + this.FormatExtents(anchor) + " margin=" + this.FormatNumber(margin) + " supportTol=" + this.FormatNumber(supTol) + " contactTol=" + this.FormatNumber(contactAllowance) + " line=" + (string.IsNullOrWhiteSpace(supTag) ? "(none)" : supTag) + " pipeCand=" + pipeCand + " incl=" + pipeIncl + " dropLine=" + pipeDropLine + " dropDist=" + pipeDropDist + " dropNoTag=" + pipeDropNoTag + " fallback=" + pipeFallback + " addedPipe=" + addedPipe + " addedSupport=" + addedSup);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include anchor=" + this.FormatExtents(anchor) + " margin=" + this.FormatNumber(margin) + " supportTol=" + this.FormatNumber(supTol) + " pipeReach=" + this.FormatNumber(pipeReach) + " contactTol=" + this.FormatNumber(contactAllowance) + " line=" + (string.IsNullOrWhiteSpace(supTag) ? "(none)" : supTag) + " pipeCand=" + pipeCand + " incl=" + pipeIncl + " dropLine=" + pipeDropLine + " dropDist=" + pipeDropDist + " dropNoTag=" + pipeDropNoTag + " fallback=" + pipeFallback + " addedPipe=" + addedPipe + " addedSupport=" + addedSup);
         }
         return result.ToArray();
       }

@@ -1,16 +1,15 @@
 # REPORT - Codex -> Claude
 
-- **cycle**: 65
+- **cycle**: 66
 - **status**: done
 - **completed_at**: 2026-07-17
-- **title**: 서포트 자동포함을 태그필터에서 접촉박스로 대체
+- **title**: 파이프 자동포함에 세그먼트 근접 게이트 추가
 
 ## 변경 요약
-- `AutoIncludeRelatedParts`의 Support 후보 포함 판정을 `probe(anchor +/- PFS_NOTAB_MARGIN)`에서 별도 접촉박스 `anchor +/- PFS_NOTAB_SUPPORT_TOL`로 변경했다.
-- `PFS_NOTAB_SUPPORT_TOL` 기본값은 50mm이며, 허용 범위는 0~10000으로 두었다.
-- cycle64의 `SupportName`/`sameSupport` 태그 기반 게이트와 `PFS_NOTAB_INCLUDE_NEIGHBOR_SUPPORT` 분기를 제거했다.
-- 미사용 `TryGetSupportName` 헬퍼를 제거했다.
-- 파이프 포함, 앵커 계산, 클립, held-pipe/BOP 선택 로직은 수정하지 않았다.
+- `AutoIncludeRelatedParts`에서 `anchor +/- PFS_NOTAB_PIPE_REACH` 근접박스(`pipeReachBox`)를 추가했다.
+- 파이프 후보는 라인태그 일치 후, 축투영/스코어링 전에 실제 `GeometricExtents`가 `pipeReachBox`와 교차하는지 먼저 검사한다.
+- 먼 동일 라인 세그먼트는 `auto-include pipe dropFar ... pipeReach=...` 로그와 함께 제외한다.
+- 축투영, BOP 스코어링, best 선택, 서포트 접촉박스, 앵커, 클립 로직은 수정하지 않았다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
@@ -20,10 +19,9 @@
 - 별도 백업 파일 생성 없음. 변경 범위가 단일 함수 내부이며 Git diff로 롤백 가능.
 
 ## 검증
-- 변경 주변 20줄 수동 확인 완료.
-- `rg`로 `PFS_NOTAB_INCLUDE_NEIGHBOR_SUPPORT`, `TryGetSupportName`, `selectedSupTag`, `sameSupport`, `candTag`, `includeNeighborSup` 잔존 참조 없음 확인.
-- `git diff -- PlantFlow_Support/Core/Commands.cs` 확인: 지정 Support 분기와 미사용 헬퍼 제거만 포함.
+- `AutoIncludeRelatedParts` 변경 주변 20줄 이상 수동 확인 완료.
+- `git diff -- PlantFlow_Support/Core/Commands.cs` 확인: 파이프 근접 게이트와 관련 로그만 포함.
 - 빌드는 프로젝트 규칙에 따라 사용자 명시 요청이 없어 실행하지 않음.
 
 ## 커밋
-- 코드 반영 커밋: `e825df0` (`Use contact box for notab support include`)
+- 코드 반영 커밋: `7846af6` (`Gate notab pipe include by segment reach`)
