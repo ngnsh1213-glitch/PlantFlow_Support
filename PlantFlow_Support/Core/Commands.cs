@@ -34,6 +34,7 @@ namespace PlantFlow_Support
     private static string s_isoSupportBI;
     private static string s_isoSupportProfile;
     private static string s_isoSupportDesignation;
+    private static System.Collections.Generic.List<string> s_isoSupportDesignations = new System.Collections.Generic.List<string>();
     private static string s_isoSupportProfileHeight;
     private static Document s_isoOpenPendingTempDoc;
     private static Document s_isoOpenPendingOriginalDoc;
@@ -1178,6 +1179,7 @@ namespace PlantFlow_Support
       s_isoSupportBI = string.Empty;
       s_isoSupportProfile = string.Empty;
       s_isoSupportDesignation = string.Empty;
+      s_isoSupportDesignations.Clear();
       s_isoSupportProfileHeight = string.Empty;
 
       Editor ed = doc.Editor;
@@ -2066,6 +2068,7 @@ namespace PlantFlow_Support
       s_isoSupportBI = string.Empty;
       s_isoSupportProfile = string.Empty;
       s_isoSupportDesignation = string.Empty;
+      s_isoSupportDesignations.Clear();
       s_isoSupportProfileHeight = string.Empty;
       Editor ed = doc.Editor;
       PromptSelectionResult psr = ed.GetSelection();
@@ -4605,7 +4608,18 @@ namespace PlantFlow_Support
     {
       if (tr == null || layoutBtr == null || db == null)
         return;
-      if (string.IsNullOrWhiteSpace(s_isoSupportDesignation))
+      System.Collections.Generic.List<string> designations = new System.Collections.Generic.List<string>();
+      if (s_isoSupportDesignations != null)
+      {
+        for (int i = 0; i < s_isoSupportDesignations.Count; i++)
+        {
+          if (!string.IsNullOrWhiteSpace(s_isoSupportDesignations[i]))
+            designations.Add(s_isoSupportDesignations[i]);
+        }
+      }
+      if (designations.Count == 0 && !string.IsNullOrWhiteSpace(s_isoSupportDesignation))
+        designations.Add(s_isoSupportDesignation);
+      if (designations.Count == 0)
         return;
 
       try
@@ -4613,7 +4627,7 @@ namespace PlantFlow_Support
         ObjectId mlStyleId = this.EnsureNotabMLeaderStyle(db, tr);
         if (mlStyleId == ObjectId.Null)
         {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout skip: mleader style null designation=" + s_isoSupportDesignation);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout skip: mleader style null designation=" + designations[0]);
           return;
         }
 
@@ -4631,52 +4645,58 @@ namespace PlantFlow_Support
         if (barPaperH <= 1e-6 || barPaperH > h)
           barPaperH = h * 0.4;
         Point3d anchor = new Point3d(supportPaperExt.MaxPoint.X, supportPaperExt.MinPoint.Y + barPaperH * 0.5, 0.0);
-        Point3d elbow = new Point3d(supportPaperExt.MaxPoint.X + offset * 3.0, supportPaperExt.MinPoint.Y + barPaperH * 0.15, 0.0);
-        Point3d textPoint = new Point3d(elbow.X + gap, elbow.Y, 0.0);
-        elbow = new Point3d(elbow.X + mdx, elbow.Y + mdy, 0.0);
-        textPoint = new Point3d(textPoint.X + mdx, textPoint.Y + mdy, 0.0);
-        MText content = new MText();
-        content.Contents = s_isoSupportDesignation;
-        content.TextHeight = txt;
-        content.Attachment = AttachmentPoint.MiddleLeft;
-        content.Location = textPoint;
-        if (textStyleId != ObjectId.Null)
-          content.TextStyleId = textStyleId;
 
-        MLeader leader = PSUtil.CreateMLeader(new Point3d[] { anchor, elbow, textPoint }, content, mlStyleId, Matrix3d.Identity);
-        if (leader == null)
+        for (int i = 0; i < designations.Count; i++)
         {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout skip: CreateMLeader null designation=" + s_isoSupportDesignation);
-          return;
-        }
+          string designation = designations[i];
+          double stackDy = -(double)i * (txt * 1.8);
+          Point3d elbow = new Point3d(supportPaperExt.MaxPoint.X + offset * 3.0, supportPaperExt.MinPoint.Y + barPaperH * 0.15 + stackDy, 0.0);
+          Point3d textPoint = new Point3d(elbow.X + gap, elbow.Y, 0.0);
+          elbow = new Point3d(elbow.X + mdx, elbow.Y + mdy, 0.0);
+          textPoint = new Point3d(textPoint.X + mdx, textPoint.Y + mdy, 0.0);
+          MText content = new MText();
+          content.Contents = designation;
+          content.TextHeight = txt;
+          content.Attachment = AttachmentPoint.MiddleLeft;
+          content.Location = textPoint;
+          if (textStyleId != ObjectId.Null)
+            content.TextStyleId = textStyleId;
 
-        try
-        {
-          leader.TextLocation = textPoint;
-          leader.TextAlignmentType = (TextAlignmentType)0;
-          MText placed = leader.MText;
-          if (placed != null)
+          MLeader leader = PSUtil.CreateMLeader(new Point3d[] { anchor, elbow, textPoint }, content, mlStyleId, Matrix3d.Identity);
+          if (leader == null)
           {
-            placed.Attachment = AttachmentPoint.MiddleLeft;
-            placed.Location = textPoint;
-            leader.MText = placed;
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL callout skip: CreateMLeader null idx=" + i + " designation=" + designation);
+            continue;
           }
-          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "callout", textPoint);
-        }
-        catch (System.Exception ex)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout text placement 예외: " + ex.GetType().Name + ": " + ex.Message + " text=" + textPoint);
-        }
 
-        if (layerId != ObjectId.Null)
-          leader.LayerId = layerId;
-        layoutBtr.AppendEntity(leader);
-        tr.AddNewlyCreatedDBObject(leader, true);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append designation=" + s_isoSupportDesignation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
+          try
+          {
+            leader.TextLocation = textPoint;
+            leader.TextAlignmentType = (TextAlignmentType)0;
+            MText placed = leader.MText;
+            if (placed != null)
+            {
+              placed.Attachment = AttachmentPoint.MiddleLeft;
+              placed.Location = textPoint;
+              leader.MText = placed;
+            }
+            this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "callout", textPoint);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL callout text placement 예외: " + ex.GetType().Name + ": " + ex.Message + " idx=" + i + " text=" + textPoint);
+          }
+
+          if (layerId != ObjectId.Null)
+            leader.LayerId = layerId;
+          layoutBtr.AppendEntity(leader);
+          tr.AddNewlyCreatedDBObject(leader, true);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append idx=" + i + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
+        }
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append 예외: " + ex.GetType().Name + ": " + ex.Message + " designation=" + s_isoSupportDesignation);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append 예외: " + ex.GetType().Name + ": " + ex.Message + " designation=" + (designations.Count > 0 ? designations[0] : s_isoSupportDesignation));
       }
     }
 
@@ -4916,6 +4936,7 @@ namespace PlantFlow_Support
       public string VerticalMode;
       public string PipeCalloutSide;
       public string HorizontalSide;
+      public string[] MemberBIs;
     }
 
     private string GetNotabStandardName()
@@ -4948,6 +4969,8 @@ namespace PlantFlow_Support
         return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "bottom" };
       if (string.Equals(standardName, "RC1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "bottom" };
+      if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "215", "16" } };
       if (string.Equals(standardName, "GD3", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "full", PipeCalloutSide = "bottom", HorizontalSide = "auto" };
 
@@ -6808,6 +6831,7 @@ namespace PlantFlow_Support
       s_isoSupportBI = string.Empty;
       s_isoSupportProfile = string.Empty;
       s_isoSupportDesignation = string.Empty;
+      s_isoSupportDesignations.Clear();
       s_isoSupportProfileHeight = string.Empty;
 
       if (supportId == ObjectId.Null)
@@ -6845,29 +6869,105 @@ namespace PlantFlow_Support
         }
         if (dims == null || !dims.ContainsKey("BI") || string.IsNullOrWhiteSpace(dims["BI"]))
         {
-          PlantOrthoView.FileDiag("PFSVBISOCLONE profile skip: BI 없음 id=" + supportId);
+          PlantOrthoView.FileDiag("PFSVBISOCLONE profile BI 없음 id=" + supportId + " config fallback 검사");
+          this.CaptureIsoSupportProfileFromConfig();
           return;
         }
 
         string bi = dims["BI"].Trim().Replace("_", string.Empty);
-        string profile = HANTEC.DetailProfile(bi);
-        if (string.IsNullOrWhiteSpace(profile))
-        {
-          PlantOrthoView.FileDiag("PFSVBISOCLONE profile skip: DetailProfile empty BI=" + bi);
+        string profile;
+        string height;
+        string designation;
+        if (!this.TryBuildNotabSupportDesignation(bi, out profile, out height, out designation))
           return;
-        }
-
-        string height = this.GetFirstProfileToken(profile);
-        string prefix = this.GetSupportProfilePrefix(bi);
         s_isoSupportBI = bi;
         s_isoSupportProfile = profile;
-        s_isoSupportDesignation = string.IsNullOrWhiteSpace(prefix) ? profile.Replace("x", "×") : prefix + "-" + profile.Replace("x", "×");
+        s_isoSupportDesignation = designation;
+        s_isoSupportDesignations.Add(s_isoSupportDesignation);
         s_isoSupportProfileHeight = height;
-        PlantOrthoView.FileDiag("PFSVBISOCLONE profile BI=" + s_isoSupportBI + " profile=" + s_isoSupportProfile + " height=" + s_isoSupportProfileHeight + " designation=" + s_isoSupportDesignation);
+        PlantOrthoView.FileDiag("PFSVBISOCLONE profile BI=" + s_isoSupportBI + " profile=" + s_isoSupportProfile + " height=" + s_isoSupportProfileHeight + " designation=" + s_isoSupportDesignation + " designations count=" + s_isoSupportDesignations.Count + " { " + s_isoSupportDesignation + " }");
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSVBISOCLONE profile 예외 id=" + supportId + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void CaptureIsoSupportProfileFromConfig()
+    {
+      try
+      {
+        string std = this.GetNotabStandardName();
+        string[] bis = this.GetNotabTypeConfig(std).MemberBIs;
+        if (bis == null || bis.Length == 0)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE profile config skip: MemberBIs 없음 std=" + std);
+          return;
+        }
+
+        System.Text.StringBuilder joined = new System.Text.StringBuilder();
+        for (int i = 0; i < bis.Length; i++)
+        {
+          string profile;
+          string height;
+          string designation;
+          if (!this.TryBuildNotabSupportDesignation(bis[i], out profile, out height, out designation))
+          {
+            PlantOrthoView.FileDiag("PFSVBISOCLONE profile config skip BI=" + (bis[i] ?? "null") + " std=" + std);
+            continue;
+          }
+
+          if (string.IsNullOrWhiteSpace(s_isoSupportBI))
+          {
+            s_isoSupportBI = bis[i].Trim().Replace("_", string.Empty);
+            s_isoSupportProfile = profile;
+            s_isoSupportProfileHeight = height;
+            s_isoSupportDesignation = designation;
+          }
+          s_isoSupportDesignations.Add(designation);
+          if (joined.Length > 0)
+            joined.Append(" | ");
+          joined.Append(designation);
+        }
+
+        PlantOrthoView.FileDiag("PFSVBISOCLONE profile designations count=" + s_isoSupportDesignations.Count + " { " + joined.ToString() + " } std=" + std);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE profile config 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private bool TryBuildNotabSupportDesignation(string bi, out string profile, out string height, out string designation)
+    {
+      profile = string.Empty;
+      height = string.Empty;
+      designation = string.Empty;
+      try
+      {
+        if (string.IsNullOrWhiteSpace(bi))
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE profile skip: BI empty");
+          return false;
+        }
+
+        string normalizedBi = bi.Trim().Replace("_", string.Empty);
+        profile = HANTEC.DetailProfile(normalizedBi);
+        if (string.IsNullOrWhiteSpace(profile))
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE profile skip: DetailProfile empty BI=" + normalizedBi);
+          return false;
+        }
+
+        height = this.GetFirstProfileToken(profile);
+        string prefix = this.GetSupportProfilePrefix(normalizedBi);
+        designation = string.IsNullOrWhiteSpace(prefix) ? profile.Replace("x", "×") : prefix + "-" + profile.Replace("x", "×");
+        return !string.IsNullOrWhiteSpace(designation);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE profile designation 예외 BI=" + (bi ?? "null") + ": " + ex.GetType().Name + ": " + ex.Message);
+        return false;
       }
     }
 

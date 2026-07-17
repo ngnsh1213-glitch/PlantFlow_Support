@@ -1,27 +1,29 @@
 # REPORT - Codex -> Claude
 
-- **cycle**: 66
+- **cycle**: 67
 - **status**: done
 - **completed_at**: 2026-07-17
-- **title**: 파이프 자동포함에 세그먼트 근접 게이트 추가
+- **title**: GD2 고정 부재 BI 기반 이중 콜아웃
 
 ## 변경 요약
-- `AutoIncludeRelatedParts`에서 `anchor +/- PFS_NOTAB_PIPE_REACH` 근접박스(`pipeReachBox`)를 추가했다.
-- 파이프 후보는 라인태그 일치 후, 축투영/스코어링 전에 실제 `GeometricExtents`가 `pipeReachBox`와 교차하는지 먼저 검사한다.
-- 먼 동일 라인 세그먼트는 `auto-include pipe dropFar ... pipeReach=...` 로그와 함께 제외한다.
-- 축투영, BOP 스코어링, best 선택, 서포트 접촉박스, 앵커, 클립 로직은 수정하지 않았다.
+- `NotabTypeConfig`에 `MemberBIs`를 추가하고 GD2에 `215`, `16` 고정 BI를 설정했다.
+- 부재 designation을 리스트(`s_isoSupportDesignations`)로 보존하도록 확장했다.
+- SupportParams `BI`가 있는 타입은 기존처럼 단건 designation을 리스트에 1개만 넣어 하위호환을 유지했다.
+- SupportParams `BI`가 비어 있는 타입은 `GetNotabStandardName()`/`GetNotabTypeConfig()`의 `MemberBIs`로 `HANTEC.DetailProfile` designation을 구성한다.
+- `AppendNotabProfileCallout`은 designation 리스트를 순회해 `idx=0`은 기존 위치, 이후 항목은 `txt * 1.8` 간격으로 아래에 적층 렌더한다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
 - `.plans/REPORT.md`
 
 ## 백업
-- 별도 백업 파일 생성 없음. 변경 범위가 단일 함수 내부이며 Git diff로 롤백 가능.
+- 별도 백업 파일 생성 없음. 변경 범위가 단일 파일 내부이며 Git diff로 롤백 가능.
 
 ## 검증
-- `AutoIncludeRelatedParts` 변경 주변 20줄 이상 수동 확인 완료.
-- `git diff -- PlantFlow_Support/Core/Commands.cs` 확인: 파이프 근접 게이트와 관련 로그만 포함.
+- 변경 주변 20줄 이상 수동 확인 완료.
+- `rg`로 `s_isoSupportDesignations`, `MemberBIs`, `CaptureIsoSupportProfileFromConfig`, `TryBuildNotabSupportDesignation`, `callout append idx`, `profile designations count` 참조 확인.
+- `git diff -- PlantFlow_Support/Core/Commands.cs` 확인: 지정된 부재 콜아웃/config/profile 경로만 포함.
 - 빌드는 프로젝트 규칙에 따라 사용자 명시 요청이 없어 실행하지 않음.
 
 ## 커밋
-- 코드 반영 커밋: `0b0b31e` (`Gate notab pipe include by segment reach`)
+- 코드 반영 커밋: (커밋 후 갱신)
