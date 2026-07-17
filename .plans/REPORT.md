@@ -23,4 +23,4 @@
 - 빌드는 프로젝트 규칙에 따라 사용자 명시 요청이 없어 실행하지 않음.
 
 ## 커밋
-- 코드 반영 커밋: `5101141` (`Add GD3 notab dimension modes`)
+- 코드 반영 커밋: `df1de1c` (`Add GD3 notab dimension modes`)
