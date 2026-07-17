@@ -7562,8 +7562,22 @@ namespace PlantFlow_Support
           double supportBop;
           bool hasBop = this.TryGetSupportBop(ps, supportForBop, out supportBop);
           double bopTol = this.GetEnvDouble("PFS_NOTAB_BOP_TOL", 10.0, 0.0, 1000.0);
+          double includeNeighborSupValue = this.GetEnvDouble("PFS_NOTAB_INCLUDE_NEIGHBOR_SUPPORT", 0.0, 0.0, 1.0);
+          bool includeNeighborSup = includeNeighborSupValue >= 0.5;
+          string selectedSupTag = string.IsNullOrWhiteSpace(s_isoSupportTag) ? string.Empty : s_isoSupportTag.Trim();
+          if (string.IsNullOrWhiteSpace(selectedSupTag))
+          {
+            foreach (ObjectId id in selectedIds)
+            {
+              string cls = id.ObjectClass == null ? string.Empty : id.ObjectClass.Name;
+              if (cls.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) < 0)
+                continue;
+              if (this.TryGetSupportName(ps, id, out selectedSupTag))
+                break;
+            }
+          }
 
-          // 2) 모델공간 스캔: Pipe는 line tag + 축거리 접촉으로, Support는 기존 bbox 근접으로 포함한다.
+          // 2) 모델공간 스캔: Pipe는 line tag + 축거리 접촉으로, Support는 같은 SupportName만 기본 포함한다.
           ObjectId msId = this.GetModelSpaceId(db, tr);
           BlockTableRecord ms = msId == ObjectId.Null ? null : tr.GetObject(msId, OpenMode.ForRead) as BlockTableRecord;
           int addedPipe = 0, addedSup = 0;
@@ -7652,9 +7666,19 @@ namespace PlantFlow_Support
               else if (isSup)
               {
                 if (!this.NotabExtentsIntersect(probe, ex)) continue;
+                string candTag;
+                this.TryGetSupportName(ps, eid, out candTag);
+                bool sameSupport = !string.IsNullOrWhiteSpace(candTag) && !string.IsNullOrWhiteSpace(selectedSupTag) &&
+                  string.Equals(candTag, selectedSupTag, System.StringComparison.OrdinalIgnoreCase);
+                if (!includeNeighborSup && !sameSupport)
+                {
+                  PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include support skip(neighbor) id=" + eid + " candTag=" + candTag + " selTag=" + selectedSupTag + " ext=" + this.FormatExtents(ex));
+                  continue;
+                }
                 existing.Add(eid);
                 result.Add(eid);
                 addedSup++;
+                PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include support add id=" + eid + " candTag=" + candTag + " reason=" + (sameSupport ? "sameTag" : "envForce"));
               }
               else
               {
@@ -7723,6 +7747,34 @@ namespace PlantFlow_Support
       if (a.MaxPoint.Y < b.MinPoint.Y || a.MinPoint.Y > b.MaxPoint.Y) return false;
       if (a.MaxPoint.Z < b.MinPoint.Z || a.MinPoint.Z > b.MaxPoint.Z) return false;
       return true;
+    }
+
+    private bool TryGetSupportName(PSUtil ps, ObjectId id, out string supportName)
+    {
+      supportName = string.Empty;
+      if (id == ObjectId.Null)
+        return false;
+      if (ps == null || ps.dl_manager == null)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL SupportName skip: dl_manager null id=" + id);
+        return false;
+      }
+
+      try
+      {
+        System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection() { "SupportName" };
+        System.Collections.Specialized.StringCollection props = ps.dl_manager.GetProperties(id, names, true);
+        string value = props != null && props.Count > 0 ? props[0] : string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+          return false;
+        supportName = value.Trim();
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL SupportName 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
     }
 
     private bool TryGetPlantLineNumber(PSUtil ps, ObjectId id, out string lineNo)

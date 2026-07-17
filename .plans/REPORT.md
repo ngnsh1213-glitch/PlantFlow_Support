@@ -1,25 +1,29 @@
-# REPORT — Codex → Claude
+# REPORT - Codex -> Claude
 
-- **cycle**: 63
+- **cycle**: 64
 - **status**: done
 - **completed_at**: 2026-07-17
-- **title**: 리팩터 — 타입판정 ShortDescription化 + 데이터주도 타입설정표(NotabTypeConfig)
+- **title**: 추출 오염 차단 - 이웃 서포트 자동포함 게이트
 
 ## 변경 요약
-- 무탭 타입 판정 소스를 `SupportName` prefix 중심에서 `s_isoShortDesc` 우선의 `GetNotabStandardName()`으로 교정했다.
-- `NotabTypeConfig`와 `GetNotabTypeConfig()`를 추가해 `VerticalMode`/`PipeCalloutSide`/`HorizontalSide` 분기를 단일 표로 통합했다.
-- 초기 설정은 GD1/RC1/default 동작을 보존하고, GD3는 `full`/`bottom`/`auto`로 적용되도록 정리했다.
-- dim/pipe callout 로그에 `std=<standardName>` 필드를 추가했다.
+- `AutoIncludeRelatedParts`의 서포트 자동포함 분기를 강화했다.
+- 기본값에서는 후보 서포트의 `SupportName`이 선택 서포트 `SupportName`과 같은 경우만 포함한다.
+- `PFS_NOTAB_INCLUDE_NEIGHBOR_SUPPORT >= 0.5`일 때만 기존처럼 근접 이웃 서포트 포함을 허용한다.
+- `TryGetSupportName` 헬퍼를 추가해 `SupportName` 조회 실패 시 로그를 남기고 안전하게 제외되도록 했다.
+- 파이프 포함, 앵커 계산, 클립, held-pipe/BOP 선택 로직은 수정하지 않았다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
 - `.plans/REPORT.md`
 
+## 백업
+- `PlantFlow_Support/Core/Commands.cs.codex_bak_20260717_cycle64`
+
 ## 검증
 - 변경 주변 20줄 수동 확인 완료.
 - `git diff --check -- PlantFlow_Support/Core/Commands.cs` 실행: 오류 없음. 단, Git의 CRLF 변환 안내 경고만 출력됨.
-- `rg -n "GetSupportTypePrefix\\(s_isoSupportTag\\)|GetNotabStandardName|GetNotabTypeConfig|std=" PlantFlow_Support/Core/Commands.cs` 실행: 분기 호출과 로그 필드 위치 확인.
+- `git diff -- PlantFlow_Support/Core/Commands.cs` 확인: 지정 분기와 `SupportName` 조회 헬퍼만 변경.
 - 빌드는 프로젝트 규칙에 따라 사용자 명시 요청이 없어 실행하지 않음.
 
 ## 커밋
-- 코드 반영 커밋: `8b8f000` (`Refactor notab type config`)
+- 코드 반영 커밋: `46b42fa` (`Gate notab support auto include`)
