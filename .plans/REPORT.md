@@ -27,4 +27,4 @@
 - 빌드는 프로젝트 규칙에 따라 사용자 명시 요청이 없어 실행하지 않음.
 
 ## 커밋
-- 코드 반영 커밋: `2fda7a0` (`Distribute GD2 member callouts`)
+- 코드 반영 커밋: `ca99240` (`Distribute GD2 member callouts`)
