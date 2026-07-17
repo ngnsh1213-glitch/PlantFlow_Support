@@ -1,16 +1,16 @@
 # REPORT - Codex -> Claude
 
-- **cycle**: 68
+- **cycle**: 69
 - **status**: done
 - **completed_at**: 2026-07-17
-- **title**: GD2 이중 부재 콜아웃 위치 분산
+- **title**: BOM 스파이크(계측) - BOMs.ContentsByDesignStd 무탭 컨텍스트 실측 준비
 
 ## 변경 요약
-- `AppendNotabProfileCallout`에서 designation이 2개 이상이면 support paper extents의 폭을 기준으로 `fx=(i+0.5)/count` 앵커를 계산하도록 분기했다.
-- 다건 콜아웃은 각 앵커에서 `minY - offset` 방향으로 아래 인출하고, 텍스트는 기존 `gap`, `mdx`, `mdy`, `MiddleLeft`, near-edge 부착 로직을 유지한다.
-- 단건(GD1/GD3 등)은 기존 우변 앵커/우측 인출/적층 동작을 유지한다.
-- GD2 `MemberBIs` 순서를 `{ "16", "215" }`로 변경해 `L-65x65x6`이 좌측, `C-150x75x6.5x10`이 우측 순서로 렌더되도록 했다.
-- 로그에 다건일 때 `callout append(multi)`와 `fx`를 남기도록 했다.
+- `CaptureIsoSupportProfile(supportId)` 직후 `PFS_NOTAB_BOM_SPIKE` env 게이트를 추가했다.
+- 게이트가 0.5 이상일 때만 `NotabBomSpike(supportId)`를 호출한다. 기본값은 off다.
+- `NotabBomSpike`는 `BOMs(supportId, new List<AttachmentInfo>())`로 프레임 BOM만 계측하고, `std`, `rowCount`, 최대 40개 행의 컬럼 수/내용을 `PFSNOTABDETAIL bom ...` 로그로 남긴다.
+- 전체 BOM 스파이크를 try/catch로 감싸 예외를 로그로만 남기며 무탭 디테일 흐름을 방해하지 않게 했다.
+- 호출 위치를 프로파일 캡처 바깥으로 두어 GD2처럼 `BI`가 없고 config fallback으로 빠지는 경우도 BOM 파이프를 실측할 수 있게 했다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
@@ -21,10 +21,9 @@
 
 ## 검증
 - 변경 주변 20줄 이상 수동 확인 완료.
-- `git diff --check -- PlantFlow_Support\Core\Commands.cs` 완료: 공백 오류 없음. CRLF 변환 경고만 확인.
-- `rg`로 `multiDesignation`, `callout append`, `MemberBIs` 반영 위치 확인.
-- `git diff -- PlantFlow_Support\Core\Commands.cs` 확인: 콜아웃 다건 분기와 GD2 BI 순서 변경만 포함.
+- `rg`로 `PFS_NOTAB_BOM_SPIKE`, `NotabBomSpike`, `bom spike` 반영 위치 확인.
+- `git diff -- PlantFlow_Support/Core/Commands.cs` 확인: env 게이트와 로그 전용 헬퍼 추가만 포함.
 - 빌드는 프로젝트 규칙에 따라 사용자 명시 요청이 없어 실행하지 않음.
 
 ## 커밋
-- 코드 반영 커밋: `ca99240` (`Distribute GD2 member callouts`)
+- 코드 반영 커밋: `baa34a9` (`Add notab BOM spike`)

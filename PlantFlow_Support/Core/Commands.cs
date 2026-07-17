@@ -6770,6 +6770,9 @@ namespace PlantFlow_Support
 
       this.CaptureIsoSupportProperties(supportId, s_isoPipeId);
       this.CaptureIsoSupportProfile(supportId);
+      bool bomSpike = this.GetEnvDouble("PFS_NOTAB_BOM_SPIKE", 0.0, 0.0, 1.0) >= 0.5;
+      if (bomSpike)
+        this.NotabBomSpike(supportId);
       PlantOrthoView.FileDiag("PFSVBISOCLONE PLN=" + s_isoPipeLineNo + " BOP=" + s_isoBOP + " size=" + s_isoSize + " realW=" + this.FormatNumber(s_isoRealWidth) + " realH=" + this.FormatNumber(s_isoRealHeight) + " basisRight=" + this.FormatVectorForCommand(right) + " basisUp=" + this.FormatVectorForCommand(up) + " valid=" + s_isoRealSizeValid);
     }
 
@@ -6899,6 +6902,25 @@ namespace PlantFlow_Support
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSVBISOCLONE profile 예외 id=" + supportId + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void NotabBomSpike(ObjectId supportId)
+    {
+      try
+      {
+        BOMs bom = new BOMs(supportId, new System.Collections.Generic.List<AttachmentInfo>());
+        System.Collections.Generic.List<string[]> rows = bom.ContentsByDesignStd("HANTEC");
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL bom spike std=" + (bom.StandardName ?? "null") + " rowCount=" + (rows == null ? -1 : rows.Count));
+        if (rows != null)
+        {
+          for (int i = 0; i < rows.Count && i < 40; i++)
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL bom row[" + i + "] cols=" + (rows[i] == null ? 0 : rows[i].Length) + " { " + (rows[i] == null ? "" : string.Join(" | ", rows[i])) + " }");
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL bom spike 예외: " + ex.GetType().Name + ": " + ex.Message + " id=" + supportId);
       }
     }
 
