@@ -4636,7 +4636,11 @@ namespace PlantFlow_Support
         double gap = arr + txt * 0.6;
         double mdx = this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DX", 0.0, -2000.0, 2000.0);
         double mdy = this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DY", 0.0, -2000.0, 2000.0);
-        double h = supportPaperExt.MaxPoint.Y - supportPaperExt.MinPoint.Y;
+        double minX = supportPaperExt.MinPoint.X;
+        double maxX = supportPaperExt.MaxPoint.X;
+        double minY = supportPaperExt.MinPoint.Y;
+        double h = supportPaperExt.MaxPoint.Y - minY;
+        double width = maxX - minX;
         double vScale = s_isoRealHeight > 1e-6 ? h / s_isoRealHeight : 0.0;
         double barRealH;
         double barPaperH = h * 0.4;
@@ -4644,13 +4648,18 @@ namespace PlantFlow_Support
           barPaperH = barRealH * vScale;
         if (barPaperH <= 1e-6 || barPaperH > h)
           barPaperH = h * 0.4;
-        Point3d anchor = new Point3d(supportPaperExt.MaxPoint.X, supportPaperExt.MinPoint.Y + barPaperH * 0.5, 0.0);
+        bool multiDesignation = designations.Count > 1 && width > 1e-6;
+        Point3d singleAnchor = new Point3d(maxX, minY + barPaperH * 0.5, 0.0);
 
         for (int i = 0; i < designations.Count; i++)
         {
           string designation = designations[i];
-          double stackDy = -(double)i * (txt * 1.8);
-          Point3d elbow = new Point3d(supportPaperExt.MaxPoint.X + offset * 3.0, supportPaperExt.MinPoint.Y + barPaperH * 0.15 + stackDy, 0.0);
+          double fx = multiDesignation ? ((double)i + 0.5) / (double)designations.Count : 1.0;
+          Point3d anchor = multiDesignation ? new Point3d(minX + width * fx, minY, 0.0) : singleAnchor;
+          double stackDy = multiDesignation ? 0.0 : -(double)i * (txt * 1.8);
+          Point3d elbow = multiDesignation
+            ? new Point3d(anchor.X, minY - offset, 0.0)
+            : new Point3d(maxX + offset * 3.0, minY + barPaperH * 0.15 + stackDy, 0.0);
           Point3d textPoint = new Point3d(elbow.X + gap, elbow.Y, 0.0);
           elbow = new Point3d(elbow.X + mdx, elbow.Y + mdy, 0.0);
           textPoint = new Point3d(textPoint.X + mdx, textPoint.Y + mdy, 0.0);
@@ -4691,7 +4700,7 @@ namespace PlantFlow_Support
             leader.LayerId = layerId;
           layoutBtr.AppendEntity(leader);
           tr.AddNewlyCreatedDBObject(leader, true);
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append idx=" + i + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " fx=" + this.FormatNumber(fx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
         }
       }
       catch (System.Exception ex)
@@ -4970,7 +4979,7 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "RC1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "bottom" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "215", "16" } };
+        return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "16", "215" } };
       if (string.Equals(standardName, "GD3", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "full", PipeCalloutSide = "bottom", HorizontalSide = "auto" };
 
