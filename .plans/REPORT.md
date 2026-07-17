@@ -26,4 +26,4 @@
 - 빌드는 프로젝트 규칙에 따라 사용자 명시 요청이 없어 실행하지 않음.
 
 ## 커밋
-- 코드 반영 커밋: `baa34a9` (`Add notab BOM spike`)
+- 코드 반영 커밋: `07170ce` (`Add notab BOM spike`)
