@@ -24,4 +24,4 @@
 - 빌드는 프로젝트 규칙에 따라 사용자 명시 요청이 없어 실행하지 않음.
 
 ## 커밋
-- 코드 반영 커밋: `7846af6` (`Gate notab pipe include by segment reach`)
+- 코드 반영 커밋: `0b0b31e` (`Gate notab pipe include by segment reach`)
