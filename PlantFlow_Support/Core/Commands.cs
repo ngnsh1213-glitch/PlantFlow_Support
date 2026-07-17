@@ -6797,6 +6797,21 @@ namespace PlantFlow_Support
         }
 
         System.Collections.Generic.Dictionary<string, string> dims = ps.GetSupportDimension(supportId);
+        if (dims != null)
+        {
+          System.Text.StringBuilder sb = new System.Text.StringBuilder();
+          int n = 0;
+          foreach (System.Collections.Generic.KeyValuePair<string, string> kv in dims)
+          {
+            sb.Append(kv.Key).Append('=').Append(kv.Value).Append(" | ");
+            if (++n >= 80)
+            {
+              sb.Append("...(truncated)");
+              break;
+            }
+          }
+          PlantOrthoView.FileDiag("PFSVBISOCLONE support params dump id=" + supportId + " count=" + dims.Count + " { " + sb.ToString() + "}");
+        }
         if (dims == null || !dims.ContainsKey("BI") || string.IsNullOrWhiteSpace(dims["BI"]))
         {
           PlantOrthoView.FileDiag("PFSVBISOCLONE profile skip: BI 없음 id=" + supportId);
