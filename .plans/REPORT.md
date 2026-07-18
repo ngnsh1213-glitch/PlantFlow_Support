@@ -29,4 +29,4 @@
 - GD1·GD3은 기존 단일 designation 호출이 동일한지 회귀 확인한다.
 
 ## 커밋
-- `e69b957` (`Fix GD2 member callout anchors`)
+- 코드 반영: `ddfdaa1` (`Fix GD2 member callout anchors`)
