@@ -4679,12 +4679,11 @@ namespace PlantFlow_Support
         {
           string designation = designations[i];
           double fx = multiDesignation ? ((double)i + 0.5) / (double)designations.Count : 1.0;
-          // GD2/GD3 2부재 전용 특수배치(요구: L=중앙수직재, C=하단수평재 우측). 순서 역전은 아래 idx별 노브로 보정.
+          // GD2/GD3 2부재 전용 특수배치. 순서 역전은 아래 idx별 노브로 보정.
           string notabTypePrefix = this.GetSupportTypePrefix(s_isoSupportTag);
-          bool gd2Two = multiDesignation
-            && designations.Count == 2
-            && (string.Equals(notabTypePrefix, "GD2", System.StringComparison.OrdinalIgnoreCase)
-                || string.Equals(notabTypePrefix, "GD3", System.StringComparison.OrdinalIgnoreCase));
+          bool twoMember = multiDesignation && designations.Count == 2;
+          bool gd2Two = twoMember && string.Equals(notabTypePrefix, "GD2", System.StringComparison.OrdinalIgnoreCase);
+          bool gd3Two = twoMember && string.Equals(notabTypePrefix, "GD3", System.StringComparison.OrdinalIgnoreCase);
           // 부재별 라이브 미세조정용 개별 노브(기본 0): DX0/DY0=idx0, DX1/DY1=idx1
           double mdxI = mdx + this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DX" + i, 0.0, -2000.0, 2000.0);
           double mdyI = mdy + this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DY" + i, 0.0, -2000.0, 2000.0);
@@ -4702,6 +4701,20 @@ namespace PlantFlow_Support
           else if (gd2Two && i == 1)
           {
             // idx1 = 하단 수평재 우측 지정, 텍스트 우측 하단
+            anchor = new Point3d(minX + width * 0.8, minY, 0.0);
+            elbow = new Point3d(maxX + offset, minY - offset * 2.0, 0.0);
+            leftHalf = false;
+          }
+          else if (gd3Two && i == 0)
+          {
+            // GD3 납작기하: 좌측 1/4 지점의 수직재(앵글)를 지시, 텍스트 좌측 하단
+            anchor = new Point3d(minX + width * 0.25, minY + h * 0.5, 0.0);
+            elbow = new Point3d(minX - offset, minY - offset, 0.0);
+            leftHalf = true;
+          }
+          else if (gd3Two && i == 1)
+          {
+            // GD3 채널: 하단 수평재 우측, 텍스트 far-right(파이프 콜아웃과 이격)
             anchor = new Point3d(minX + width * 0.8, minY, 0.0);
             elbow = new Point3d(maxX + offset, minY - offset * 2.0, 0.0);
             leftHalf = false;

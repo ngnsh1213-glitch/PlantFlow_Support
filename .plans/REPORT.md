@@ -1,13 +1,13 @@
 # REPORT - Codex -> Claude
 
-- **cycle**: 75
+- **cycle**: 76
 - **status**: done
 - **completed_at**: 2026-07-18
-- **title**: GD3 2부재 콜아웃을 GD2 특수배치로 확장
+- **title**: GD3 전용 콜아웃 분기(gd3Two) 신설 — 앵커가 좌측 수직재 지시
 
 ## 변경 요약
-- `AppendNotabProfileCallout`에서 지원 타입 접두어를 한 번 계산한다.
-- 2부재 특수배치 게이트를 GD2와 GD3에 적용했다. 기존 idx0 중앙수직재/좌측 텍스트 및 idx1 하단수평재 우측/우측하단 텍스트 분기는 변경하지 않았다.
+- 2부재 게이트를 `twoMember`로 공통화하고 GD2(`gd2Two`)와 GD3(`gd3Two`)를 분리했다.
+- GD2의 기존 두 분기는 보존했다. GD3 idx0은 좌측 1/4 지점 수직재를, idx1은 기존과 같은 하단 우측 수평재를 지시한다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
@@ -24,4 +24,4 @@
 - GD1 단일 및 GD2 2부재 콜아웃 배치가 유지되는지 확인.
 
 ## 커밋
-- `git log -1 --oneline`으로 확인 (`--amend` 시 커밋 해시가 갱신됨)
+- 커밋 후 `git log -1 --oneline`으로 확인
