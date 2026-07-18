@@ -1,16 +1,13 @@
 # REPORT - Codex -> Claude
 
-- **cycle**: 72
+- **cycle**: 73
 - **status**: done
 - **completed_at**: 2026-07-18
-- **title**: GD2 부재 콜아웃 앵커/텍스트 재배치 — L=중앙수직재, C만 우측하단
+- **title**: BOM 부재코드 → designation 코드공간 브리지 측정
 
 ## 변경 요약
-- `AppendNotabProfileCallout`에서 GD2·2부재 조합만 별도 배치했다.
-- idx0(L)는 중앙 수직재 몸통을 앵커로 하고 좌측 하단 텍스트를 유지한다.
-- idx1(C)는 하단 수평재 우측을 앵커로 하고 우측 하단 텍스트를 배치한다.
-- 단일 designation 및 GD2 외 다중 designation은 기존 균등 분할 로직을 유지한다.
-- `PFS_NOTAB_MEMBER_CALLOUT_DX0/DY0/DX1/DY1`를 추가해 엘보·텍스트만 부재별 미세 조정할 수 있다. 앵커는 고정한다.
+- `NotabBomSpike`에 BOM `col[2]`의 마지막 토큰을 읽어 원본·숫자·하이픈 변형으로 `HANTEC.DetailProfile`과 `GetSupportProfilePrefix`를 진단하는 로깅을 추가했다.
+- `TryBuildNotabSupportDesignation`은 원본 카탈로그 코드로만 호출하며, designation 상태는 변경하지 않는다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
@@ -18,15 +15,14 @@
 
 ## 검증
 - 변경 주변 20줄 이상 수동 확인 완료.
-- `git diff --check -- PlantFlow_Support/Core/Commands.cs` 통과.
-- 지정한 `AppendNotabProfileCallout` 루프 앵커·엘보·텍스트 산출부 외 제품 코드 변경 없음.
-- 빌드는 프로젝트 규칙과 핸드오프 지시에 따라 실행하지 않았다.
+- `dev_test.bat` 실행: Release 빌드 성공(오류 0, 기존 경고 15개), 배포 및 Plant 3D 기동 성공.
+- `PFSNOTABTEST 완료 tags=3 ok=3` 확인.
+- GD2: `C15` 원본/하이픈은 `KeyNotFoundException`; 숫자 `15`는 `50x50x6`, `L`로 기대값 `150x75x6.5x10`, `C`와 불일치(오탐). `A6` 전 변형 실패.
+- GD3: `C10`, `A7` 전 변형 실패.
 
-## 라이브 확인 필요
-- `dev_test.bat`을 `PFS_NOTAB_TEST_TAG=GD2-001`로 실행한다.
-- 로그에서 `callout append(multi)`의 idx0 앵커가 `(centerX, minY+h*0.5)`, idx1 앵커가 `(minX+width*0.8, minY)`인지 확인한다.
-- 결과 DWG에서 L 화살표/좌측 하단 텍스트와 C 화살표/우측 하단 텍스트를 확인한다.
-- GD1·GD3은 기존 단일 designation 호출이 동일한지 회귀 확인한다.
+## 판정 및 다음 단계
+- BOM 카탈로그 코드와 BI 코드 공간은 직접 호환되지 않는다.
+- BOM을 부재 소스로 전환하려면 카탈로그코드↔BI 브리지 테이블을 1개 신설해야 한다.
 
 ## 커밋
-- 코드 반영: `ddfdaa1` (`Fix GD2 member callout anchors`)
+- 코드 및 보고서 커밋은 아래 해시를 참조.

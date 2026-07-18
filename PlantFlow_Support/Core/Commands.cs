@@ -6976,6 +6976,47 @@ namespace PlantFlow_Support
         {
           for (int i = 0; i < rows.Count && i < 40; i++)
             PlantOrthoView.FileDiag("PFSNOTABDETAIL bom row[" + i + "] cols=" + (rows[i] == null ? 0 : rows[i].Length) + " { " + (rows[i] == null ? "" : string.Join(" | ", rows[i])) + " }");
+
+          // --- BOM 부재코드 → designation 코드공간 브리지 측정(진단 전용) ---
+          System.Collections.Generic.HashSet<string> seen = new System.Collections.Generic.HashSet<string>();
+          for (int i = 0; i < rows.Count && i < 40; i++)
+          {
+            string[] r = rows[i];
+            if (r == null || r.Length < 3 || string.IsNullOrWhiteSpace(r[2]))
+              continue;
+            // col[2] 예: "CHANNEL C15" / "ANGLE A6" → 마지막 토큰
+            string[] toks = r[2].Trim().Split(new char[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
+            string code = toks.Length > 0 ? toks[toks.Length - 1].Trim() : string.Empty;
+            if (code.Length == 0 || !seen.Add(code))
+              continue;   // 중복 부재코드 skip(로그 과다 방지)
+
+            // 변형 후보: 원본(C15), 문자 접두 제거(15), 하이픈형(C-15)
+            string digits = System.Text.RegularExpressions.Regex.Replace(code, "[^0-9]", string.Empty);
+            string letter = System.Text.RegularExpressions.Regex.Replace(code, "[^A-Za-z]", string.Empty);
+            string hyphen = (letter.Length > 0 && digits.Length > 0) ? letter + "-" + digits : code;
+            string[] variants = new string[] { code, digits, hyphen };
+
+            foreach (string v in variants)
+            {
+              if (string.IsNullOrWhiteSpace(v))
+                continue;
+              string rawProfile = "ERR";
+              string prefix = "ERR";
+              try { rawProfile = HANTEC.DetailProfile(v.Trim().Replace("_", string.Empty)) ?? "null"; }
+              catch (System.Exception px) { rawProfile = "EX:" + px.GetType().Name; }
+              try { prefix = this.GetSupportProfilePrefix(v.Trim().Replace("_", string.Empty)) ?? "null"; }
+              catch (System.Exception px) { prefix = "EX:" + px.GetType().Name; }
+              // 판정은 사람이 원시값으로. 빈값/오탐 구분 위해 profile 원문 그대로 남긴다.
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL bom-bridge code=" + code + " variant=" + v
+                + " DetailProfile={" + rawProfile + "} prefix={" + prefix + "}");
+            }
+
+            // 참고: 완성 designation 빌더 경로도 동시 시도(원본 코드로만)
+            string bp, bh, bd;
+            bool ok = this.TryBuildNotabSupportDesignation(code, out bp, out bh, out bd);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL bom-bridge build code=" + code + " ok=" + ok
+              + " designation={" + (bd ?? "null") + "} height={" + (bh ?? "null") + "}");
+          }
         }
       }
       catch (System.Exception ex)
