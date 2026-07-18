@@ -25,4 +25,4 @@
 - 로그에 각 태그의 `서포트 발견`과 `완료 tags=3 ok=3`가 남고, 세 개의 `_notab.dwg`가 저장되는지 확인한다.
 
 ## 커밋
-- 코드 반영 커밋: (아래 커밋 해시 참조)
+- 코드 반영 커밋: `53ce3dd` (`Support multi-tag PFSNOTABTEST`)
