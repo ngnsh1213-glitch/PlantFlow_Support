@@ -1034,18 +1034,28 @@ namespace PlantFlow_Support
         return;
 
       PlantOrthoView.FileDiag("========== PFSNOTABTEST RUN START ==========");
-      string tag = System.Environment.GetEnvironmentVariable("PFS_NOTAB_TEST_TAG");
-      if (string.IsNullOrWhiteSpace(tag)) tag = "GD1-001";
+      string raw = System.Environment.GetEnvironmentVariable("PFS_NOTAB_TEST_TAG");
+      if (string.IsNullOrWhiteSpace(raw)) raw = "GD1-001";
 
-      ObjectId supId = this.FindSupportByTag(doc.Database, tag);
-      if (supId == ObjectId.Null)
+      string[] tags = raw.Split(new char[] { ',' }, System.StringSplitOptions.RemoveEmptyEntries);
+      int ok = 0;
+      foreach (string t in tags)
       {
-        PlantOrthoView.FileDiag("PFSNOTABTEST 서포트 태그 미발견 tag=" + tag);
-        doc.Editor.WriteMessage("\nPFSNOTABTEST: 서포트 '" + tag + "' 없음");
-        return;
+        string tag = t.Trim();
+        if (tag.Length == 0) continue;
+
+        ObjectId supId = this.FindSupportByTag(doc.Database, tag);
+        if (supId == ObjectId.Null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABTEST 서포트 태그 미발견 tag=" + tag);
+          doc.Editor.WriteMessage("\nPFSNOTABTEST: 서포트 '" + tag + "' 없음");
+          continue;
+        }
+        PlantOrthoView.FileDiag("PFSNOTABTEST 서포트 발견 tag=" + tag + " id=" + supId);
+        this.RunNotabDetailPipeline(doc, new ObjectId[] { supId });
+        ok++;
       }
-      PlantOrthoView.FileDiag("PFSNOTABTEST 서포트 발견 tag=" + tag + " id=" + supId);
-      this.RunNotabDetailPipeline(doc, new ObjectId[] { supId });
+      PlantOrthoView.FileDiag("PFSNOTABTEST 완료 tags=" + tags.Length + " ok=" + ok);
     }
 
     private ObjectId FindSupportByTag(Database db, string tag)

@@ -1,15 +1,14 @@
 # REPORT - Codex -> Claude
 
-- **cycle**: 70
+- **cycle**: 71
 - **status**: done
 - **completed_at**: 2026-07-18
-- **title**: GD2 — 세로치수=배관중심까지(좌) + 멀티부재 콜아웃 텍스트 바깥 발산
+- **title**: PFSNOTABTEST 다중 태그(콤마) 순회
 
 ## 변경 요약
-- GD2의 `VerticalMode`를 `pipecenter`로 변경했다.
-- 배관 중심 Y가 유효하면 좌측 세로치수를 바닥부터 배관 중심까지로 생성하고, 치수값은 페이퍼-실물 스케일로 환산한다. 중심 좌표 또는 스케일이 유효하지 않으면 기존 전체 높이 치수로 폴백하고 진단 로그를 남긴다.
-- 다중 부재 콜아웃은 중앙 기준 좌측 부재가 왼쪽, 우측 부재가 오른쪽으로 발산하도록 텍스트 위치, MText attachment, MLeader 방향을 적용했다.
-- 단건 부재와 배관 콜아웃은 기존 `LeftLeader` 방향을 유지했다.
+- `PFS_NOTAB_TEST_TAG`를 콤마로 분리해 각 태그를 순차적으로 찾고, 발견된 서포트마다 기존 `RunNotabDetailPipeline`을 호출한다.
+- 개별 태그를 찾지 못하면 진단 로그와 명령행 메시지를 남긴 뒤 다음 태그를 계속 처리한다.
+- 완료 시 전체 분리 태그 수와 성공 처리 수를 진단 로그로 기록한다. 단일 태그 입력의 호출 경로는 기존과 동일하다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
@@ -17,13 +16,13 @@
 
 ## 검증
 - 변경 주변 20줄 이상 수동 확인 완료.
-- `rg`로 `pipecenter`, `leftHalf`, `ApplyNotabCalloutNearEdgeAttachment`의 정의·모든 호출부를 확인했다.
 - `git diff --check` 통과.
+- 지정 메서드 외 제품 코드 변경 없음.
 - 빌드는 프로젝트 규칙과 핸드오프 지시에 따라 실행하지 않았다.
 
 ## 라이브 확인 필요
-- GD2-001: 좌측 세로치수 300, 다중 콜아웃의 `leftHalf=True/False` 로그 및 좌우 발산을 확인한다.
-- GD1/GD3: 세로치수 및 단건 콜아웃이 기존과 동일한지 확인한다.
+- `dev_test.bat`에서 `PFS_NOTAB_TEST_TAG=GD1-001,GD2-001,GD3-001`로 실행한다.
+- 로그에 각 태그의 `서포트 발견`과 `완료 tags=3 ok=3`가 남고, 세 개의 `_notab.dwg`가 저장되는지 확인한다.
 
 ## 커밋
-- 코드 반영 커밋: `945403b` (`Fix GD2 pipe center dimension callouts`)
+- 코드 반영 커밋: (아래 커밋 해시 참조)
