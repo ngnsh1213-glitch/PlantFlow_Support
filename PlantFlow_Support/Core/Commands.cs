@@ -4541,6 +4541,19 @@ namespace PlantFlow_Support
 
           dimVText = string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? this.FormatNumber(realH) : s_isoSupportProfileHeight;
         }
+        else if (string.Equals(verticalMode, "pipecenter", System.StringComparison.OrdinalIgnoreCase))
+        {
+          if (!double.IsNaN(pipeCenterYPaper) && pipeCenterYPaper > minY + 1e-6 && pipeCenterYPaper < maxY - 1e-6 && vScale > 1e-9)
+          {
+            dimVTopY = pipeCenterYPaper;
+            dimVBarSpan = false;
+            dimVText = this.FormatNumber((pipeCenterYPaper - minY) / vScale);
+          }
+          else
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV pipecenter fallback: pipeCenterY=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " minY=" + this.FormatNumber(minY) + " maxY=" + this.FormatNumber(maxY));
+          }
+        }
 
         RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(minX, minY, 0.0), new Point3d(minX, dimVTopY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, realH, txt, "dimV", dimVText);
@@ -4638,6 +4651,7 @@ namespace PlantFlow_Support
         double mdy = this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DY", 0.0, -2000.0, 2000.0);
         double minX = supportPaperExt.MinPoint.X;
         double maxX = supportPaperExt.MaxPoint.X;
+        double centerX = (minX + maxX) / 2.0;
         double minY = supportPaperExt.MinPoint.Y;
         double h = supportPaperExt.MaxPoint.Y - minY;
         double width = maxX - minX;
@@ -4660,13 +4674,16 @@ namespace PlantFlow_Support
           Point3d elbow = multiDesignation
             ? new Point3d(anchor.X, minY - offset, 0.0)
             : new Point3d(maxX + offset * 3.0, minY + barPaperH * 0.15 + stackDy, 0.0);
-          Point3d textPoint = new Point3d(elbow.X + gap, elbow.Y, 0.0);
+          bool leftHalf = multiDesignation && anchor.X < centerX;
+          Point3d textPoint = multiDesignation && leftHalf
+            ? new Point3d(elbow.X - gap, elbow.Y, 0.0)
+            : new Point3d(elbow.X + gap, elbow.Y, 0.0);
           elbow = new Point3d(elbow.X + mdx, elbow.Y + mdy, 0.0);
           textPoint = new Point3d(textPoint.X + mdx, textPoint.Y + mdy, 0.0);
           MText content = new MText();
           content.Contents = designation;
           content.TextHeight = txt;
-          content.Attachment = AttachmentPoint.MiddleLeft;
+          content.Attachment = leftHalf ? AttachmentPoint.MiddleRight : AttachmentPoint.MiddleLeft;
           content.Location = textPoint;
           if (textStyleId != ObjectId.Null)
             content.TextStyleId = textStyleId;
@@ -4685,11 +4702,11 @@ namespace PlantFlow_Support
             MText placed = leader.MText;
             if (placed != null)
             {
-              placed.Attachment = AttachmentPoint.MiddleLeft;
+              placed.Attachment = leftHalf ? AttachmentPoint.MiddleRight : AttachmentPoint.MiddleLeft;
               placed.Location = textPoint;
               leader.MText = placed;
             }
-            this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "callout", textPoint);
+            this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "callout", textPoint, leftHalf ? "RightLeader" : "LeftLeader");
           }
           catch (System.Exception ex)
           {
@@ -4700,7 +4717,7 @@ namespace PlantFlow_Support
             leader.LayerId = layerId;
           layoutBtr.AppendEntity(leader);
           tr.AddNewlyCreatedDBObject(leader, true);
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " fx=" + this.FormatNumber(fx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + (multiDesignation ? " leftHalf=" + leftHalf : string.Empty) + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " fx=" + this.FormatNumber(fx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
         }
       }
       catch (System.Exception ex)
@@ -4781,7 +4798,7 @@ namespace PlantFlow_Support
             placed.Location = textPoint;
             leader.MText = placed;
           }
-          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "pipe callout", textPoint);
+          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "pipe callout", textPoint, "LeftLeader");
         }
         catch (System.Exception ex)
         {
@@ -4800,7 +4817,7 @@ namespace PlantFlow_Support
       }
     }
 
-    private void ApplyNotabCalloutNearEdgeAttachment(MLeader leader, double gap, string label, Point3d textPoint)
+    private void ApplyNotabCalloutNearEdgeAttachment(MLeader leader, double gap, string label, Point3d textPoint, string leaderDir)
     {
       if (leader == null)
         return;
@@ -4814,7 +4831,7 @@ namespace PlantFlow_Support
         Type leaderType = leader.GetType();
         Type directionType = leaderType.Assembly.GetType("Autodesk.AutoCAD.DatabaseServices.LeaderDirectionType");
         bool attachDirHorizontal = this.TrySetNotabTextAttachmentDirection(leader, "leader " + label, textPoint);
-        string directionName = "LeftLeader";
+        string directionName = string.Equals(leaderDir, "RightLeader", System.StringComparison.Ordinal) ? "RightLeader" : "LeftLeader";
         TextAttachmentType attachType = (TextAttachmentType)6;
         if (directionType != null)
         {
@@ -4979,7 +4996,7 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "RC1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "bottom" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "16", "215" } };
+        return new NotabTypeConfig { VerticalMode = "pipecenter", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "16", "215" } };
       if (string.Equals(standardName, "GD3", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "full", PipeCalloutSide = "bottom", HorizontalSide = "auto" };
 
