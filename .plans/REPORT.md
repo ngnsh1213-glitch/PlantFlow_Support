@@ -25,4 +25,4 @@
 - BOM을 부재 소스로 전환하려면 카탈로그코드↔BI 브리지 테이블을 1개 신설해야 한다.
 
 ## 커밋
-- 코드 및 보고서 커밋은 아래 해시를 참조.
+- `01f246e` (`Measure BOM designation code bridge`)
