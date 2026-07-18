@@ -26,4 +26,4 @@
 - GD1/GD2 `bom-augment 동일 유지`, GD3 `L-75×75×9 | C-100×50×5×7.5` 교체와 GD3 치수 불변을 확인.
 
 ## 커밋
-- 대기 중
+- `d85953b` (`Use BOM members for notab callout augmentation`)
