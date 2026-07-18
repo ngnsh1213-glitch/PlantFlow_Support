@@ -4679,17 +4679,50 @@ namespace PlantFlow_Support
         {
           string designation = designations[i];
           double fx = multiDesignation ? ((double)i + 0.5) / (double)designations.Count : 1.0;
-          Point3d anchor = multiDesignation ? new Point3d(minX + width * fx, minY, 0.0) : singleAnchor;
-          double stackDy = multiDesignation ? 0.0 : -(double)i * (txt * 1.8);
-          Point3d elbow = multiDesignation
-            ? new Point3d(anchor.X, minY - offset, 0.0)
-            : new Point3d(maxX + offset * 3.0, minY + barPaperH * 0.15 + stackDy, 0.0);
-          bool leftHalf = multiDesignation && anchor.X < centerX;
-          Point3d textPoint = multiDesignation && leftHalf
+          // GD2 2부재 전용 특수배치(요구: L=중앙수직재, C=하단수평재 우측). 순서 역전은 아래 idx별 노브로 보정.
+          bool gd2Two = multiDesignation
+            && designations.Count == 2
+            && string.Equals(this.GetSupportTypePrefix(s_isoSupportTag), "GD2", System.StringComparison.OrdinalIgnoreCase);
+          // 부재별 라이브 미세조정용 개별 노브(기본 0): DX0/DY0=idx0, DX1/DY1=idx1
+          double mdxI = mdx + this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DX" + i, 0.0, -2000.0, 2000.0);
+          double mdyI = mdy + this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DY" + i, 0.0, -2000.0, 2000.0);
+
+          Point3d anchor;
+          Point3d elbow;
+          bool leftHalf;
+          if (gd2Two && i == 0)
+          {
+            // idx0 = 중앙 수직재 몸통 지정, 텍스트는 좌측 하단 유지
+            anchor = new Point3d(centerX, minY + h * 0.5, 0.0);
+            elbow = new Point3d(minX - offset, minY - offset, 0.0);
+            leftHalf = true;
+          }
+          else if (gd2Two && i == 1)
+          {
+            // idx1 = 하단 수평재 우측 지정, 텍스트 우측 하단
+            anchor = new Point3d(minX + width * 0.8, minY, 0.0);
+            elbow = new Point3d(maxX + offset, minY - offset * 2.0, 0.0);
+            leftHalf = false;
+          }
+          else if (multiDesignation)
+          {
+            anchor = new Point3d(minX + width * fx, minY, 0.0);
+            elbow = new Point3d(anchor.X, minY - offset, 0.0);
+            leftHalf = anchor.X < centerX;
+          }
+          else
+          {
+            double stackDy = -(double)i * (txt * 1.8);
+            anchor = singleAnchor;
+            elbow = new Point3d(maxX + offset * 3.0, minY + barPaperH * 0.15 + stackDy, 0.0);
+            leftHalf = false;
+          }
+          Point3d textPoint = leftHalf
             ? new Point3d(elbow.X - gap, elbow.Y, 0.0)
             : new Point3d(elbow.X + gap, elbow.Y, 0.0);
-          elbow = new Point3d(elbow.X + mdx, elbow.Y + mdy, 0.0);
-          textPoint = new Point3d(textPoint.X + mdx, textPoint.Y + mdy, 0.0);
+          // anchor(부재 지정점)는 노브 미적용으로 고정, elbow/text만 idx별 노브로 이동
+          elbow = new Point3d(elbow.X + mdxI, elbow.Y + mdyI, 0.0);
+          textPoint = new Point3d(textPoint.X + mdxI, textPoint.Y + mdyI, 0.0);
           MText content = new MText();
           content.Contents = designation;
           content.TextHeight = txt;

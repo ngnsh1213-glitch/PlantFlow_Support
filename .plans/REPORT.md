@@ -1,14 +1,16 @@
 # REPORT - Codex -> Claude
 
-- **cycle**: 71
+- **cycle**: 72
 - **status**: done
 - **completed_at**: 2026-07-18
-- **title**: PFSNOTABTEST 다중 태그(콤마) 순회
+- **title**: GD2 부재 콜아웃 앵커/텍스트 재배치 — L=중앙수직재, C만 우측하단
 
 ## 변경 요약
-- `PFS_NOTAB_TEST_TAG`를 콤마로 분리해 각 태그를 순차적으로 찾고, 발견된 서포트마다 기존 `RunNotabDetailPipeline`을 호출한다.
-- 개별 태그를 찾지 못하면 진단 로그와 명령행 메시지를 남긴 뒤 다음 태그를 계속 처리한다.
-- 완료 시 전체 분리 태그 수와 성공 처리 수를 진단 로그로 기록한다. 단일 태그 입력의 호출 경로는 기존과 동일하다.
+- `AppendNotabProfileCallout`에서 GD2·2부재 조합만 별도 배치했다.
+- idx0(L)는 중앙 수직재 몸통을 앵커로 하고 좌측 하단 텍스트를 유지한다.
+- idx1(C)는 하단 수평재 우측을 앵커로 하고 우측 하단 텍스트를 배치한다.
+- 단일 designation 및 GD2 외 다중 designation은 기존 균등 분할 로직을 유지한다.
+- `PFS_NOTAB_MEMBER_CALLOUT_DX0/DY0/DX1/DY1`를 추가해 엘보·텍스트만 부재별 미세 조정할 수 있다. 앵커는 고정한다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
@@ -16,13 +18,15 @@
 
 ## 검증
 - 변경 주변 20줄 이상 수동 확인 완료.
-- `git diff --check` 통과.
-- 지정 메서드 외 제품 코드 변경 없음.
+- `git diff --check -- PlantFlow_Support/Core/Commands.cs` 통과.
+- 지정한 `AppendNotabProfileCallout` 루프 앵커·엘보·텍스트 산출부 외 제품 코드 변경 없음.
 - 빌드는 프로젝트 규칙과 핸드오프 지시에 따라 실행하지 않았다.
 
 ## 라이브 확인 필요
-- `dev_test.bat`에서 `PFS_NOTAB_TEST_TAG=GD1-001,GD2-001,GD3-001`로 실행한다.
-- 로그에 각 태그의 `서포트 발견`과 `완료 tags=3 ok=3`가 남고, 세 개의 `_notab.dwg`가 저장되는지 확인한다.
+- `dev_test.bat`을 `PFS_NOTAB_TEST_TAG=GD2-001`로 실행한다.
+- 로그에서 `callout append(multi)`의 idx0 앵커가 `(centerX, minY+h*0.5)`, idx1 앵커가 `(minX+width*0.8, minY)`인지 확인한다.
+- 결과 DWG에서 L 화살표/좌측 하단 텍스트와 C 화살표/우측 하단 텍스트를 확인한다.
+- GD1·GD3은 기존 단일 designation 호출이 동일한지 회귀 확인한다.
 
 ## 커밋
-- 코드 반영 커밋: `53ce3dd` (`Support multi-tag PFSNOTABTEST`)
+- `e69b957` (`Fix GD2 member callout anchors`)
