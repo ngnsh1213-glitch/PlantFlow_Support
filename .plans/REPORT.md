@@ -1,28 +1,29 @@
 # REPORT - Codex -> Claude
 
-- **cycle**: 73
+- **cycle**: 74
 - **status**: done
 - **completed_at**: 2026-07-18
-- **title**: BOM 부재코드 → designation 코드공간 브리지 측정
+- **title**: 부재 콜아웃 소스 config→BOM 전환 (비파괴 augment, config는 폴백 유지)
 
 ## 변경 요약
-- `NotabBomSpike`에 BOM `col[2]`의 마지막 토큰을 읽어 원본·숫자·하이픈 변형으로 `HANTEC.DetailProfile`과 `GetSupportProfilePrefix`를 진단하는 로깅을 추가했다.
-- `TryBuildNotabSupportDesignation`은 원본 카탈로그 코드로만 호출하며, designation 상태는 변경하지 않는다.
+- `HANTEC.BeamProfile`의 기존 BI→BOM 값 맵을 공유 메서드로 추출하고, BOM `col[2]` 값에서 BI를 찾는 `BeamProfileBI` 역조회 메서드를 추가했다.
+- `CaptureIsoSupportProfile` 호출 직후 BOM 부재를 앵글→채널→기타 순서로 보강한다. BOM 목록이 기존 콜아웃 집합과 다를 때만 콜아웃 목록을 교체한다.
+- BOM 보강은 `s_isoSupportBI`, `s_isoSupportProfile`, `s_isoSupportProfileHeight`를 변경하지 않는다. 기존 config `MemberBIs` 폴백과 `NotabBomSpike` 행 로그는 유지했고, cycle73의 `bom-bridge` 진단 루프는 제거했다.
 
 ## 변경 파일
+- `PlantFlow_Support/Ortho/HANTEC.cs`
 - `PlantFlow_Support/Core/Commands.cs`
 - `.plans/REPORT.md`
 
 ## 검증
-- 변경 주변 20줄 이상 수동 확인 완료.
-- `dev_test.bat` 실행: Release 빌드 성공(오류 0, 기존 경고 15개), 배포 및 Plant 3D 기동 성공.
-- `PFSNOTABTEST 완료 tags=3 ok=3` 확인.
-- GD2: `C15` 원본/하이픈은 `KeyNotFoundException`; 숫자 `15`는 `50x50x6`, `L`로 기대값 `150x75x6.5x10`, `C`와 불일치(오탐). `A6` 전 변형 실패.
-- GD3: `C10`, `A7` 전 변형 실패.
+- `git diff --check` 통과.
+- `BeamProfileMap`, `BeamProfileBI`, `AugmentDesignationsFromBom` 및 Capture 직후 호출을 정적 확인.
+- `bom-bridge` 진단 코드가 제거된 것을 검색으로 확인.
+- 빌드는 프로젝트 규칙에 따라 실행하지 않음.
 
-## 판정 및 다음 단계
-- BOM 카탈로그 코드와 BI 코드 공간은 직접 호환되지 않는다.
-- BOM을 부재 소스로 전환하려면 카탈로그코드↔BI 브리지 테이블을 1개 신설해야 한다.
+## 라이브 검증 필요
+- `dev_test.bat`에서 `PFS_NOTAB_TEST_TAG=GD1-001,GD2-001,GD3-001`로 실행.
+- GD1/GD2 `bom-augment 동일 유지`, GD3 `L-75×75×9 | C-100×50×5×7.5` 교체와 GD3 치수 불변을 확인.
 
 ## 커밋
-- `01f246e` (`Measure BOM designation code bridge`)
+- 대기 중

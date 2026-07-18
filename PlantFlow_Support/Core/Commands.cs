@@ -6830,6 +6830,7 @@ namespace PlantFlow_Support
 
       this.CaptureIsoSupportProperties(supportId, s_isoPipeId);
       this.CaptureIsoSupportProfile(supportId);
+      this.AugmentDesignationsFromBom(supportId);
       bool bomSpike = this.GetEnvDouble("PFS_NOTAB_BOM_SPIKE", 0.0, 0.0, 1.0) >= 0.5;
       if (bomSpike)
         this.NotabBomSpike(supportId);
@@ -6977,51 +6978,96 @@ namespace PlantFlow_Support
           for (int i = 0; i < rows.Count && i < 40; i++)
             PlantOrthoView.FileDiag("PFSNOTABDETAIL bom row[" + i + "] cols=" + (rows[i] == null ? 0 : rows[i].Length) + " { " + (rows[i] == null ? "" : string.Join(" | ", rows[i])) + " }");
 
-          // --- BOM 부재코드 → designation 코드공간 브리지 측정(진단 전용) ---
-          System.Collections.Generic.HashSet<string> seen = new System.Collections.Generic.HashSet<string>();
-          for (int i = 0; i < rows.Count && i < 40; i++)
-          {
-            string[] r = rows[i];
-            if (r == null || r.Length < 3 || string.IsNullOrWhiteSpace(r[2]))
-              continue;
-            // col[2] 예: "CHANNEL C15" / "ANGLE A6" → 마지막 토큰
-            string[] toks = r[2].Trim().Split(new char[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
-            string code = toks.Length > 0 ? toks[toks.Length - 1].Trim() : string.Empty;
-            if (code.Length == 0 || !seen.Add(code))
-              continue;   // 중복 부재코드 skip(로그 과다 방지)
-
-            // 변형 후보: 원본(C15), 문자 접두 제거(15), 하이픈형(C-15)
-            string digits = System.Text.RegularExpressions.Regex.Replace(code, "[^0-9]", string.Empty);
-            string letter = System.Text.RegularExpressions.Regex.Replace(code, "[^A-Za-z]", string.Empty);
-            string hyphen = (letter.Length > 0 && digits.Length > 0) ? letter + "-" + digits : code;
-            string[] variants = new string[] { code, digits, hyphen };
-
-            foreach (string v in variants)
-            {
-              if (string.IsNullOrWhiteSpace(v))
-                continue;
-              string rawProfile = "ERR";
-              string prefix = "ERR";
-              try { rawProfile = HANTEC.DetailProfile(v.Trim().Replace("_", string.Empty)) ?? "null"; }
-              catch (System.Exception px) { rawProfile = "EX:" + px.GetType().Name; }
-              try { prefix = this.GetSupportProfilePrefix(v.Trim().Replace("_", string.Empty)) ?? "null"; }
-              catch (System.Exception px) { prefix = "EX:" + px.GetType().Name; }
-              // 판정은 사람이 원시값으로. 빈값/오탐 구분 위해 profile 원문 그대로 남긴다.
-              PlantOrthoView.FileDiag("PFSNOTABDETAIL bom-bridge code=" + code + " variant=" + v
-                + " DetailProfile={" + rawProfile + "} prefix={" + prefix + "}");
-            }
-
-            // 참고: 완성 designation 빌더 경로도 동시 시도(원본 코드로만)
-            string bp, bh, bd;
-            bool ok = this.TryBuildNotabSupportDesignation(code, out bp, out bh, out bd);
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL bom-bridge build code=" + code + " ok=" + ok
-              + " designation={" + (bd ?? "null") + "} height={" + (bh ?? "null") + "}");
-          }
         }
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL bom spike 예외: " + ex.GetType().Name + ": " + ex.Message + " id=" + supportId);
+      }
+    }
+
+    private void AugmentDesignationsFromBom(ObjectId supportId)
+    {
+      if (supportId == ObjectId.Null)
+        return;
+
+      try
+      {
+        BOMs bom = new BOMs(supportId, new System.Collections.Generic.List<AttachmentInfo>());
+        System.Collections.Generic.List<string[]> rows = bom.ContentsByDesignStd("HANTEC");
+        if (rows == null || rows.Count == 0)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE bom-augment skip: rows empty id=" + supportId);
+          return;
+        }
+
+        System.Collections.Generic.List<string> angles = new System.Collections.Generic.List<string>();
+        System.Collections.Generic.List<string> channels = new System.Collections.Generic.List<string>();
+        System.Collections.Generic.List<string> others = new System.Collections.Generic.List<string>();
+        System.Collections.Generic.HashSet<string> seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+        foreach (string[] r in rows)
+        {
+          if (r == null || r.Length < 3 || string.IsNullOrWhiteSpace(r[2]))
+            continue;
+
+          string memberValue = System.Text.RegularExpressions.Regex.Replace(r[2].Trim(), "\\s+", " ");
+          if (!seen.Add(memberValue))
+            continue;
+
+          string upper = memberValue.ToUpperInvariant();
+          if (upper.StartsWith("ANGLE")) angles.Add(memberValue);
+          else if (upper.StartsWith("CHANNEL")) channels.Add(memberValue);
+          else others.Add(memberValue);
+        }
+
+        System.Collections.Generic.List<string> ordered = new System.Collections.Generic.List<string>();
+        ordered.AddRange(angles);
+        ordered.AddRange(channels);
+        ordered.AddRange(others);
+
+        System.Collections.Generic.List<string> bomDesignations = new System.Collections.Generic.List<string>();
+        foreach (string memberValue in ordered)
+        {
+          string bi = HANTEC.BeamProfileBI(memberValue);
+          if (string.IsNullOrWhiteSpace(bi))
+          {
+            PlantOrthoView.FileDiag("PFSVBISOCLONE bom-augment 미매핑 member=" + memberValue);
+            continue;
+          }
+
+          string profile;
+          string height;
+          string designation;
+          if (this.TryBuildNotabSupportDesignation(bi, out profile, out height, out designation) && !string.IsNullOrWhiteSpace(designation))
+            bomDesignations.Add(designation);
+          else
+            PlantOrthoView.FileDiag("PFSVBISOCLONE bom-augment build 실패 member=" + memberValue + " bi=" + bi);
+        }
+
+        if (bomDesignations.Count == 0)
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE bom-augment skip: designation 0 id=" + supportId);
+          return;
+        }
+
+        System.Collections.Generic.HashSet<string> current = new System.Collections.Generic.HashSet<string>(s_isoSupportDesignations, System.StringComparer.OrdinalIgnoreCase);
+        System.Collections.Generic.HashSet<string> replacement = new System.Collections.Generic.HashSet<string>(bomDesignations, System.StringComparer.OrdinalIgnoreCase);
+        bool differ = bomDesignations.Count != s_isoSupportDesignations.Count || !current.SetEquals(replacement);
+        if (differ)
+        {
+          string before = string.Join(" | ", s_isoSupportDesignations);
+          s_isoSupportDesignations.Clear();
+          s_isoSupportDesignations.AddRange(bomDesignations);
+          PlantOrthoView.FileDiag("PFSVBISOCLONE bom-augment 교체 before={" + before + "} after={" + string.Join(" | ", bomDesignations) + "} (dim기준 BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "empty" : s_isoSupportBI) + " 불변)");
+        }
+        else
+        {
+          PlantOrthoView.FileDiag("PFSVBISOCLONE bom-augment 동일 유지 { " + string.Join(" | ", bomDesignations) + " }");
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSVBISOCLONE bom-augment 예외 id=" + supportId + ": " + ex.GetType().Name + ": " + ex.Message);
       }
     }
 

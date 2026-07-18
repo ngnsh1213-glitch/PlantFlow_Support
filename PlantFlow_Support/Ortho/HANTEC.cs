@@ -2006,7 +2006,7 @@ label_72:
       }[BI];
     }
 
-    public static string BeamProfile(string indicator)
+    private static Dictionary<string, string> BeamProfileMap()
     {
       return new Dictionary<string, string>()
       {
@@ -2118,7 +2118,28 @@ label_72:
           "4100",
           "FLAT BAR F100"
         }
-      }[indicator];
+      };
+    }
+
+    public static string BeamProfile(string indicator)
+    {
+      return BeamProfileMap()[indicator];
+    }
+
+    // BOM col[2]("CHANNEL C15") -> BI("215"). 값은 고유하므로 충돌 없음.
+    public static string BeamProfileBI(string beamValue)
+    {
+      if (string.IsNullOrWhiteSpace(beamValue))
+        return string.Empty;
+
+      string key = System.Text.RegularExpressions.Regex.Replace(beamValue.Trim(), "\\s+", " ").ToUpperInvariant();
+      foreach (KeyValuePair<string, string> kv in BeamProfileMap())
+      {
+        string value = System.Text.RegularExpressions.Regex.Replace(kv.Value.Trim(), "\\s+", " ").ToUpperInvariant();
+        if (string.Equals(value, key, System.StringComparison.Ordinal))
+          return kv.Key;
+      }
+      return string.Empty;
     }
 
     public static string PlateProfile(string standard_type, string BI)
