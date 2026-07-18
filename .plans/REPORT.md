@@ -26,4 +26,4 @@
 - GD1/GD3: 세로치수 및 단건 콜아웃이 기존과 동일한지 확인한다.
 
 ## 커밋
-- 코드 반영 커밋: `9e52cb2` (`Fix GD2 pipe center dimension callouts`)
+- 코드 반영 커밋: `945403b` (`Fix GD2 pipe center dimension callouts`)
