@@ -4995,6 +4995,27 @@ namespace PlantFlow_Support
           tr.AddNewlyCreatedDBObject(leader, true);
           try
           {
+            // 실측 법칙: 문자는 TextLocation에서 왼쪽으로 W만큼 뻗는다.
+            // → 문자를 앵커 반대(우측)로 보내려면 TextLocation을 실측 폭만큼 우측으로 민다.
+            bool wantRight = !(textPoint.X < anchor.X);
+            if (wantRight)
+            {
+              MText mtFix = leader.MText;
+              double actualW = (mtFix != null) ? mtFix.ActualWidth : 0.0;
+              if (actualW > 1e-6)
+              {
+                Point3d fixedLoc = new Point3d(textPoint.X + actualW, textPoint.Y, 0.0);
+                leader.TextLocation = fixedLoc;
+                PlantOrthoView.FileDiag("PFSNOTABDETAIL text-shift right W=" + this.FormatNumber(actualW)
+                  + " from=" + this.FormatNumber(textPoint.X) + " to=" + this.FormatNumber(fixedLoc.X)
+                  + " anchorX=" + this.FormatNumber(anchor.X));
+              }
+            }
+          }
+          catch (System.Exception sx)
+          { PlantOrthoView.FileDiag("PFSNOTABDETAIL text-shift 예외: " + sx.GetType().Name + ": " + sx.Message); }
+          try
+          {
             MText mt = leader.MText;
             if (mt != null)
             {
@@ -5130,6 +5151,27 @@ namespace PlantFlow_Support
           leader.LayerId = layerId;
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
+        try
+        {
+          // 실측 법칙: 문자는 TextLocation에서 왼쪽으로 W만큼 뻗는다.
+          // → 문자를 앵커 반대(우측)로 보내려면 TextLocation을 실측 폭만큼 우측으로 민다.
+          bool wantRight = !(textPoint.X < anchor.X);
+          if (wantRight)
+          {
+            MText mtFix = leader.MText;
+            double actualW = (mtFix != null) ? mtFix.ActualWidth : 0.0;
+            if (actualW > 1e-6)
+            {
+              Point3d fixedLoc = new Point3d(textPoint.X + actualW, textPoint.Y, 0.0);
+              leader.TextLocation = fixedLoc;
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL text-shift right W=" + this.FormatNumber(actualW)
+                + " from=" + this.FormatNumber(textPoint.X) + " to=" + this.FormatNumber(fixedLoc.X)
+                + " anchorX=" + this.FormatNumber(anchor.X));
+            }
+          }
+        }
+        catch (System.Exception sx)
+        { PlantOrthoView.FileDiag("PFSNOTABDETAIL text-shift 예외: " + sx.GetType().Name + ": " + sx.Message); }
         try
         {
           MText mt = leader.MText;
