@@ -10,6 +10,125 @@ using Autodesk.ProcessPower.PnP3dObjects;
 #nullable disable
 namespace PlantFlow_Support
 {
+  // 페이퍼공간 콜아웃 전용: 디테일마다 새 인스턴스를 만들어 문자·리더 충돌 상태를 공유한다.
+  internal sealed class NotabCalloutPlacer
+  {
+    private readonly System.Collections.Generic.List<Extents3d> _obstacles = new System.Collections.Generic.List<Extents3d>();
+    private readonly System.Collections.Generic.List<Extents3d> _placedBoxes = new System.Collections.Generic.List<Extents3d>();
+    private readonly System.Collections.Generic.List<Point3d[]> _placedLeaders = new System.Collections.Generic.List<Point3d[]>();
+    private readonly double _minX, _minY, _maxX, _maxY;
+    private static readonly int[] Fan = BuildFan(15);
+
+    public NotabCalloutPlacer(double minX, double minY, double maxX, double maxY)
+    { _minX = minX; _minY = minY; _maxX = maxX; _maxY = maxY; }
+
+    public void AddObstacle(Extents3d obstacle) { _obstacles.Add(obstacle); }
+
+    private static int[] BuildFan(int step)
+    {
+      System.Collections.Generic.List<int> values = new System.Collections.Generic.List<int> { 0 };
+      for (int value = step; value <= 180; value += step)
+      { values.Add(value); if (value != 180) values.Add(-value); }
+      return values.ToArray();
+    }
+
+    public bool TryPlace(Point3d anchor, double outwardAngleDeg, double width, double height, double gap,
+      out Point3d textCenter, out Point3d elbow, out bool textLeftOfAnchor, out string diagnostic)
+    {
+      double startRadius = System.Math.Max(15.0, System.Math.Max(width, height) / 2.0 + gap);
+      for (int tier = 0; tier < 2; tier++)
+      {
+        bool checkLeader = tier == 0;
+        for (double radius = startRadius; radius <= startRadius + 60.0; radius += 2.5)
+        {
+          foreach (int fanOffset in Fan)
+          {
+            double angle = (outwardAngleDeg + fanOffset) * System.Math.PI / 180.0;
+            double x = anchor.X + radius * System.Math.Cos(angle);
+            double y = anchor.Y + radius * System.Math.Sin(angle);
+            Extents3d box = new Extents3d(new Point3d(x - width / 2.0, y - height / 2.0, 0.0), new Point3d(x + width / 2.0, y + height / 2.0, 0.0));
+            if (OutOfBounds(box)) continue;
+            Point3d edge = BoxEdgeToward(box, anchor);
+            if (!Free(box, anchor, edge, checkLeader)) continue;
+            textCenter = new Point3d(x, y, 0.0);
+            textLeftOfAnchor = x < anchor.X;
+            elbow = new Point3d(x + (textLeftOfAnchor ? gap : -gap), y, 0.0);
+            diagnostic = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " ang=" + outwardAngleDeg.ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
+            return true;
+          }
+        }
+      }
+      textCenter = Point3d.Origin; elbow = Point3d.Origin; textLeftOfAnchor = false; diagnostic = "FAIL";
+      return false;
+    }
+
+    public void Commit(Point3d anchor, Point3d elbow, Point3d textCenter, double width, double height)
+    {
+      _placedBoxes.Add(new Extents3d(new Point3d(textCenter.X - width / 2.0, textCenter.Y - height / 2.0, 0.0), new Point3d(textCenter.X + width / 2.0, textCenter.Y + height / 2.0, 0.0)));
+      _placedLeaders.Add(new Point3d[] { anchor, elbow });
+    }
+
+    private bool OutOfBounds(Extents3d box)
+    { return box.MinPoint.X < _minX || box.MaxPoint.X > _maxX || box.MinPoint.Y < _minY || box.MaxPoint.Y > _maxY; }
+
+    private bool Free(Extents3d box, Point3d anchor, Point3d edge, bool checkLeader)
+    {
+      foreach (Extents3d obstacle in _obstacles)
+      {
+        if (BoxOverlap(box, obstacle)) return false;
+        if (checkLeader && SegIntersectsBox(anchor, edge, obstacle)) return false;
+      }
+      foreach (Extents3d placed in _placedBoxes)
+      {
+        if (BoxOverlap(box, placed)) return false;
+        if (checkLeader && SegIntersectsBox(anchor, edge, placed)) return false;
+      }
+      if (checkLeader)
+      {
+        foreach (Point3d[] leader in _placedLeaders)
+        {
+          if (SegIntersectsBox(leader[0], leader[1], box) || SegsIntersect(anchor, edge, leader[0], leader[1])) return false;
+        }
+      }
+      return true;
+    }
+
+    private static bool BoxOverlap(Extents3d a, Extents3d b)
+    { return a.MaxPoint.X >= b.MinPoint.X && a.MinPoint.X <= b.MaxPoint.X && a.MaxPoint.Y >= b.MinPoint.Y && a.MinPoint.Y <= b.MaxPoint.Y; }
+
+    private static bool PointInBox(Point3d point, Extents3d box)
+    { return point.X >= box.MinPoint.X && point.X <= box.MaxPoint.X && point.Y >= box.MinPoint.Y && point.Y <= box.MaxPoint.Y; }
+
+    private static bool SegIntersectsBox(Point3d start, Point3d end, Extents3d box)
+    {
+      if (PointInBox(start, box)) return false;
+      if (PointInBox(end, box)) return true;
+      Point3d bl = box.MinPoint, tr = box.MaxPoint;
+      Point3d br = new Point3d(tr.X, bl.Y, 0.0), tl = new Point3d(bl.X, tr.Y, 0.0);
+      return SegsIntersect(start, end, bl, br) || SegsIntersect(start, end, br, tr) || SegsIntersect(start, end, tr, tl) || SegsIntersect(start, end, tl, bl);
+    }
+
+    private static bool SegsIntersect(Point3d a, Point3d b, Point3d c, Point3d d)
+    {
+      double denominator = (b.X - a.X) * (d.Y - c.Y) - (b.Y - a.Y) * (d.X - c.X);
+      if (System.Math.Abs(denominator) < 1e-9) return false;
+      double r = ((a.Y - c.Y) * (d.X - c.X) - (a.X - c.X) * (d.Y - c.Y)) / denominator;
+      double s = ((a.Y - c.Y) * (b.X - a.X) - (a.X - c.X) * (b.Y - a.Y)) / denominator;
+      return r >= 0.0 && r <= 1.0 && s >= 0.0 && s <= 1.0;
+    }
+
+    private static Point3d BoxEdgeToward(Extents3d box, Point3d anchor)
+    {
+      double x = (box.MinPoint.X + box.MaxPoint.X) / 2.0, y = (box.MinPoint.Y + box.MaxPoint.Y) / 2.0;
+      double dx = anchor.X - x, dy = anchor.Y - y;
+      if (System.Math.Abs(dx) < 1e-9 && System.Math.Abs(dy) < 1e-9) return new Point3d(x, y, 0.0);
+      double sx = System.Math.Abs(dx) > 1e-9 ? (box.MaxPoint.X - box.MinPoint.X) / 2.0 / System.Math.Abs(dx) : double.PositiveInfinity;
+      double sy = System.Math.Abs(dy) > 1e-9 ? (box.MaxPoint.Y - box.MinPoint.Y) / 2.0 / System.Math.Abs(dy) : double.PositiveInfinity;
+      double scale = System.Math.Min(sx, sy);
+      return new Point3d(x + dx * scale, y + dy * scale, 0.0);
+    }
+  }
+
   public partial class Commands
   {
     private static CustomPaletteSet palette;
@@ -4567,8 +4686,12 @@ namespace PlantFlow_Support
 
         RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(minX, minY, 0.0), new Point3d(minX, dimVTopY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, realH, txt, "dimV", dimVText);
-        this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt);
-        this.AppendNotabPipeCallout(tr, layoutBtr, db, textStyleId, layerId, pipeCenterXPaper, pipeCenterYPaper, supportPaperExt, txt);
+        // 파이프가 항상 먼저 자리를 확정하고, 모든 부재 콜아웃이 같은 충돌 상태를 공유한다.
+        double calloutMargin = 100.0;
+        NotabCalloutPlacer calloutPlacer = new NotabCalloutPlacer(minX - calloutMargin, minY - calloutMargin, maxX + calloutMargin, maxY + calloutMargin);
+        calloutPlacer.AddObstacle(supportPaperExt);
+        this.AppendNotabPipeCallout(tr, layoutBtr, db, textStyleId, layerId, pipeCenterXPaper, pipeCenterYPaper, supportPaperExt, txt, calloutPlacer);
+        this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, calloutPlacer);
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " vMode=" + verticalMode + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
@@ -4592,7 +4715,7 @@ namespace PlantFlow_Support
       {
         dim.DimensionStyle = dimStyleId;
         this.ApplyNotabPaperDimensionOverrides(dim, txt, label);
-        dim.DimensionText = string.IsNullOrWhiteSpace(dimensionTextOverride) ? this.FormatNumber(realValue) : dimensionTextOverride;
+        dim.DimensionText = string.IsNullOrWhiteSpace(dimensionTextOverride) ? this.FormatDimNumber(realValue) : dimensionTextOverride;
         if (layerId != ObjectId.Null)
           dim.LayerId = layerId;
         layoutBtr.AppendEntity(dim);
@@ -4614,12 +4737,14 @@ namespace PlantFlow_Support
         double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         dim.Dimtxt = txt;
         dim.Dimasz = arr;
-        dim.Dimexe = 1.5;
+        dim.Dimexe = 5.0;
         dim.Dimexo = 1.5;
         dim.Dimgap = txt * 0.6;
         dim.Dimscale = 1.0;
         dim.Dimtih = false;
         dim.Dimtoh = false;
+        dim.Dimtad = 1;
+        dim.Dimdec = 1;
       }
       catch (System.Exception ex)
       {
@@ -4627,7 +4752,7 @@ namespace PlantFlow_Support
       }
     }
 
-    private void AppendNotabProfileCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt)
+    private void AppendNotabProfileCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer)
     {
       if (tr == null || layoutBtr == null || db == null)
         return;
@@ -4738,6 +4863,26 @@ namespace PlantFlow_Support
           // anchor(부재 지정점)는 노브 미적용으로 고정, elbow/text만 idx별 노브로 이동
           elbow = new Point3d(elbow.X + mdxI, elbow.Y + mdyI, 0.0);
           textPoint = new Point3d(textPoint.X + mdxI, textPoint.Y + mdyI, 0.0);
+          bool smartPlaced = false;
+          string smartDiag = "FAIL";
+          if (placer != null)
+          {
+            double textWidth = System.Math.Max(1.0, designation.Length * txt * 0.7);
+            double textHeight = System.Math.Max(1.0, txt * 1.4);
+            Point3d supportCenter = new Point3d((minX + maxX) / 2.0, (minY + supportPaperExt.MaxPoint.Y) / 2.0, 0.0);
+            double outwardAngle = System.Math.Atan2(anchor.Y - supportCenter.Y, anchor.X - supportCenter.X) * 180.0 / System.Math.PI;
+            Point3d smartCenter, smartElbow;
+            bool smartLeft;
+            if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, out smartCenter, out smartElbow, out smartLeft, out smartDiag))
+            {
+              textPoint = smartCenter;
+              elbow = smartElbow;
+              leftHalf = smartLeft;
+              smartPlaced = true;
+            }
+            else
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL " + designation + " smart FAIL fallback");
+          }
           MText content = new MText();
           content.Contents = designation;
           content.TextHeight = txt;
@@ -4775,7 +4920,9 @@ namespace PlantFlow_Support
             leader.LayerId = layerId;
           layoutBtr.AppendEntity(leader);
           tr.AddNewlyCreatedDBObject(leader, true);
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + (multiDesignation ? " leftHalf=" + leftHalf : string.Empty) + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " fx=" + this.FormatNumber(fx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
+          if (smartPlaced)
+            placer.Commit(anchor, elbow, textPoint, System.Math.Max(1.0, designation.Length * txt * 0.7), System.Math.Max(1.0, txt * 1.4));
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + (multiDesignation ? " leftHalf=" + leftHalf : string.Empty) + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " fx=" + this.FormatNumber(fx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
         }
       }
       catch (System.Exception ex)
@@ -4784,7 +4931,7 @@ namespace PlantFlow_Support
       }
     }
 
-    private void AppendNotabPipeCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, double pipeCenterXPaper, double pipeCenterYPaper, Extents3d supportPaperExt, double txt)
+    private void AppendNotabPipeCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, double pipeCenterXPaper, double pipeCenterYPaper, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer)
     {
       if (tr == null || layoutBtr == null || db == null)
         return;
@@ -4830,10 +4977,34 @@ namespace PlantFlow_Support
         if (!string.IsNullOrWhiteSpace(bop))
           contents = string.IsNullOrWhiteSpace(contents) ? "B.O.P +" + bop : contents + "\\P" + "B.O.P +" + bop;
 
+        bool textLeftOfAnchor = false;
+        bool smartPlaced = false;
+        string smartDiag = "FAIL";
+        int longestLine = 0;
+        string[] lines = contents.Split(new string[] { "\\P" }, System.StringSplitOptions.None);
+        for (int i = 0; i < lines.Length; i++)
+          if (lines[i].Length > longestLine) longestLine = lines[i].Length;
+        double textWidth = System.Math.Max(1.0, longestLine * txt * 0.7);
+        double textHeight = System.Math.Max(1.0, lines.Length * txt * 1.4);
+        if (placer != null)
+        {
+          Point3d supportCenter = new Point3d((minX + maxX) / 2.0, (minY + maxY) / 2.0, 0.0);
+          double outwardAngle = System.Math.Atan2(anchor.Y - supportCenter.Y, anchor.X - supportCenter.X) * 180.0 / System.Math.PI;
+          Point3d smartCenter, smartElbow;
+          if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, out smartCenter, out smartElbow, out textLeftOfAnchor, out smartDiag))
+          {
+            textPoint = smartCenter;
+            elbow = smartElbow;
+            smartPlaced = true;
+          }
+          else
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe smart FAIL fallback");
+        }
+
         MText content = new MText();
         content.Contents = contents;
         content.TextHeight = txt;
-        content.Attachment = AttachmentPoint.MiddleLeft;
+        content.Attachment = textLeftOfAnchor ? AttachmentPoint.MiddleRight : AttachmentPoint.MiddleLeft;
         content.Location = textPoint;
         if (textStyleId != ObjectId.Null)
           content.TextStyleId = textStyleId;
@@ -4852,11 +5023,11 @@ namespace PlantFlow_Support
           MText placed = leader.MText;
           if (placed != null)
           {
-            placed.Attachment = AttachmentPoint.MiddleLeft;
+            placed.Attachment = textLeftOfAnchor ? AttachmentPoint.MiddleRight : AttachmentPoint.MiddleLeft;
             placed.Location = textPoint;
             leader.MText = placed;
           }
-          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "pipe callout", textPoint, "LeftLeader");
+          this.ApplyNotabCalloutNearEdgeAttachment(leader, gap, "pipe callout", textPoint, textLeftOfAnchor ? "RightLeader" : "LeftLeader");
         }
         catch (System.Exception ex)
         {
@@ -4867,7 +5038,9 @@ namespace PlantFlow_Support
           leader.LayerId = layerId;
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop) + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " pipeSide=" + pipeSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pdx=" + this.FormatNumber(pdx) + " pdy=" + this.FormatNumber(pdy));
+        if (smartPlaced)
+          placer.Commit(anchor, elbow, textPoint, textWidth, textHeight);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop) + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " pipeSide=" + pipeSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pdx=" + this.FormatNumber(pdx) + " pdy=" + this.FormatNumber(pdy));
       }
       catch (System.Exception ex)
       {
@@ -7264,6 +7437,11 @@ namespace PlantFlow_Support
       return System.Math.Abs(value).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
     }
 
+    private string FormatDimNumber(double value)
+    {
+      return System.Math.Abs(value).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private void EnsureIsoAnnotationResources(Database db, Transaction tr, out ObjectId layerId, out ObjectId textStyleId, out ObjectId dimStyleId)
     {
       layerId = ObjectId.Null;
@@ -7350,7 +7528,7 @@ namespace PlantFlow_Support
         {
           dimH.DimensionStyle = dimStyleId;
           this.ApplyIsoDimensionOverrides(dimH, dimSize, "dimH");
-          dimH.DimensionText = this.FormatNumber(s_isoRealWidth);
+          dimH.DimensionText = this.FormatDimNumber(s_isoRealWidth);
           if (annotationLayerId != ObjectId.Null)
             dimH.LayerId = annotationLayerId;
           targetMs.AppendEntity(dimH);
@@ -7373,7 +7551,7 @@ namespace PlantFlow_Support
           {
             dimLeft.DimensionStyle = dimStyleId;
             this.ApplyIsoDimensionOverrides(dimLeft, dimSize, "dimSplitL");
-            dimLeft.DimensionText = this.FormatNumber(leftReal);
+            dimLeft.DimensionText = this.FormatDimNumber(leftReal);
             if (annotationLayerId != ObjectId.Null)
               dimLeft.LayerId = annotationLayerId;
             targetMs.AppendEntity(dimLeft);
@@ -7384,7 +7562,7 @@ namespace PlantFlow_Support
           {
             dimRight.DimensionStyle = dimStyleId;
             this.ApplyIsoDimensionOverrides(dimRight, dimSize, "dimSplitR");
-            dimRight.DimensionText = this.FormatNumber(rightReal);
+            dimRight.DimensionText = this.FormatDimNumber(rightReal);
             if (annotationLayerId != ObjectId.Null)
               dimRight.LayerId = annotationLayerId;
             targetMs.AppendEntity(dimRight);
@@ -7402,7 +7580,7 @@ namespace PlantFlow_Support
         {
           dimV.DimensionStyle = dimStyleId;
           this.ApplyIsoDimensionOverrides(dimV, dimSize, "dimV");
-          dimV.DimensionText = this.FormatNumber(s_isoRealHeight);
+          dimV.DimensionText = this.FormatDimNumber(s_isoRealHeight);
           if (annotationLayerId != ObjectId.Null)
             dimV.LayerId = annotationLayerId;
           targetMs.AppendEntity(dimV);
@@ -7695,11 +7873,13 @@ namespace PlantFlow_Support
       {
         dim.Dimtxt = h;
         dim.Dimasz = h;
-        dim.Dimexe = h * 0.6;
+        dim.Dimexe = 5.0;
         dim.Dimexo = h * 0.3;
         dim.Dimgap = h * 0.3;
         dim.Dimtih = false;
         dim.Dimtoh = false;
+        dim.Dimtad = 1;
+        dim.Dimdec = 1;
       }
       catch (System.Exception ex)
       {
