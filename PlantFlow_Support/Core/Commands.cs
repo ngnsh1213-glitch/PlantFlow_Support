@@ -17,6 +17,7 @@ namespace PlantFlow_Support
     private readonly System.Collections.Generic.List<Extents3d> _placedBoxes = new System.Collections.Generic.List<Extents3d>();
     private readonly System.Collections.Generic.List<Point3d[]> _placedLeaders = new System.Collections.Generic.List<Point3d[]>();
     private readonly double _minX, _minY, _maxX, _maxY;
+    private Extents3d _costRefExt;
     // 최근접 모서리 법선을 기준으로 대각 배치를 먼저 시도한다.
     private static readonly int[] Fan = new int[] { 45, -45, 30, -30, 60, -60, 15, -15, 75, -75, 0, 90, -90, 105, -105, 120, -120, 135, -135, 150, -150, 165, -165, 180 };
 
@@ -25,6 +26,14 @@ namespace PlantFlow_Support
 
     public void AddObstacle(Extents3d obstacle) { _obstacles.Add(obstacle); }
 
+    // 콜아웃이 서포트와 앵커에서 얼마나 멀리 퍼지는지를 같은 기준으로 점수화한다.
+    public void SetCostReference(Extents3d supportExt, Point3d anchor)
+    {
+      _costRefExt = new Extents3d(
+        new Point3d(System.Math.Min(supportExt.MinPoint.X, anchor.X), System.Math.Min(supportExt.MinPoint.Y, anchor.Y), 0.0),
+        new Point3d(System.Math.Max(supportExt.MaxPoint.X, anchor.X), System.Math.Max(supportExt.MaxPoint.Y, anchor.Y), 0.0));
+    }
+
     public bool TryPlace(Point3d anchor, double outwardAngleDeg, double width, double height, double gap, double minDx,
       out Point3d textCenter, out Point3d elbow, out bool textLeftOfAnchor, out string diagnostic)
     {
@@ -32,6 +41,12 @@ namespace PlantFlow_Support
       for (int tier = 0; tier < 2; tier++)
       {
         bool checkLeader = tier == 0;
+        bool found = false;
+        double bestCost = double.MaxValue;
+        Point3d bestCenter = Point3d.Origin, bestElbow = Point3d.Origin;
+        bool bestLeft = false;
+        string bestDiag = "FAIL";
+        int scanned = 0;
         for (double radius = startRadius; radius <= startRadius + 60.0; radius += 2.5)
         {
           foreach (int fanOffset in Fan)
@@ -41,18 +56,35 @@ namespace PlantFlow_Support
             double y = anchor.Y + radius * System.Math.Sin(angle);
             if (System.Math.Abs(x - anchor.X) < minDx) continue;
             bool textLeft = x < anchor.X;
-            Extents3d box = textLeft
-              ? new Extents3d(new Point3d(x - width, y - height / 2.0, 0.0), new Point3d(x, y + height / 2.0, 0.0))
-              : new Extents3d(new Point3d(x, y - height / 2.0, 0.0), new Point3d(x + width, y + height / 2.0, 0.0));
+            double boxLeft = textLeft ? System.Math.Min(x, anchor.X - minDx) - width : System.Math.Max(x, anchor.X + minDx);
+            Extents3d box = new Extents3d(new Point3d(boxLeft, y - height / 2.0, 0.0), new Point3d(boxLeft + width, y + height / 2.0, 0.0));
             if (OutOfBounds(box)) continue;
-            Point3d edge = new Point3d(x, y, 0.0);
+            Point3d edge = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, y, 0.0);
             if (!Free(box, anchor, edge, checkLeader)) continue;
-            textCenter = new Point3d(x, y, 0.0);
-            textLeftOfAnchor = textLeft;
-            elbow = new Point3d(x + (textLeftOfAnchor ? gap : -gap), y, 0.0);
-            diagnostic = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " out=" + outwardAngleDeg.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " actual=" + (outwardAngleDeg + fanOffset).ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
-            return true;
+            scanned++;
+            double cost = System.Math.Max(0.0, box.MaxPoint.X - _costRefExt.MaxPoint.X)
+              + System.Math.Max(0.0, _costRefExt.MinPoint.X - box.MinPoint.X)
+              + System.Math.Max(0.0, box.MaxPoint.Y - _costRefExt.MaxPoint.Y)
+              + System.Math.Max(0.0, _costRefExt.MinPoint.Y - box.MinPoint.Y)
+              + radius * 0.01;
+            if (cost < bestCost)
+            {
+              found = true;
+              bestCost = cost;
+              bestCenter = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, y, 0.0);
+              bestLeft = textLeft;
+              bestElbow = bestCenter;
+              bestDiag = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " out=" + outwardAngleDeg.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " actual=" + (outwardAngleDeg + fanOffset).ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " cost=" + cost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+            }
           }
+        }
+        if (found)
+        {
+          textCenter = bestCenter;
+          elbow = bestElbow;
+          textLeftOfAnchor = bestLeft;
+          diagnostic = bestDiag + " scanned=" + scanned;
+          return true;
         }
       }
       textCenter = Point3d.Origin; elbow = Point3d.Origin; textLeftOfAnchor = false; diagnostic = "FAIL";
@@ -4761,6 +4793,10 @@ namespace PlantFlow_Support
         double calloutMargin = 100.0;
         NotabCalloutPlacer calloutPlacer = new NotabCalloutPlacer(minX - calloutMargin, minY - calloutMargin, maxX + calloutMargin, maxY + calloutMargin);
         calloutPlacer.AddObstacle(supportPaperExt);
+        Point3d calloutCostAnchor = (!double.IsNaN(pipeCenterXPaper) && !double.IsNaN(pipeCenterYPaper))
+          ? new Point3d(pipeCenterXPaper, pipeCenterYPaper, 0.0)
+          : new Point3d((minX + maxX) / 2.0, (minY + maxY) / 2.0, 0.0);
+        calloutPlacer.SetCostReference(supportPaperExt, calloutCostAnchor);
         this.AppendNotabPipeCallout(tr, layoutBtr, db, textStyleId, layerId, pipeCenterXPaper, pipeCenterYPaper, supportPaperExt, txt, calloutPlacer);
         this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, calloutPlacer);
 
@@ -4823,6 +4859,62 @@ namespace PlantFlow_Support
       }
     }
 
+    private void AppendNotabDirectCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer, string designation, Point3d anchor, Point3d fallbackNear, bool fallbackLeft, double gap, double minDx, string label)
+    {
+      MText mt = new MText();
+      try
+      {
+        mt.Contents = designation;
+        mt.TextHeight = txt;
+        mt.Attachment = AttachmentPoint.BottomLeft;
+        mt.Location = Point3d.Origin;
+        if (textStyleId != ObjectId.Null) mt.TextStyleId = textStyleId;
+        if (layerId != ObjectId.Null) mt.LayerId = layerId;
+        layoutBtr.AppendEntity(mt);
+        tr.AddNewlyCreatedDBObject(mt, true);
+
+        double actualWidth = System.Math.Max(1.0, mt.ActualWidth);
+        double actualHeight = System.Math.Max(1.0, mt.ActualHeight);
+        Point3d near = fallbackNear, ignoredElbow;
+        bool left = fallbackLeft;
+        string diagnostic = "fallback";
+        if (placer != null)
+        {
+          double dL = anchor.X - supportPaperExt.MinPoint.X, dR = supportPaperExt.MaxPoint.X - anchor.X;
+          double dB = anchor.Y - supportPaperExt.MinPoint.Y, dT = supportPaperExt.MaxPoint.Y - anchor.Y;
+          double m = System.Math.Min(System.Math.Min(dL, dR), System.Math.Min(dB, dT));
+          double outwardAngle = (m == dB) ? -90.0 : (m == dT) ? 90.0 : (m == dL) ? 180.0 : 0.0;
+          if (!placer.TryPlace(anchor, outwardAngle, actualWidth, actualHeight, gap, minDx, out near, out ignoredElbow, out left, out diagnostic))
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " smart FAIL fallback designation=" + designation);
+        }
+
+        bool right = !left;
+        double leftX = right ? System.Math.Max(near.X, anchor.X + minDx) : System.Math.Min(near.X, anchor.X - minDx) - actualWidth;
+        double rightX = leftX + actualWidth;
+        double baseY = near.Y;
+        double nearX = right ? leftX : rightX;
+        double farX = right ? rightX : leftX;
+        mt.Location = new Point3d(leftX, baseY, 0.0);
+
+        Leader leader = new Leader();
+        leader.AppendVertex(anchor);
+        leader.AppendVertex(new Point3d(nearX, baseY, 0.0));
+        leader.AppendVertex(new Point3d(farX, baseY, 0.0));
+        leader.HasArrowHead = true;
+        leader.Dimasz = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
+        if (layerId != ObjectId.Null) leader.LayerId = layerId;
+        if (db.Dimstyle != ObjectId.Null) leader.DimensionStyle = db.Dimstyle;
+        layoutBtr.AppendEntity(leader);
+        tr.AddNewlyCreatedDBObject(leader, true);
+        if (placer != null) placer.Commit(anchor, new Point3d(nearX, baseY, 0.0), new Point3d(nearX, baseY, 0.0), actualWidth, actualHeight);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-draw designation=" + designation + " anchor=" + anchor + " nearX=" + this.FormatNumber(nearX) + " farX=" + this.FormatNumber(farX) + " baseY=" + this.FormatNumber(baseY) + " W=" + this.FormatNumber(actualWidth) + " H=" + this.FormatNumber(actualHeight) + " side=" + (right ? "right" : "left") + " sep=" + this.FormatNumber(right ? nearX - anchor.X : anchor.X - nearX) + " " + diagnostic);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " direct draw 예외: " + ex.GetType().Name + ": " + ex.Message + " designation=" + designation);
+      }
+    }
+
     private void AppendNotabProfileCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer)
     {
       if (tr == null || layoutBtr == null || db == null)
@@ -4843,13 +4935,6 @@ namespace PlantFlow_Support
 
       try
       {
-        ObjectId mlStyleId = this.EnsureNotabMLeaderStyle(db, tr);
-        if (mlStyleId == ObjectId.Null)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout skip: mleader style null designation=" + designations[0]);
-          return;
-        }
-
         double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
         double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         double gap = arr + txt * 0.6;
@@ -4958,6 +5043,8 @@ namespace PlantFlow_Support
             else
               PlantOrthoView.FileDiag("PFSNOTABDETAIL " + designation + " smart FAIL fallback");
           }
+          // cycle83: MLeader 경로는 접속점을 확정할 수 없어 직접 MText+Leader 작도로 교체했다.
+          #if false
           MText content = new MText();
           content.Contents = designation;
           content.TextHeight = txt;
@@ -5053,6 +5140,8 @@ namespace PlantFlow_Support
           }
           if (smartPlaced)
             placer.Commit(anchor, elbow, textPoint, System.Math.Max(1.0, designation.Length * txt * 0.7), System.Math.Max(1.0, txt * 1.4));
+          #endif
+          this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, designation, anchor, textPoint, leftHalf, gap, minDx, "callout");
           PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + (multiDesignation ? " leftHalf=" + leftHalf : string.Empty) + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " textSide=" + (textPoint.X < anchor.X ? "left" : "right") + " anchorX=" + this.FormatNumber(anchor.X) + " textX=" + this.FormatNumber(textPoint.X) + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " fx=" + this.FormatNumber(fx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
         }
       }
@@ -5077,13 +5166,6 @@ namespace PlantFlow_Support
 
       try
       {
-        ObjectId mlStyleId = this.EnsureNotabMLeaderStyle(db, tr);
-        if (mlStyleId == ObjectId.Null)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout skip: mleader style null PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop));
-          return;
-        }
-
         double minX = supportPaperExt.MinPoint.X;
         double maxX = supportPaperExt.MaxPoint.X;
         double minY = supportPaperExt.MinPoint.Y;
@@ -5136,6 +5218,8 @@ namespace PlantFlow_Support
             PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe smart FAIL fallback");
         }
 
+        // cycle83: MLeader 경로는 접속점을 확정할 수 없어 직접 MText+Leader 작도로 교체했다.
+        #if false
         MText content = new MText();
         content.Contents = contents;
         content.TextHeight = txt;
@@ -5231,6 +5315,8 @@ namespace PlantFlow_Support
         }
         if (smartPlaced)
           placer.Commit(anchor, elbow, textPoint, textWidth, textHeight);
+        #endif
+        this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, contents, anchor, textPoint, textLeftOfAnchor, gap, minDx, "pipe callout");
         PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop) + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " textSide=" + (textPoint.X < anchor.X ? "left" : "right") + " anchorX=" + this.FormatNumber(anchor.X) + " textX=" + this.FormatNumber(textPoint.X) + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " pipeSide=" + pipeSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pdx=" + this.FormatNumber(pdx) + " pdy=" + this.FormatNumber(pdy));
       }
       catch (System.Exception ex)
