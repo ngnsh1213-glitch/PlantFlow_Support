@@ -25,7 +25,7 @@ namespace PlantFlow_Support
 
     public void AddObstacle(Extents3d obstacle) { _obstacles.Add(obstacle); }
 
-    public bool TryPlace(Point3d anchor, double outwardAngleDeg, double width, double height, double gap,
+    public bool TryPlace(Point3d anchor, double outwardAngleDeg, double width, double height, double gap, double minDx,
       out Point3d textCenter, out Point3d elbow, out bool textLeftOfAnchor, out string diagnostic)
     {
       double startRadius = System.Math.Max(15.0, System.Math.Max(width, height) / 2.0 + gap);
@@ -39,6 +39,7 @@ namespace PlantFlow_Support
             double angle = (outwardAngleDeg + fanOffset) * System.Math.PI / 180.0;
             double x = anchor.X + radius * System.Math.Cos(angle);
             double y = anchor.Y + radius * System.Math.Sin(angle);
+            if (System.Math.Abs(x - anchor.X) < minDx) continue;
             bool textLeft = x < anchor.X;
             Extents3d box = textLeft
               ? new Extents3d(new Point3d(x - width, y - height / 2.0, 0.0), new Point3d(x, y + height / 2.0, 0.0))
@@ -4852,6 +4853,7 @@ namespace PlantFlow_Support
         double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
         double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         double gap = arr + txt * 0.6;
+        double minDx = this.GetEnvDouble("PFS_NOTAB_CALLOUT_MIN_DX", 40.0, 0.0, 500.0);
         double mdx = this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DX", 0.0, -2000.0, 2000.0);
         double mdy = this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DY", 0.0, -2000.0, 2000.0);
         double minX = supportPaperExt.MinPoint.X;
@@ -4946,7 +4948,7 @@ namespace PlantFlow_Support
             double outwardAngle = (m == dB) ? -90.0 : (m == dT) ? 90.0 : (m == dL) ? 180.0 : 0.0;
             Point3d smartCenter, smartElbow;
             bool smartLeft;
-            if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, out smartCenter, out smartElbow, out smartLeft, out smartDiag))
+            if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, minDx, out smartCenter, out smartElbow, out smartLeft, out smartDiag))
             {
               textPoint = smartCenter;
               elbow = smartElbow;
@@ -4995,25 +4997,44 @@ namespace PlantFlow_Support
           tr.AddNewlyCreatedDBObject(leader, true);
           try
           {
-            // 실측 법칙: 문자는 TextLocation에서 왼쪽으로 W만큼 뻗는다.
-            // → 문자를 앵커 반대(우측)로 보내려면 TextLocation을 실측 폭만큼 우측으로 민다.
-            bool wantRight = !(textPoint.X < anchor.X);
-            if (wantRight)
+            double textMinDx = this.GetEnvDouble("PFS_NOTAB_CALLOUT_MIN_DX", 40.0, 0.0, 500.0);
+            MText mtFix = leader.MText;
+            if (mtFix != null)
             {
-              MText mtFix = leader.MText;
-              double actualW = (mtFix != null) ? mtFix.ActualWidth : 0.0;
-              if (actualW > 1e-6)
+              double aw = mtFix.ActualWidth, ah = mtFix.ActualHeight;
+              if (aw > 1e-6)
               {
-                Point3d fixedLoc = new Point3d(textPoint.X + actualW, textPoint.Y, 0.0);
-                leader.TextLocation = fixedLoc;
-                PlantOrthoView.FileDiag("PFSNOTABDETAIL text-shift right W=" + this.FormatNumber(actualW)
-                  + " from=" + this.FormatNumber(textPoint.X) + " to=" + this.FormatNumber(fixedLoc.X)
-                  + " anchorX=" + this.FormatNumber(anchor.X));
+                Point3d loc = mtFix.Location;
+                string att = mtFix.Attachment.ToString();
+                bool extRight = att.EndsWith("Left", System.StringComparison.Ordinal);
+                double curLeft = extRight ? loc.X : loc.X - aw;
+                double curRight = extRight ? loc.X + aw : loc.X;
+                bool extDown = att.StartsWith("Top", System.StringComparison.Ordinal);
+                double curTop = extDown ? loc.Y : loc.Y + ah / 2.0;
+                double curBottom = extDown ? loc.Y - ah : loc.Y - ah / 2.0;
+                bool outwardRight = !(textPoint.X < anchor.X);
+                double wantLeft, wantRight2;
+                if (outwardRight)
+                { wantLeft = System.Math.Max(textPoint.X, anchor.X + textMinDx); wantRight2 = wantLeft + aw; }
+                else
+                { wantRight2 = System.Math.Min(textPoint.X, anchor.X - textMinDx); wantLeft = wantRight2 - aw; }
+                double curCenterY = (curTop + curBottom) / 2.0;
+                double dx = outwardRight ? wantLeft - curLeft : wantRight2 - curRight;
+                double dy = textPoint.Y - curCenterY;
+                if (System.Math.Abs(dx) > 1e-6 || System.Math.Abs(dy) > 1e-6)
+                {
+                  leader.TextLocation = new Point3d(loc.X + dx, loc.Y + dy, 0.0);
+                  PlantOrthoView.FileDiag("PFSNOTABDETAIL text-fit att=" + att + " aw=" + this.FormatNumber(aw) + " ah=" + this.FormatNumber(ah)
+                    + " cur=[" + this.FormatNumber(curLeft) + "," + this.FormatNumber(curRight) + "]x[" + this.FormatNumber(curBottom) + "," + this.FormatNumber(curTop) + "]"
+                    + " want=[" + this.FormatNumber(wantLeft) + "," + this.FormatNumber(wantRight2) + "]"
+                    + " d=(" + this.FormatNumber(dx) + "," + this.FormatNumber(dy) + ")"
+                    + " anchorX=" + this.FormatNumber(anchor.X) + " sep=" + this.FormatNumber(outwardRight ? wantLeft - anchor.X : anchor.X - wantRight2));
+                }
               }
             }
           }
           catch (System.Exception sx)
-          { PlantOrthoView.FileDiag("PFSNOTABDETAIL text-shift 예외: " + sx.GetType().Name + ": " + sx.Message); }
+          { PlantOrthoView.FileDiag("PFSNOTABDETAIL text-fit 예외: " + sx.GetType().Name + ": " + sx.Message); }
           try
           {
             MText mt = leader.MText;
@@ -5022,7 +5043,7 @@ namespace PlantFlow_Support
               PlantOrthoView.FileDiag("PFSNOTABDETAIL render-check designation=" + designation
                 + " calcTextX=" + this.FormatNumber(textPoint.X) + " calcSide=" + (textPoint.X < anchor.X ? "left" : "right")
                 + " mtLoc=(" + this.FormatNumber(mt.Location.X) + "," + this.FormatNumber(mt.Location.Y) + ")"
-                + " mtActualW=" + this.FormatNumber(mt.ActualWidth) + " att=" + mt.Attachment.ToString()
+                + " mtActualW=" + this.FormatNumber(mt.ActualWidth) + " mtActualH=" + this.FormatNumber(mt.ActualHeight) + " att=" + mt.Attachment.ToString()
                 + " anchorX=" + this.FormatNumber(anchor.X));
             }
           }
@@ -5072,6 +5093,7 @@ namespace PlantFlow_Support
         double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
         double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         double gap = arr + txt * 0.6;
+        double minDx = this.GetEnvDouble("PFS_NOTAB_CALLOUT_MIN_DX", 40.0, 0.0, 500.0);
         double pdx = this.GetEnvDouble("PFS_NOTAB_PIPE_CALLOUT_DX", 0.0, -2000.0, 2000.0);
         double pdy = this.GetEnvDouble("PFS_NOTAB_PIPE_CALLOUT_DY", 0.0, -2000.0, 2000.0);
         Point3d anchor = (!double.IsNaN(pipeCenterXPaper) && !double.IsNaN(pipeCenterYPaper))
@@ -5104,7 +5126,7 @@ namespace PlantFlow_Support
           double m = System.Math.Min(System.Math.Min(dL, dR), System.Math.Min(dB, dT));
           double outwardAngle = (m == dB) ? -90.0 : (m == dT) ? 90.0 : (m == dL) ? 180.0 : 0.0;
           Point3d smartCenter, smartElbow;
-          if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, out smartCenter, out smartElbow, out textLeftOfAnchor, out smartDiag))
+          if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, minDx, out smartCenter, out smartElbow, out textLeftOfAnchor, out smartDiag))
           {
             textPoint = smartCenter;
             elbow = smartElbow;
@@ -5153,25 +5175,44 @@ namespace PlantFlow_Support
         tr.AddNewlyCreatedDBObject(leader, true);
         try
         {
-          // 실측 법칙: 문자는 TextLocation에서 왼쪽으로 W만큼 뻗는다.
-          // → 문자를 앵커 반대(우측)로 보내려면 TextLocation을 실측 폭만큼 우측으로 민다.
-          bool wantRight = !(textPoint.X < anchor.X);
-          if (wantRight)
+          double textMinDx = this.GetEnvDouble("PFS_NOTAB_CALLOUT_MIN_DX", 40.0, 0.0, 500.0);
+          MText mtFix = leader.MText;
+          if (mtFix != null)
           {
-            MText mtFix = leader.MText;
-            double actualW = (mtFix != null) ? mtFix.ActualWidth : 0.0;
-            if (actualW > 1e-6)
+            double aw = mtFix.ActualWidth, ah = mtFix.ActualHeight;
+            if (aw > 1e-6)
             {
-              Point3d fixedLoc = new Point3d(textPoint.X + actualW, textPoint.Y, 0.0);
-              leader.TextLocation = fixedLoc;
-              PlantOrthoView.FileDiag("PFSNOTABDETAIL text-shift right W=" + this.FormatNumber(actualW)
-                + " from=" + this.FormatNumber(textPoint.X) + " to=" + this.FormatNumber(fixedLoc.X)
-                + " anchorX=" + this.FormatNumber(anchor.X));
+              Point3d loc = mtFix.Location;
+              string att = mtFix.Attachment.ToString();
+              bool extRight = att.EndsWith("Left", System.StringComparison.Ordinal);
+              double curLeft = extRight ? loc.X : loc.X - aw;
+              double curRight = extRight ? loc.X + aw : loc.X;
+              bool extDown = att.StartsWith("Top", System.StringComparison.Ordinal);
+              double curTop = extDown ? loc.Y : loc.Y + ah / 2.0;
+              double curBottom = extDown ? loc.Y - ah : loc.Y - ah / 2.0;
+              bool outwardRight = !(textPoint.X < anchor.X);
+              double wantLeft, wantRight2;
+              if (outwardRight)
+              { wantLeft = System.Math.Max(textPoint.X, anchor.X + textMinDx); wantRight2 = wantLeft + aw; }
+              else
+              { wantRight2 = System.Math.Min(textPoint.X, anchor.X - textMinDx); wantLeft = wantRight2 - aw; }
+              double curCenterY = (curTop + curBottom) / 2.0;
+              double dx = outwardRight ? wantLeft - curLeft : wantRight2 - curRight;
+              double dy = textPoint.Y - curCenterY;
+              if (System.Math.Abs(dx) > 1e-6 || System.Math.Abs(dy) > 1e-6)
+              {
+                leader.TextLocation = new Point3d(loc.X + dx, loc.Y + dy, 0.0);
+                PlantOrthoView.FileDiag("PFSNOTABDETAIL text-fit att=" + att + " aw=" + this.FormatNumber(aw) + " ah=" + this.FormatNumber(ah)
+                  + " cur=[" + this.FormatNumber(curLeft) + "," + this.FormatNumber(curRight) + "]x[" + this.FormatNumber(curBottom) + "," + this.FormatNumber(curTop) + "]"
+                  + " want=[" + this.FormatNumber(wantLeft) + "," + this.FormatNumber(wantRight2) + "]"
+                  + " d=(" + this.FormatNumber(dx) + "," + this.FormatNumber(dy) + ")"
+                  + " anchorX=" + this.FormatNumber(anchor.X) + " sep=" + this.FormatNumber(outwardRight ? wantLeft - anchor.X : anchor.X - wantRight2));
+              }
             }
           }
         }
         catch (System.Exception sx)
-        { PlantOrthoView.FileDiag("PFSNOTABDETAIL text-shift 예외: " + sx.GetType().Name + ": " + sx.Message); }
+        { PlantOrthoView.FileDiag("PFSNOTABDETAIL text-fit 예외: " + sx.GetType().Name + ": " + sx.Message); }
         try
         {
           MText mt = leader.MText;
@@ -5180,7 +5221,7 @@ namespace PlantFlow_Support
             PlantOrthoView.FileDiag("PFSNOTABDETAIL render-check PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln)
               + " calcTextX=" + this.FormatNumber(textPoint.X) + " calcSide=" + (textPoint.X < anchor.X ? "left" : "right")
               + " mtLoc=(" + this.FormatNumber(mt.Location.X) + "," + this.FormatNumber(mt.Location.Y) + ")"
-              + " mtActualW=" + this.FormatNumber(mt.ActualWidth) + " att=" + mt.Attachment.ToString()
+              + " mtActualW=" + this.FormatNumber(mt.ActualWidth) + " mtActualH=" + this.FormatNumber(mt.ActualHeight) + " att=" + mt.Attachment.ToString()
               + " anchorX=" + this.FormatNumber(anchor.X));
           }
         }
