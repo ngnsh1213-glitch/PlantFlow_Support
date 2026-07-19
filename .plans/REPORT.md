@@ -24,4 +24,4 @@
 - `calcSide=left`인 파이프 콜아웃이 기존 방향을 유지하는지 확인.
 
 ## 커밋
-- `6af55e1` (보고서 해시 반영을 위해 amend 예정)
+- 코드 변경: `55b25f4` (`fix: apply notab MLeader attachment on both directions`)
