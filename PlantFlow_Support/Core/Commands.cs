@@ -5174,12 +5174,16 @@ namespace PlantFlow_Support
         TextAttachmentType attachType = (TextAttachmentType)6;
         if (directionType != null)
         {
-          object leftLeader = Enum.Parse(directionType, directionName);
           System.Reflection.MethodInfo method = leaderType.GetMethod(
             "SetTextAttachmentType",
             new Type[] { typeof(TextAttachmentType), directionType });
           if (method != null)
+          {
+            object leftLeader = Enum.Parse(directionType, "LeftLeader");
+            object rightLeader = Enum.Parse(directionType, "RightLeader");
             method.Invoke(leader, new object[] { attachType, leftLeader });
+            method.Invoke(leader, new object[] { attachType, rightLeader });
+          }
           else
             PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " near-edge attachment skip: SetTextAttachmentType overload missing text=" + textPoint);
         }
