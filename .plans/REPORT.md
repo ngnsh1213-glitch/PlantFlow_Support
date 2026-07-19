@@ -25,4 +25,4 @@
 - 우측 6건은 문자 범위가 anchorX 우측인지, 좌측 2건은 기존 위치를 유지하는지 확인.
 
 ## 커밋
-- 대기 중
+- 코드 변경: `9e5e34d` (`fix: shift right notab callout text by actual width`)
