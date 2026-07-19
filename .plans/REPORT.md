@@ -26,4 +26,4 @@
 - 이전 GD1 우측 문자 폭만큼의 일괄 오버슛이 없는지 `d=`와 도면에서 확인한다.
 
 ## 커밋
-- 아래 커밋 참조.
+- 코드 변경: `b114d5d` (`fix: fit notab callout text by actual bounds`)
