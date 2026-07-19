@@ -4526,6 +4526,8 @@ namespace PlantFlow_Support
             return;
           }
 
+          this.NotabMemberGeometrySpike(tr, db, vp, supportExt);
+
           Extents3d supportPaperExt;
           double pipeCenterXPaper;
           double pipeCenterYPaper;
@@ -4556,6 +4558,75 @@ namespace PlantFlow_Support
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void NotabMemberGeometrySpike(Transaction tr, Database db, Viewport vp, Extents3d supportExt)
+    {
+      if (tr == null || db == null || vp == null)
+        return;
+
+      try
+      {
+        BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+        if (bt == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike skip: block table null");
+          return;
+        }
+        BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+        if (ms == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike skip: model space null");
+          return;
+        }
+
+        int i = 0;
+        foreach (ObjectId id in ms)
+        {
+          Entity ent = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+          if (ent == null)
+            continue;
+          string kind = ent.GetType().Name;
+          Extents3d we;
+          try { we = ent.GeometricExtents; }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike extents skip kind=" + kind + " 예외=" + ex.GetType().Name);
+            continue;
+          }
+          double dx = we.MaxPoint.X - we.MinPoint.X, dy = we.MaxPoint.Y - we.MinPoint.Y, dz = we.MaxPoint.Z - we.MinPoint.Z;
+          Point3d[] corners = this.GetExtentsCorners(we);
+          double pminx = double.MaxValue, pminy = double.MaxValue, pmaxx = double.MinValue, pmaxy = double.MinValue;
+          for (int c = 0; c < corners.Length; c++)
+          {
+            Point3d p = this.NotabProjectWcsToPaper(vp, corners[c]);
+            pminx = System.Math.Min(pminx, p.X);
+            pminy = System.Math.Min(pminy, p.Y);
+            pmaxx = System.Math.Max(pmaxx, p.X);
+            pmaxy = System.Math.Max(pmaxy, p.Y);
+          }
+          double[] dims = new double[] { dx, dy, dz };
+          System.Array.Sort(dims);
+          double aspectLongMid = dims[0] > 1e-6 ? dims[2] / dims[0] : -1;
+          double pipeDist = -1;
+          if (s_isoPipeCenterValid)
+          {
+            Point3d ec = new Point3d((we.MinPoint.X + we.MaxPoint.X) / 2.0, (we.MinPoint.Y + we.MaxPoint.Y) / 2.0, (we.MinPoint.Z + we.MaxPoint.Z) / 2.0);
+            pipeDist = ec.DistanceTo(s_isoPipeCenterWcs);
+          }
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike i=" + (i++) + " kind=" + kind
+            + " wcsDims=(" + this.FormatNumber(dx) + "," + this.FormatNumber(dy) + "," + this.FormatNumber(dz) + ")"
+            + " aspect=" + this.FormatNumber(aspectLongMid)
+            + " paperBox=(" + this.FormatNumber(pminx) + "," + this.FormatNumber(pminy) + ")~(" + this.FormatNumber(pmaxx) + "," + this.FormatNumber(pmaxy) + ")"
+            + " paperWH=(" + this.FormatNumber(pmaxx - pminx) + "," + this.FormatNumber(pmaxy - pminy) + ")"
+            + " pipeDist=" + this.FormatNumber(pipeDist));
+        }
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike done count=" + i + " std=" + this.GetNotabStandardName());
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
     }
 
@@ -4922,6 +4993,22 @@ namespace PlantFlow_Support
             leader.LayerId = layerId;
           layoutBtr.AppendEntity(leader);
           tr.AddNewlyCreatedDBObject(leader, true);
+          try
+          {
+            MText mt = leader.MText;
+            if (mt != null)
+            {
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL render-check designation=" + designation
+                + " calcTextX=" + this.FormatNumber(textPoint.X) + " calcSide=" + (textPoint.X < anchor.X ? "left" : "right")
+                + " mtLoc=(" + this.FormatNumber(mt.Location.X) + "," + this.FormatNumber(mt.Location.Y) + ")"
+                + " mtActualW=" + this.FormatNumber(mt.ActualWidth) + " att=" + mt.Attachment.ToString()
+                + " anchorX=" + this.FormatNumber(anchor.X));
+            }
+          }
+          catch (System.Exception rex)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL render-check 예외: " + rex.GetType().Name);
+          }
           if (smartPlaced)
             placer.Commit(anchor, elbow, textPoint, System.Math.Max(1.0, designation.Length * txt * 0.7), System.Math.Max(1.0, txt * 1.4));
           PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + (multiDesignation ? " leftHalf=" + leftHalf : string.Empty) + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " textSide=" + (textPoint.X < anchor.X ? "left" : "right") + " anchorX=" + this.FormatNumber(anchor.X) + " textX=" + this.FormatNumber(textPoint.X) + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " fx=" + this.FormatNumber(fx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
@@ -5043,6 +5130,22 @@ namespace PlantFlow_Support
           leader.LayerId = layerId;
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
+        try
+        {
+          MText mt = leader.MText;
+          if (mt != null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL render-check PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln)
+              + " calcTextX=" + this.FormatNumber(textPoint.X) + " calcSide=" + (textPoint.X < anchor.X ? "left" : "right")
+              + " mtLoc=(" + this.FormatNumber(mt.Location.X) + "," + this.FormatNumber(mt.Location.Y) + ")"
+              + " mtActualW=" + this.FormatNumber(mt.ActualWidth) + " att=" + mt.Attachment.ToString()
+              + " anchorX=" + this.FormatNumber(anchor.X));
+          }
+        }
+        catch (System.Exception rex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL render-check 예외: " + rex.GetType().Name);
+        }
         if (smartPlaced)
           placer.Commit(anchor, elbow, textPoint, textWidth, textHeight);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop) + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " textSide=" + (textPoint.X < anchor.X ? "left" : "right") + " anchorX=" + this.FormatNumber(anchor.X) + " textX=" + this.FormatNumber(textPoint.X) + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " pipeSide=" + pipeSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pdx=" + this.FormatNumber(pdx) + " pdy=" + this.FormatNumber(pdy));
