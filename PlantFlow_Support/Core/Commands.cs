@@ -17,20 +17,13 @@ namespace PlantFlow_Support
     private readonly System.Collections.Generic.List<Extents3d> _placedBoxes = new System.Collections.Generic.List<Extents3d>();
     private readonly System.Collections.Generic.List<Point3d[]> _placedLeaders = new System.Collections.Generic.List<Point3d[]>();
     private readonly double _minX, _minY, _maxX, _maxY;
-    private static readonly int[] Fan = BuildFan(15);
+    // 최근접 모서리 법선을 기준으로 대각 배치를 먼저 시도한다.
+    private static readonly int[] Fan = new int[] { 45, -45, 30, -30, 60, -60, 15, -15, 75, -75, 0, 90, -90, 105, -105, 120, -120, 135, -135, 150, -150, 165, -165, 180 };
 
     public NotabCalloutPlacer(double minX, double minY, double maxX, double maxY)
     { _minX = minX; _minY = minY; _maxX = maxX; _maxY = maxY; }
 
     public void AddObstacle(Extents3d obstacle) { _obstacles.Add(obstacle); }
-
-    private static int[] BuildFan(int step)
-    {
-      System.Collections.Generic.List<int> values = new System.Collections.Generic.List<int> { 0 };
-      for (int value = step; value <= 180; value += step)
-      { values.Add(value); if (value != 180) values.Add(-value); }
-      return values.ToArray();
-    }
 
     public bool TryPlace(Point3d anchor, double outwardAngleDeg, double width, double height, double gap,
       out Point3d textCenter, out Point3d elbow, out bool textLeftOfAnchor, out string diagnostic)
@@ -46,14 +39,17 @@ namespace PlantFlow_Support
             double angle = (outwardAngleDeg + fanOffset) * System.Math.PI / 180.0;
             double x = anchor.X + radius * System.Math.Cos(angle);
             double y = anchor.Y + radius * System.Math.Sin(angle);
-            Extents3d box = new Extents3d(new Point3d(x - width / 2.0, y - height / 2.0, 0.0), new Point3d(x + width / 2.0, y + height / 2.0, 0.0));
+            bool textLeft = x < anchor.X;
+            Extents3d box = textLeft
+              ? new Extents3d(new Point3d(x - width, y - height / 2.0, 0.0), new Point3d(x, y + height / 2.0, 0.0))
+              : new Extents3d(new Point3d(x, y - height / 2.0, 0.0), new Point3d(x + width, y + height / 2.0, 0.0));
             if (OutOfBounds(box)) continue;
-            Point3d edge = BoxEdgeToward(box, anchor);
+            Point3d edge = new Point3d(x, y, 0.0);
             if (!Free(box, anchor, edge, checkLeader)) continue;
             textCenter = new Point3d(x, y, 0.0);
-            textLeftOfAnchor = x < anchor.X;
+            textLeftOfAnchor = textLeft;
             elbow = new Point3d(x + (textLeftOfAnchor ? gap : -gap), y, 0.0);
-            diagnostic = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " ang=" + outwardAngleDeg.ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
+            diagnostic = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " out=" + outwardAngleDeg.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " actual=" + (outwardAngleDeg + fanOffset).ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
             return true;
           }
         }
@@ -64,7 +60,10 @@ namespace PlantFlow_Support
 
     public void Commit(Point3d anchor, Point3d elbow, Point3d textCenter, double width, double height)
     {
-      _placedBoxes.Add(new Extents3d(new Point3d(textCenter.X - width / 2.0, textCenter.Y - height / 2.0, 0.0), new Point3d(textCenter.X + width / 2.0, textCenter.Y + height / 2.0, 0.0)));
+      bool textLeft = textCenter.X < anchor.X;
+      _placedBoxes.Add(textLeft
+        ? new Extents3d(new Point3d(textCenter.X - width, textCenter.Y - height / 2.0, 0.0), new Point3d(textCenter.X, textCenter.Y + height / 2.0, 0.0))
+        : new Extents3d(new Point3d(textCenter.X, textCenter.Y - height / 2.0, 0.0), new Point3d(textCenter.X + width, textCenter.Y + height / 2.0, 0.0)));
       _placedLeaders.Add(new Point3d[] { anchor, elbow });
     }
 
@@ -4869,8 +4868,11 @@ namespace PlantFlow_Support
           {
             double textWidth = System.Math.Max(1.0, designation.Length * txt * 0.7);
             double textHeight = System.Math.Max(1.0, txt * 1.4);
-            Point3d supportCenter = new Point3d((minX + maxX) / 2.0, (minY + supportPaperExt.MaxPoint.Y) / 2.0, 0.0);
-            double outwardAngle = System.Math.Atan2(anchor.Y - supportCenter.Y, anchor.X - supportCenter.X) * 180.0 / System.Math.PI;
+            double eMinX = supportPaperExt.MinPoint.X, eMaxX = supportPaperExt.MaxPoint.X;
+            double eMinY = supportPaperExt.MinPoint.Y, eMaxY = supportPaperExt.MaxPoint.Y;
+            double dL = anchor.X - eMinX, dR = eMaxX - anchor.X, dB = anchor.Y - eMinY, dT = eMaxY - anchor.Y;
+            double m = System.Math.Min(System.Math.Min(dL, dR), System.Math.Min(dB, dT));
+            double outwardAngle = (m == dB) ? -90.0 : (m == dT) ? 90.0 : (m == dL) ? 180.0 : 0.0;
             Point3d smartCenter, smartElbow;
             bool smartLeft;
             if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, out smartCenter, out smartElbow, out smartLeft, out smartDiag))
@@ -4922,7 +4924,7 @@ namespace PlantFlow_Support
           tr.AddNewlyCreatedDBObject(leader, true);
           if (smartPlaced)
             placer.Commit(anchor, elbow, textPoint, System.Math.Max(1.0, designation.Length * txt * 0.7), System.Math.Max(1.0, txt * 1.4));
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + (multiDesignation ? " leftHalf=" + leftHalf : string.Empty) + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " fx=" + this.FormatNumber(fx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + (multiDesignation ? " leftHalf=" + leftHalf : string.Empty) + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " textSide=" + (textPoint.X < anchor.X ? "left" : "right") + " anchorX=" + this.FormatNumber(anchor.X) + " textX=" + this.FormatNumber(textPoint.X) + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " fx=" + this.FormatNumber(fx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
         }
       }
       catch (System.Exception ex)
@@ -4988,8 +4990,11 @@ namespace PlantFlow_Support
         double textHeight = System.Math.Max(1.0, lines.Length * txt * 1.4);
         if (placer != null)
         {
-          Point3d supportCenter = new Point3d((minX + maxX) / 2.0, (minY + maxY) / 2.0, 0.0);
-          double outwardAngle = System.Math.Atan2(anchor.Y - supportCenter.Y, anchor.X - supportCenter.X) * 180.0 / System.Math.PI;
+          double eMinX = supportPaperExt.MinPoint.X, eMaxX = supportPaperExt.MaxPoint.X;
+          double eMinY = supportPaperExt.MinPoint.Y, eMaxY = supportPaperExt.MaxPoint.Y;
+          double dL = anchor.X - eMinX, dR = eMaxX - anchor.X, dB = anchor.Y - eMinY, dT = eMaxY - anchor.Y;
+          double m = System.Math.Min(System.Math.Min(dL, dR), System.Math.Min(dB, dT));
+          double outwardAngle = (m == dB) ? -90.0 : (m == dT) ? 90.0 : (m == dL) ? 180.0 : 0.0;
           Point3d smartCenter, smartElbow;
           if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, out smartCenter, out smartElbow, out textLeftOfAnchor, out smartDiag))
           {
@@ -5040,7 +5045,7 @@ namespace PlantFlow_Support
         tr.AddNewlyCreatedDBObject(leader, true);
         if (smartPlaced)
           placer.Commit(anchor, elbow, textPoint, textWidth, textHeight);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop) + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " pipeSide=" + pipeSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pdx=" + this.FormatNumber(pdx) + " pdy=" + this.FormatNumber(pdy));
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop) + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " textSide=" + (textPoint.X < anchor.X ? "left" : "right") + " anchorX=" + this.FormatNumber(anchor.X) + " textX=" + this.FormatNumber(textPoint.X) + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " pipeSide=" + pipeSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pdx=" + this.FormatNumber(pdx) + " pdy=" + this.FormatNumber(pdy));
       }
       catch (System.Exception ex)
       {
@@ -7439,7 +7444,7 @@ namespace PlantFlow_Support
 
     private string FormatDimNumber(double value)
     {
-      return System.Math.Abs(value).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+      return System.Math.Abs(value).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private void EnsureIsoAnnotationResources(Database db, Transaction tr, out ObjectId layerId, out ObjectId textStyleId, out ObjectId dimStyleId)
