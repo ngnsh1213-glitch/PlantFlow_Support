@@ -71,11 +71,13 @@ namespace PlantFlow_Support
             Point3d candP2 = new Point3d(textLeft ? box.MinPoint.X : box.MaxPoint.X, baseY, 0.0);
             if (!Free(box, anchor, candP1, candP2, checkLeader, ownerTag)) continue;
             scanned++;
+            double angleW = System.Math.Max(0.0, ReadEnvDouble("PFS_NOTAB_CALLOUT_ANGLE_W", 0.3));
             double cost = System.Math.Max(0.0, box.MaxPoint.X - _costRefExt.MaxPoint.X)
               + System.Math.Max(0.0, _costRefExt.MinPoint.X - box.MinPoint.X)
               + System.Math.Max(0.0, box.MaxPoint.Y - _costRefExt.MaxPoint.Y)
               + System.Math.Max(0.0, _costRefExt.MinPoint.Y - box.MinPoint.Y)
-              + radius * 0.01;
+              + radius * 0.01
+              + System.Math.Abs(fanOffset) * angleW;
             if (cost < bestCost)
             {
               found = true;
@@ -84,7 +86,7 @@ namespace PlantFlow_Support
               bestLeft = textLeft;
               bestP1 = candP1;
               bestP2 = candP2;
-              bestDiag = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " out=" + outwardAngleDeg.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " actual=" + (outwardAngleDeg + fanOffset).ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " cost=" + cost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+              bestDiag = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " out=" + outwardAngleDeg.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " actual=" + (outwardAngleDeg + fanOffset).ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " angleW=" + angleW.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " cost=" + cost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
             }
           }
         }
@@ -94,7 +96,7 @@ namespace PlantFlow_Support
           p1 = bestP1;
           p2 = bestP2;
           textLeftOfAnchor = bestLeft;
-          diagnostic = bestDiag + " scanned=" + scanned;
+          diagnostic = bestDiag + " scanned=" + scanned + " obst=" + _obstacles.Count;
           return true;
         }
       }
@@ -119,7 +121,8 @@ namespace PlantFlow_Support
     {
       foreach (Obstacle obstacle in _obstacles)
       {
-        if (string.Equals(ownerTag ?? string.Empty, obstacle.Owner, System.StringComparison.Ordinal)) continue;
+        if (!string.IsNullOrEmpty(obstacle.Owner)
+          && string.Equals(ownerTag ?? string.Empty, obstacle.Owner, System.StringComparison.Ordinal)) continue;
         if (BoxOverlap(box, obstacle.Box)) return false;
         if (checkLeader && (SegIntersectsBox(anchor, p1, obstacle.Box) || SegIntersectsBox(p1, p2, obstacle.Box))) return false;
       }
@@ -194,6 +197,7 @@ namespace PlantFlow_Support
     private static ObjectId s_isoPipeId;
     private static Point3d s_isoPipeCenterWcs;
     private static bool s_isoPipeCenterValid;
+    private static double s_isoPipeRadiusModel;
     private static double s_isoRealWidth;
     private static double s_isoRealHeight;
     private static bool s_isoRealSizeValid;
@@ -1349,6 +1353,7 @@ namespace PlantFlow_Support
       s_isoPipeId = ObjectId.Null;
       s_isoPipeCenterWcs = Point3d.Origin;
       s_isoPipeCenterValid = false;
+      s_isoPipeRadiusModel = double.NaN;
       s_isoRealWidth = 0.0;
       s_isoRealHeight = 0.0;
       s_isoRealSizeValid = false;
@@ -2238,6 +2243,7 @@ namespace PlantFlow_Support
       s_isoPipeId = ObjectId.Null;
       s_isoPipeCenterWcs = Point3d.Origin;
       s_isoPipeCenterValid = false;
+      s_isoPipeRadiusModel = double.NaN;
       s_isoRealWidth = 0.0;
       s_isoRealHeight = 0.0;
       s_isoRealSizeValid = false;
@@ -4383,6 +4389,7 @@ namespace PlantFlow_Support
     {
       s_isoPipeCenterWcs = Point3d.Origin;
       s_isoPipeCenterValid = false;
+      s_isoPipeRadiusModel = double.NaN;
       if (db == null || pipeId == ObjectId.Null)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe center skip: db/id invalid id=" + pipeId);
@@ -4402,7 +4409,8 @@ namespace PlantFlow_Support
           {
             s_isoPipeCenterWcs = p0;
             s_isoPipeCenterValid = true;
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe center captured wcs=(" + this.FormatNumber(p0.X) + "," + this.FormatNumber(p0.Y) + "," + this.FormatNumber(p0.Z) + ") id=" + pipeId);
+            s_isoPipeRadiusModel = radius > 1e-6 ? radius : double.NaN;
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe center captured wcs=(" + this.FormatNumber(p0.X) + "," + this.FormatNumber(p0.Y) + "," + this.FormatNumber(p0.Z) + ") id=" + pipeId + " rModel=" + this.FormatNumber(s_isoPipeRadiusModel));
           }
           else
           {
@@ -4413,8 +4421,9 @@ namespace PlantFlow_Support
       }
       catch (System.Exception ex)
       {
-        s_isoPipeCenterWcs = Point3d.Origin;
-        s_isoPipeCenterValid = false;
+            s_isoPipeCenterWcs = Point3d.Origin;
+            s_isoPipeCenterValid = false;
+            s_isoPipeRadiusModel = double.NaN;
         PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe center 예외 id=" + pipeId + ": " + ex.GetType().Name + ": " + ex.Message);
       }
     }
@@ -4605,16 +4614,12 @@ namespace PlantFlow_Support
           ObjectId textStyleId;
           ObjectId dimStyleId;
           this.EnsureIsoAnnotationResources(db, tr, out layerId, out textStyleId, out dimStyleId);
-          double pipePaperRadius = double.NaN;
-          try
-          {
-            Point3d p0; Vector3d dir; double modelRadius;
-            PSUtil ps = Commands.PSUtil ?? new PSUtil();
-            if (this.TryGetPipeAxisFromId(tr, s_isoPipeId, ps, out p0, out dir, out modelRadius) && modelRadius > 1e-6)
-              pipePaperRadius = modelRadius * this.GetNotabViewportScale(vp);
-          }
-          catch (System.Exception ex)
-          { PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe paper radius 예외: " + ex.GetType().Name + ": " + ex.Message); }
+          double pipePaperRadius = s_isoPipeRadiusModel > 1e-6
+            ? s_isoPipeRadiusModel * this.GetNotabViewportScale(vp)
+            : double.NaN;
+          if (double.IsNaN(pipePaperRadius))
+            pipePaperRadius = this.TryGetNotabPipePaperRadiusFromDetailSolids(tr, db, vp, pipeCenterXPaper, pipeCenterYPaper);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe paper radius=" + this.FormatNumber(pipePaperRadius) + " source=" + (s_isoPipeRadiusModel > 1e-6 ? "model" : "detail-solid"));
           this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId, textStyleId, db);
           tr.Commit();
         }
@@ -4952,11 +4957,59 @@ namespace PlantFlow_Support
       {
         Extents3d box = new Extents3d(new Point3d(centerX - pipePaperRadius, centerY - pipePaperRadius, 0.0), new Point3d(centerX + pipePaperRadius, centerY + pipePaperRadius, 0.0));
         placer.AddObstacle(box, "pipe");
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe-obstacle count=1 center=(" + this.FormatNumber(centerX) + "," + this.FormatNumber(centerY) + ") r=" + this.FormatNumber(pipePaperRadius));
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe-obstacle box=(" + this.FormatNumber(box.MinPoint.X) + "," + this.FormatNumber(box.MinPoint.Y) + ")~(" + this.FormatNumber(box.MaxPoint.X) + "," + this.FormatNumber(box.MaxPoint.Y) + ") r=" + this.FormatNumber(pipePaperRadius));
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe-obstacle 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private double TryGetNotabPipePaperRadiusFromDetailSolids(Transaction tr, Database db, Viewport vp, double centerX, double centerY)
+    {
+      if (tr == null || db == null || vp == null || double.IsNaN(centerX) || double.IsNaN(centerY))
+        return double.NaN;
+      try
+      {
+        BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+        BlockTableRecord ms = bt == null ? null : tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+        if (ms == null)
+          return double.NaN;
+        double bestRadius = double.NaN;
+        double bestDistance = double.MaxValue;
+        foreach (ObjectId id in ms)
+        {
+          Solid3d solid = tr.GetObject(id, OpenMode.ForRead, false) as Solid3d;
+          if (solid == null)
+            continue;
+          Extents3d ext = solid.GeometricExtents;
+          Point3d[] corners = this.GetExtentsCorners(ext);
+          double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+          for (int i = 0; i < corners.Length; i++)
+          {
+            Point3d paper = this.NotabProjectWcsToPaper(vp, corners[i]);
+            minX = System.Math.Min(minX, paper.X); minY = System.Math.Min(minY, paper.Y);
+            maxX = System.Math.Max(maxX, paper.X); maxY = System.Math.Max(maxY, paper.Y);
+          }
+          double w = maxX - minX, h = maxY - minY;
+          if (w <= 1e-6 || h <= 1e-6 || System.Math.Abs(w - h) > System.Math.Min(w, h) * 0.2)
+            continue;
+          double candidateCenterX = (minX + maxX) / 2.0, candidateCenterY = (minY + maxY) / 2.0;
+          double distance = new Point3d(candidateCenterX, candidateCenterY, 0.0).DistanceTo(new Point3d(centerX, centerY, 0.0));
+          if (distance <= System.Math.Max(w, h) * 1.5 && distance < bestDistance)
+          {
+            bestDistance = distance;
+            bestRadius = System.Math.Min(w, h) / 2.0;
+          }
+        }
+        if (!double.IsNaN(bestRadius))
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe radius detail-solid r=" + this.FormatNumber(bestRadius) + " dist=" + this.FormatNumber(bestDistance));
+        return bestRadius;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe radius detail-solid 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return double.NaN;
       }
     }
 
@@ -5100,7 +5153,7 @@ namespace PlantFlow_Support
           else if (gd3Two && i == 0)
           {
             // GD3 납작기하: 좌측 1/4 지점의 수직재(앵글)를 지시, 텍스트 좌측 하단
-            anchorFx = this.GetEnvDouble("PFS_NOTAB_GD3_ANCHOR_FX0", 0.25, 0.0, 1.0);
+            anchorFx = this.GetEnvDouble("PFS_NOTAB_GD3_ANCHOR_FX0", 0.305, 0.0, 1.0);
             anchor = new Point3d(minX + width * anchorFx, minY + h * 0.5, 0.0);
             elbow = new Point3d(minX - offset, minY - offset, 0.0);
             leftHalf = true;
@@ -5143,10 +5196,16 @@ namespace PlantFlow_Support
             double dL = anchor.X - eMinX, dR = eMaxX - anchor.X, dB = anchor.Y - eMinY, dT = eMaxY - anchor.Y;
             double m = System.Math.Min(System.Math.Min(dL, dR), System.Math.Min(dB, dT));
             double outwardAngle = (m == dB) ? -90.0 : (m == dT) ? 90.0 : (m == dL) ? 180.0 : 0.0;
+            string dirKey = "PFS_NOTAB_DIR_" + notabTypePrefix + "_M" + i;
+            double requestedAngle = this.GetEnvDouble(dirKey, double.NaN, -360.0, 360.0);
+            bool directionFromEnv = !double.IsNaN(requestedAngle);
+            if (directionFromEnv)
+              outwardAngle = requestedAngle;
             Point3d smartCenter, smartElbow, smartFar;
             bool smartLeft;
             if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, minDx, string.Empty, out smartCenter, out smartElbow, out smartFar, out smartLeft, out smartDiag))
             {
+              smartDiag += " dirSrc=" + (directionFromEnv ? "env" : "auto") + " out=" + this.FormatNumber(outwardAngle);
               textPoint = smartCenter;
               elbow = smartElbow;
               leftHalf = smartLeft;
@@ -5319,9 +5378,15 @@ namespace PlantFlow_Support
           double dL = anchor.X - eMinX, dR = eMaxX - anchor.X, dB = anchor.Y - eMinY, dT = eMaxY - anchor.Y;
           double m = System.Math.Min(System.Math.Min(dL, dR), System.Math.Min(dB, dT));
           double outwardAngle = (m == dB) ? -90.0 : (m == dT) ? 90.0 : (m == dL) ? 180.0 : 0.0;
+          string dirKey = "PFS_NOTAB_DIR_" + this.GetSupportTypePrefix(s_isoSupportTag) + "_PIPE";
+          double requestedAngle = this.GetEnvDouble(dirKey, double.NaN, -360.0, 360.0);
+          bool directionFromEnv = !double.IsNaN(requestedAngle);
+          if (directionFromEnv)
+            outwardAngle = requestedAngle;
           Point3d smartCenter, smartElbow, smartFar;
           if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, minDx, "pipe", out smartCenter, out smartElbow, out smartFar, out textLeftOfAnchor, out smartDiag))
           {
+            smartDiag += " dirSrc=" + (directionFromEnv ? "env" : "auto") + " out=" + this.FormatNumber(outwardAngle);
             textPoint = smartCenter;
             elbow = smartElbow;
             smartPlaced = true;
