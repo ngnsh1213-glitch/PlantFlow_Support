@@ -8106,12 +8106,19 @@ namespace PlantFlow_Support
         NotabCalloutPlacer.RequiredSide side = anchor.X >= viewportCenterX
           ? NotabCalloutPlacer.RequiredSide.Right : NotabCalloutPlacer.RequiredSide.Left;
 
-        // 밸룬 아래 부재 코드(ANGLE A6 → A6). 표를 보지 않아도 규격을 알 수 있다.
+        // 밸룬 옆/아래 부재 코드(ANGLE A6 → A6). 표를 보지 않아도 규격을 알 수 있다.
+        // 아래 배치는 세로 공간을 원 지름만큼 더 먹으므로 기본은 옆(side)이다.
         string subLabel = this.GetNotabBalloonSubLabel(bomDesc);
+        bool subBelow = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_BALLOON_SUB"),
+          "below", System.StringComparison.OrdinalIgnoreCase);
         double subGap = subLabel.Length == 0 ? 0.0 : txt * 0.4;
-        double subH = subLabel.Length == 0 ? 0.0 : txt;
-        double boxH = radius * 2.0 + subGap + subH;
-        double boxW = System.Math.Max(radius * 2.0, subLabel.Length * txt * 0.7);
+        double subW = subLabel.Length == 0 ? 0.0 : subLabel.Length * txt * 0.7;
+        double boxH = subBelow
+          ? radius * 2.0 + subGap + (subLabel.Length == 0 ? 0.0 : txt)
+          : System.Math.Max(radius * 2.0, txt);
+        double boxW = subBelow
+          ? System.Math.Max(radius * 2.0, subW)
+          : radius * 2.0 + subGap + subW;
 
         Point3d center, p1, p2;
         bool left;
@@ -8123,10 +8130,13 @@ namespace PlantFlow_Support
           continue;
         }
 
-        // TryPlace는 상자 좌변/우변의 세로 중앙을 반환한다. 원은 상자 위쪽, 코드 문자는 그 아래에 둔다.
+        // TryPlace는 상자 좌변/우변의 세로 중앙을 반환한다.
+        // below = 원이 위, 코드가 아래. side = 원이 앵커쪽, 코드가 바깥쪽(리더를 짧게 유지).
         double boxCenterX = left ? center.X - boxW / 2.0 : center.X + boxW / 2.0;
         double boxTopY = center.Y + boxH / 2.0;
-        Point3d ballCenter = new Point3d(boxCenterX, boxTopY - radius, 0.0);
+        Point3d ballCenter = subBelow
+          ? new Point3d(boxCenterX, boxTopY - radius, 0.0)
+          : new Point3d(left ? center.X - radius : center.X + radius, center.Y, 0.0);
         // 밸룬 리더는 꺾지 않는다. 앵커에서 원주까지 직선 1개.
         Vector3d toCenter = ballCenter - anchor;
         if (toCenter.Length < 1e-9) toCenter = Vector3d.XAxis;
@@ -8156,8 +8166,19 @@ namespace PlantFlow_Support
             MText sub = new MText();
             sub.Contents = subLabel;
             sub.TextHeight = txt;
-            sub.Attachment = AttachmentPoint.TopCenter;
-            sub.Location = new Point3d(ballCenter.X, ballCenter.Y - radius - subGap, 0.0);
+            if (subBelow)
+            {
+              sub.Attachment = AttachmentPoint.TopCenter;
+              sub.Location = new Point3d(ballCenter.X, ballCenter.Y - radius - subGap, 0.0);
+            }
+            else
+            {
+              // 코드는 앵커 반대편(바깥)으로. 리더가 원을 지나 문자를 통과하지 않는다.
+              sub.Attachment = left ? AttachmentPoint.MiddleRight : AttachmentPoint.MiddleLeft;
+              sub.Location = new Point3d(
+                left ? ballCenter.X - radius - subGap : ballCenter.X + radius + subGap,
+                ballCenter.Y, 0.0);
+            }
             if (textStyleId != ObjectId.Null) sub.TextStyleId = textStyleId;
             if (layerId != ObjectId.Null) sub.LayerId = layerId;
             sub.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)3);
