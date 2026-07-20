@@ -50,7 +50,8 @@ namespace PlantFlow_Support
     {
       string normalized = (designStd ?? string.Empty).Trim();
       bool supported = SupportedDesignStandards.Any(value => string.Equals(value, normalized, StringComparison.OrdinalIgnoreCase));
-      PSUtil.Log("StandardSupport design standard value='" + normalized + "' supported=" + supported);
+      // 진단은 파일 로그가 표준이다. PSUtil.Log는 명령행 출력이라 사후 검증이 불가능하다.
+      PlantOrthoView.FileDiag("STANDARDSUPPORT design standard value='" + normalized + "' supported=" + supported);
       return supported;
     }
     public void StandardInformation(string standard_name)
