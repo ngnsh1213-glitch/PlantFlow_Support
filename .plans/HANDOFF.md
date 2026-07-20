@@ -3,91 +3,92 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 94
+- **cycle**: 95
 - **status**: ready
 - **issued_at**: 2026-07-20
-- **title**: 오쏘 BOM·밸룬 자산의 무탭 이식 — **계측 전용**(작도 변경 금지)
-- **작업 경로**: `d:\PlantFlow\PlantFlow_Support\PlantFlow_Support\`
-- **계획서**: `d:\PlantFlow\PlantFlow_Support\.plans\plan_notab_bom_balloon_measure_20260720.md` (**먼저 정독**)
+- **title**: 무탭 BOM 표 + 밸룬 **신규 설계**(이식 아님)
+- **작업 경로**: `d:\PlantFlow\PlantFlow_Support\PlantFlow_Support\Core\Commands.cs`
+- **계획서**: `d:\PlantFlow\PlantFlow_Support\.plans\plan_notab_bom_balloon_design_20260720.md` (**먼저 정독**)
 - **핸드오프 위치**: `d:\PlantFlow\PlantFlow_Support\.plans\HANDOFF.md`
 
-## 이번 사이클의 성격
-**계측만 한다. 표·밸룬 작도에 착수하지 않는다.**
-RC 트랙에서 추정으로 3연속 빗나간 전례가 있어, 이식 전 의존성을 실측으로 굳힌다.
-산출물은 로그와 REPORT의 **이식 가능/불가 판정**이다.
+## 전제 (cycle 94 계측 확정, 재조사 금지)
+- **부재 밸룬은 오쏘에도 없다** — `bom-item item='F1' branch=NONE anchorExact=True`.
+  생성되는 리더는 `PLN`/`BOP` 둘뿐. **이식이 아니라 신규 설계다.**
+- BOM 행은 원본 DB에서 정상 취득(6칸 균일, `HANTEC`·`PFS STANDARD` 모두).
+- `TaggingPoints` = `F1`/`F2`/`P1_0` … WCS 확보. **`p1`은 `p0+(50,50,z=0)` 방향 힌트, 실좌표 아님.**
+- BOM 표 영역 `(640.5,84.5)~(820.5,108.5)`, 행당 8. **뷰포트(30.5~640.5) 바깥 우측**.
+- `BOMs`는 Plant 컨텍스트 필수 → **side DB 호출 불가**.
+- **BOM이 부재를 구분한다**: RC3 `F1(500)`/`F2(600)`은 같은 `ANGLE A6`지만 길이가 다른 별개 행.
+  현재 무탭은 designation 중복 제거로 하나만 그린다.
 
-## 재조사 금지 (확정 사실)
-- **무탭은 MLeader를 폐기했다**(cycle 79~82 실측 → 83). `content.Location` 무시 /
-  `SetTextAttachmentType` 양방향 호출해도 렌더 바이트 동일 / `TextLocation` 이동해도 끝단 불변.
-  → 오쏘 밸룬(`CIRCLE_ST` + `PSUtil.CreateMLeader`)은 **그대로 이식 불가**. 데이터 계층만 재사용.
-- 오쏘 PLN/BOP 콜아웃은 **이식 불필요** — 무탭에 직접 작도로 이미 있다(가져오면 퇴행).
-- `BOMs`는 **원본 Plant 컨텍스트 필수**(`SupportHelper.GetSupportParameters`, `dl_manager.GetProperties`,
-  `PSUtil`의 프로젝트/DataLinksManager 의존) → **side DB에서 호출 불가.**
+## A. BOM/앵커 스냅샷 (원본 → side DB)
+- 캡처 지점 = **`Commands.cs:7790`**(cycle 94 계측 코드 자리). `CloneSelectionToSideDatabase()`(1444) 이전.
+- 보관 = **명시 DTO 정적 목록**. `List<string[]>`를 그대로 들고 다니지 말 것
+  (framework 6칸 / attachment 9칸 불균일).
+```csharp
+NotabBomRow { Item, Category, Description, Material, QuantityOrLength, Remark }
+NotabBalloonAnchor { Item, WcsP0 }
+```
+- **초기화는 `RunNotabDetailPipeline()` 진입부(1389)에 함께 추가** — 배치 처리 누출 방지.
+  기존 `MEASURE state-reset` 로그에 두 목록 개수도 포함시킬 것.
 
-## ★M0. 전제 검증 (최우선)
-`CreateAnnotations()`의 밸룬 루프는 **`P*`/`R*` ITEM만 처리하고 `F*` 분기가 없다**
-(`OrthoViewportManager.cs:855`).
-→ **부재(F1~F4) 밸룬이 실제로 생성되는지부터 판정**한다.
-- 오쏘 실행 시 **ITEM별 처리 결과와 실제 생성 엔티티를 분리 기록**.
-- "이식하면 된다"가 아니라 **"애초에 없을 수도 있다"**를 먼저 확인한다.
-- 없다면 다음 사이클은 이식이 아니라 **신규 설계**가 된다.
+## B. BOM 표 작도 (`Table` 사용)
+무탭 `layoutBtr`은 정상 페이퍼 BTR이고 `detailDb`가 `WorkingDatabase`라 `Table` 사용 가능.
+직접 선/문자 작도는 병합·정렬·행증가·extents 재구현이라 이득 없음.
+- `TableStyle = db.Tablestyle` → **`GenerateLayout()` 먼저** → `AppendEntity`.
+- 시작점·열폭·행높이·문자는 오쏘 실측값에서 출발: `(640.5,84.5)`, `15/30/40/40/30/25`, `8`, `3`.
+- **`FlowDirection`이 행 증가 방향을 정한다. "위로 자란다"는 라이브 extents로 재확인**할 것.
+- 표 `GeometricExtents`를 구해 **placer 장애물로 등록**(안전장치. 표는 뷰포트 밖이라 실질 충돌은 없음).
+- 행 수가 많을 때 타이틀블록 충돌 여부를 로그로 남길 것.
 
-## M1. BOM 데이터 캡처 지점 실측
-- 캡처 지점 = `AutoIncludeRelatedParts()` **직후**, `CloneSelectionToSideDatabase()` **직전**
-  (`Commands.cs:1417` 부근). 그 시점에 BOM 행을 얻을 수 있는지 확인하고 **전량 로그**.
-- 보관 형태는 `string[]` 대신 **명시 DTO** 권장(framework 6칸 / attachment 9칸 혼합이라 위험):
-  `Item·Ancillary·Description·Material·QuantityOrLength·Remark` + attachment `BOP·COP·LineNumber`.
-- `s_isoDesignStd`는 cycle 93에서 실제 값 사용 확인됨 — 그대로 활용.
+## C. 밸룬 작도 (신규, MLeader 금지)
+`AppendNotabDirectCallout` **재사용 금지**(MText 폭·밑줄·3정점 리더 전제).
+별도 어댑터 경로로 만든다:
+```
+TryPlace(anchor, side, 2r, 2r, ...)      // 원의 외접 사각형으로 배치
+→ 반환 중심 = 원 중심
+→ anchor → elbow → 원주 접점 Leader 직접 생성
+→ Circle + 중앙정렬 문자(번호)
+→ CommitBalloon(외접 사각형, 리더 2선분)
+```
+- ★기존 `Commit()`은 좌우를 `textCenter.X < anchor.X`로 추론한다(`Commands.cs:124`).
+  밸룬은 **`CommitBalloon` 별도 메서드로 명시적 bbox·리더 등록**.
+- 반지름·문자 크기는 env(`PFS_NOTAB_BALLOON_R` 등), 기본은 글자 높이 기준.
+- 좌우 규칙 R1~R4와 콜아웃 여백(`PFS_NOTAB_CALLOUT_PAD`)은 그대로 적용.
 
-## M2. `AttachmentList` 대응물 — 무탭엔 없다
-팔레트 선택 처리에서만 구성된다(`PaletteTab.Events.cs:171~300`):
-`SupportType=ATTACHMENT` + DataLinks 속성 + `Part.GetPorts()` → `AttachmentInfo`,
-`FindNearestSupport()`로 소유 framework 배정 → `R1`/`R2` 명명.
-무탭 `AutoIncludeRelatedParts()`는 **ObjectId만 추가**한다.
-→ **원본 DB 단계에서 캡처 가능한지 실측**하고 로그:
-attachment ObjectId·`Item`/`Name`(R1…)·`Description`·`Size`·`BOP`·`COP`·`LineNumber`·
-포트 전량 WCS·`PortZero` 후보·소유자 배정 결과.
-**배정 실패 / 포트 없음 / 동일 거리 경쟁도 반드시 로그.**
-- `R<n>` 순번이 **선택·열거 순서 의존**이다. 재실행/다중 attachment에서 **순서 안정성 측정**
-  (흔들리면 BOM 번호와 밸룬 번호가 어긋난다).
+## D. 앵커 가드 (★자동 보장 아님)
+좌표 변환은 보장되나 **시각적 유효성은 보장되지 않는다**:
+- 무탭은 side DB 솔리드를 **clip-box로 실제 절단**(`Commands.cs:3779`). F1/F2 `p0`가 범위 안이라는
+  불변식이 코드에 없다. cycle 92의 S2 검증은 **좌표 변환 검증**이지 F 키 시각 검증이 아니다.
+- `NotabProjectWcsToPaper`는 예외 시 `Point3d.Origin`을 반환(`4608`)해 **정상값과 구분 불가**
+  → **`TryProject...` 형태로 성공 여부를 분리**할 것.
+- 키마다 가드 후 실패 시 **밸룬 생략 + 사유 로그**:
+  `balloon-skip reason=projection-failed|outside-viewport|outside-support|no-anchor`
 
-## M3. 밸룬 앵커 원천 실측
-- **`S<n> → F<n>` 일반 규칙은 코드에 없다.** 관계는
-  `ITEM F<n> → 타입별 TaggingPoints 규칙 → PPorts[index]`
-  (예: GD2 `F1←PPorts[2]`, `F2←PPorts[1]`, `F3←PPorts[3]`, `F4←PPorts[4]`).
-  **포트 이름 매핑을 추측하지 말 것.**
-- 원본 단계에서 `StandardSupport.StandardInformation(ShortDescription)`을 실행해
-  **`TaggingPoints` 자체를 WCS로 스냅샷**하고, `NotabProjectWcsToPaper` 투영 결과와 함께 로그.
-- `TaggingPoints` 키 집합 ↔ BOM `ITEM` 집합의 **차집합**을 타입별로 기록:
-  `BOM-only` / `anchor-only` / 수량 확장키(`P1_0`).
-- `TaggingPoints`는 **두 점**이다. 첫 점=지시점, 둘째 점=리더 방향 힌트.
-  무탭 직접 `Leader`에서 둘째 점을 그대로 쓸지 방향 힌트로만 쓸지 판단 근거를 남길 것.
-- `NotabProjectWcsToPaper()`는 투영 실패 시 **원점 폴백**(`Commands.cs:4578`).
-  **원점 폴백 건수를 기록** — 밸룬 작도 금지 조건이 된다.
-
-## M4. 표 배치 공간 실측
-- `CreateBOMTable`은 좌표가 **절대 하드코딩**: 위치 `(640.5, 84.5, 0)`,
-  열 폭 `15/30/40/40/30/25`, 행 높이 `8`, 문자 `3` (`OrthoViewportManager.cs:729`).
-- 무탭 뷰포트 실측이 `(30.5,84.5)~(640.5,573.5)`라 **표 시작 x가 뷰포트 우측 끝과 정확히 일치**한다.
-  숫자 재사용 가능성은 있으나 **같은 템플릿·가용영역일 때만**이다.
-- **행 수별 최종 extents**와 타이틀블록·뷰포트·기존 치수·콜아웃과의 **겹침을 계측**.
-- 표는 `NotabCalloutPlacer` **장애물로 등록해야 함**을 전제로 필요한 좌표를 남길 것.
-
-## M5. 상태 수명 검증
-BOM/attachment 캡처는 `s_iso*` 정적 상태와 같은 수명이라 **배치 처리(`PFSNOTABBATCH`)에서 누출 위험**.
-서포트별 불변 스냅샷을 만들고 **다음 대상 시작 시 초기화되었는지 로그로 검증**.
+## E. 정책 결정 (구현에 반영)
+1. **부재 텍스트 콜아웃 vs 밸룬** — **기본값 = 밸룬로 대체**(부재는 번호만, 규격은 표에서 읽음).
+   `PFS_NOTAB_MEMBER_TEXT=1`이면 기존 텍스트 콜아웃도 함께 그림(공존).
+   **사용자 라이브 확인 후 확정**하므로 두 경로 모두 동작해야 한다.
+2. **한 BOM item ↔ 여러 앵커**(`P1_0`, `P1_1`) — **앵커마다 밸룬 1개**, 번호는 BOM `Item`(`P1`).
+   중복 번호가 여러 개 찍히는 것이 제작도 관례에 맞다.
+3. **BOM에만 있고 앵커가 없는 항목**(`J1` SET ANCHOR 등) — **밸룬 생략, 표에는 유지**.
+4. **작도 순서** = 치수 → BOM 표(장애물 등록) → 파이프 → 부재 → U-bolt → **밸룬**.
+   기존 확정 배치의 회귀를 최소화한다.
 
 ## 완료 기준
 1. 빌드 성공(`dev_test.bat`은 사용자 수동 실행).
-2. `bom-measure` / `attachment-measure` / `balloon-measure` / `bomtable-space` 로그 생성.
-3. REPORT에 **M0 판정**(F* 밸룬 실재 여부)과 항목별 **이식 가능/불가 + 근거 수치**.
-4. **무탭·오쏘 회귀 없음** — 계측 로그 외 동작 변경이 없어야 한다.
+2. RC1/RC2/RC3·GD1/GD2/GD3에서 **BOM 표 생성**, 행 수가 BOM 행과 일치.
+3. 밸룬이 `F1`/`F2`/`P1` 앵커에 생성되고 서로·기존 콜아웃과 **겹치지 않음**.
+4. 표가 타이틀블록·뷰포트와 충돌하지 않음.
+5. **기존 배치 회귀 없음**(cycle 88 R1~R4 · cycle 92 포트 앵커 판정 유지).
+6. `balloon-skip` 사유가 로그로 구분됨.
 
 ## 하지 말 것
-- 표·밸룬 **작도 착수**. MLeader 기반 코드 이식. 오쏘 PLN/BOP 콜아웃 이식.
-- 무탭 배치 규칙(cycle 88 R1~R4)·포트 앵커(cycle 92)·표준 판정(cycle 93) 변경.
+- MLeader 사용. 오쏘 PLN/BOP 리더 이식(무탭에 이미 있음).
+- side DB에서 `BOMs` 조회(Plant 컨텍스트 없음).
+- cycle 88 R1~R4 / cycle 92 포트 앵커 / cycle 93 표준 판정 변경.
 
 ## 자문 출처
-**Codex MCP**(2026-07-20, read-only) — M0 전제 붕괴 발견(`F*` 분기 부재), `S<n>→F<n>` 매핑 부재 정정,
-`AttachmentList` 구성 경로와 무탭 대응물 부재, `BOMs`의 Plant 컨텍스트 의존과 캡처 지점,
-표 좌표 하드코딩·장애물 등록 필요, `R<n>` 순서 의존·원점 폴백·정적 상태 누출 위험. Gemini 미호출.
+**Codex MCP**(2026-07-20, read-only) — 캡처 지점 정정(7790), `Table` 사용 가능 판정,
+원형 밸룬 어댑터 설계와 `Commit()` 좌우 추론 결함, F1/F2 시각적 보장 부재(clip·은선),
+`Point3d.Origin` 폴백 미구분, BOM 행 길이 불균일, item↔앵커 다대일. Gemini 미호출.
