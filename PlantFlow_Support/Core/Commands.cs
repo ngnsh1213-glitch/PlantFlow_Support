@@ -4661,7 +4661,7 @@ namespace PlantFlow_Support
             pipePaperRadius = this.TryGetNotabPipePaperRadiusFromDetailSolids(tr, db, vp, pipeCenterXPaper, pipeCenterYPaper);
           PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe paper radius=" + this.FormatNumber(pipePaperRadius) + " source=" + (s_isoPipeRadiusModel > 1e-6 ? "model" : "detail-solid"));
           Extents3d viewportPaperExt = new Extents3d(new Point3d(vp.CenterPoint.X - vp.Width / 2.0, vp.CenterPoint.Y - vp.Height / 2.0, 0.0), new Point3d(vp.CenterPoint.X + vp.Width / 2.0, vp.CenterPoint.Y + vp.Height / 2.0, 0.0));
-          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, viewportPaperExt, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId, textStyleId, db, memberBoxes);
+          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, viewportPaperExt, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId, textStyleId, db, memberBoxes, vp);
           tr.Commit();
         }
       }
@@ -4818,7 +4818,7 @@ namespace PlantFlow_Support
       return true;
     }
 
-    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, Extents3d viewportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double pipePaperRadius, double realW, double realH, ObjectId dimStyleId, ObjectId layerId, ObjectId textStyleId, Database db, System.Collections.Generic.List<NotabMemberBox> memberBoxes)
+    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, Extents3d viewportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double pipePaperRadius, double realW, double realH, ObjectId dimStyleId, ObjectId layerId, ObjectId textStyleId, Database db, System.Collections.Generic.List<NotabMemberBox> memberBoxes, Viewport vp)
     {
       if (tr == null || layoutBtr == null)
         return;
