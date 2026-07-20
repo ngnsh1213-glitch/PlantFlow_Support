@@ -2,6 +2,53 @@
 
 _최종 갱신: 2026-07-20 (cycle93 StandardSupport 개명·DesignStd 외부화 집도 완료, 라이브 검증 대기)_
 
+## ★★★ cycle 93 종결 — StandardSupport 개명 + DesignStd 외부화 (2026-07-20, 전 항목 검증)
+
+### 결과
+- `HANTEC` 클래스·파일·정적호출 89곳 → **`StandardSupport`**. 빌드 1회 통과.
+- 리터럴 `"HANTEC"` 4곳은 **개별 처리**(일괄 치환 금지 지시 준수). 남은 것은
+  지원 목록·빈값 폴백·주석뿐. `span_table_JIS.json`의 `WELCRON HANTEC`(출처 데이터) 보존.
+- **표준 판정 단일 지점** = `StandardSupport.IsSupportedStandard()`.
+  목록 `{ "PFS STANDARD", "HANTEC" }`, 대소문자·공백 무시. **고객사 표준은 이 목록에만 추가.**
+- 무탭은 `GetNotabBomDesignStd()`로 **실제 `s_isoDesignStd`** 전달, 빈 값이면 legacy 폴백+로그.
+
+### 라이브 검증 (전부 통과)
+```
+value='HANTEC'       supported=True   (RC1-001 등)
+value='PFS STANDARD' supported=True   (GD1-003)
+```
+- **같은 도면에 구/신 값이 섞여도 둘 다 통과** → 출하 카탈로그 전환 시 기존 프로젝트 안 깨짐.
+- `DesignStd empty; legacy fallback` 로그 없음 = 폴백 미발동, 실제 값 사용 중.
+- 무탭 RC1~3·GD1~3 도면 회귀 없음(사용자 판정).
+- **오쏘 BOM 표 정상 생성 확인** — `F1 FRAMEWORK / ANGLE A7 / ASTM A36 / 445`,
+  타이틀 `PIPE SUPPORT DETAIL FOR GD1-003`.
+
+### ★자문(Codex)이 찾은 독립 결함 — 개명과 무관하게 오쏘 주석이 죽어 있었다
+`CreateAnnotations()`가 `ContentsByDesignStd()`를 호출하지 않은 채 `boMs.StandardName`을
+`StandardInformation()`에 넘겨 **그 값이 `null`**이었다 → 타입별 `TaggingPoints` 미생성.
+`HANTEC` 객체에서도 마찬가지였다. **헬퍼만 교체했으면 "고쳤는데 여전히 주석 없음"으로 끝났을 건**.
+→ `OrthoViewportManager.cs:786`에 BOM 초기화 추가로 해소.
+
+### 후속 교정 (Claude)
+- `PSUtil.Log`는 `Editor.WriteMessage`(명령행)이라 `pfs_diag.log`에 안 남아 사후 검증 불가였다.
+  → **`PlantOrthoView.FileDiag`로 교체**(`6d71127`). 진단은 파일 로그가 이 프로젝트 표준.
+
+### 커밋
+`d5b237f`(Codex 개명·외부화) · `6d71127`(Claude 진단 경로)
+계획서 `.plans/plan_standard_support_rename_20260720.md`
+
+### 제품 맥락 (확정)
+Python 서포트 스크립트 + PFS **한 패키지 판매**. 기본 스탠다드 = HANTEC 규격집을 개명한
+`PIPE SUPPORT STANDARD`, **출하 `DesignStd` = `PFS STANDARD`**. 고객사 표준은 회사명으로 추가.
+타입 메서드(`RC1()`/`GD1()`) **구조 분리는 두 번째 표준이 실제로 올 때**(현재 보류).
+
+### 다음 — ★오쏘 주석 자산을 무탭 엔진으로 통합 (사용자 방향 제시)
+오쏘에서 BOM 표가 나오는 것을 확인했으므로, 이 자산을 무탭 상세도에 합친다.
+무탭은 이미 치수·라인넘버/BOP 콜아웃·부재 콜아웃·U-bolt 콜아웃을 갖췄고,
+**남은 것은 BOM 표 + 밸룬(F1~F4 마크 ↔ TaggingPoints)**이다. `TODO.md`의 N4 항목.
+
+---
+
 ## ★★★ cycle 92 종결 — RC 패밀리 완료 (2026-07-20, 사용자 "RC 타입 이상없음 종결" + "GD 회귀 없음")
 
 ### 결론: 추정 기하 → 실측 포트로 전환하며 RC 트랙이 끝났다.
