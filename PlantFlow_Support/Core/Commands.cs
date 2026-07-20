@@ -7974,6 +7974,8 @@ namespace PlantFlow_Support
         table.TableStyle = db.Tablestyle;
         table.SetSize(s_isoBomRows.Count + 2, colW.Length);
         table.SetRowHeight(rowH);
+        // 행 증가 방향. 기본값이면 아래로 자라 타이틀블록에 묻힌다(라이브 실측 ext=(...,36.5)~(...,84.5)).
+        table.FlowDirection = (FlowDirection)1;
         for (int c = 0; c < colW.Length; c++)
           table.Columns[c].Width = colW[c];
 
