@@ -303,7 +303,7 @@ label_59:
       string str1 = PSUtil.MetricImperial(this.Properties["Size"]);
       string str2 = "-A" + Math.Ceiling(num1 + num2).ToString();
       string str3 = "-E" + this.GetEParam(2);
-      string str4 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str4 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4;
     }
 
@@ -377,7 +377,7 @@ label_59:
           435.0
         }
       };
-      double num1 = Convert.ToDouble(HANTEC.DetailProfile(this.SupportParams["BI"]).Split('x')[1]);
+      double num1 = Convert.ToDouble(StandardSupport.DetailProfile(this.SupportParams["BI"]).Split('x')[1]);
       double num2 = 75.0;
       double num3 = 10.0;
       double num4 = Convert.ToDouble(this.SupportParams["F1"]);
@@ -388,7 +388,7 @@ label_59:
       string str3 = "-B" + Math.Ceiling(dictionary[supportParam] * 2.0 + num1 * 2.0).ToString();
       string str4 = "-C" + dictionary[supportParam].ToString();
       string str5 = "-E" + this.GetEParam(0);
-      string str6 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str6 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5 + str6;
     }
 
@@ -400,7 +400,7 @@ label_59:
       string str1 = PSUtil.MetricImperial(this.Properties["Size"]);
       string str2 = "-A" + Math.Ceiling(num1 + num2).ToString();
       string str3 = "-E" + this.GetEParam(3);
-      string str4 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str4 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4;
     }
 
@@ -408,7 +408,7 @@ label_59:
     {
       string supportParam1 = this.SupportParams["BI"];
       string supportParam2 = this.SupportParams["TY"];
-      double num1 = Convert.ToDouble(HANTEC.DetailProfile(supportParam1).Split('x')[0]);
+      double num1 = Convert.ToDouble(StandardSupport.DetailProfile(supportParam1).Split('x')[0]);
       double num2 = Convert.ToDouble(this.SupportParams["A"]);
       double a = Convert.ToDouble(this.SupportParams["F2"]);
       Convert.ToInt32(this.SupportParams["Dn"]);
@@ -418,7 +418,7 @@ label_59:
       string str2 = "-A" + Math.Ceiling(num2 + num3).ToString();
       string str3 = "-H" + Math.Ceiling(a).ToString();
       string str4 = "-E" + this.GetEParam(2);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       if (supportParam2 == "-2" || supportParam2 == "-4")
         str2 = "-A" + Math.Ceiling(num2 + num3 - num1).ToString();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
@@ -428,7 +428,7 @@ label_59:
     {
       string supportParam1 = this.SupportParams["BI"];
       string supportParam2 = this.SupportParams["TY"];
-      double num1 = Convert.ToDouble(HANTEC.DetailProfile(supportParam1).Split('x')[0]);
+      double num1 = Convert.ToDouble(StandardSupport.DetailProfile(supportParam1).Split('x')[0]);
       double num2 = Convert.ToDouble(this.SupportParams["A"]);
       double a = Convert.ToDouble(this.SupportParams["F2"]);
       Convert.ToInt32(this.SupportParams["Dn"]);
@@ -438,7 +438,7 @@ label_59:
       string str2 = "-A" + Math.Ceiling(num2 + num3).ToString();
       string str3 = "-H" + Math.Ceiling(a).ToString();
       string str4 = "-E" + this.GetEParam(2);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       if (supportParam2 == "-2" || supportParam2 == "-4")
         str2 = "-A" + Math.Ceiling(num2 + num3 - num1).ToString();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
@@ -457,7 +457,7 @@ label_59:
       string str3 = "-H1" + Math.Ceiling(a1).ToString();
       string str4 = "-H2" + Math.Ceiling(a2).ToString();
       string str5 = "-E" + this.GetEParam(3);
-      string str6 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str6 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5 + str6;
     }
 
@@ -474,7 +474,7 @@ label_59:
       string str3 = "-H1" + Math.Ceiling(a1).ToString();
       string str4 = "-H2" + Math.Ceiling(a2).ToString();
       string str5 = "-E" + this.GetEParam(3);
-      string str6 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str6 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5 + str6;
     }
 
@@ -492,7 +492,7 @@ label_59:
       if (supportParam == "-2")
         str3 = "-H" + Math.Ceiling(a - 100.0).ToString();
       string str4 = "-E" + this.GetEParam(2);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
     }
 
@@ -511,7 +511,7 @@ label_59:
       if (supportParam == "-2")
         str3 = "-H" + Math.Ceiling(a - 100.0).ToString();
       string str4 = "-E" + this.GetEParam(2);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
     }
 
@@ -529,7 +529,7 @@ label_59:
       if (supportParam == "-2")
         str3 = "-H" + Math.Ceiling(a - 100.0).ToString();
       string str4 = "-E" + this.GetEParam(2);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
     }
 
@@ -549,7 +549,7 @@ label_59:
       if (supportParam == "-2")
         str4 = "-H" + Math.Ceiling(a2 - 100.0).ToString();
       string str5 = "-E" + this.GetEParam(2);
-      string str6 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str6 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5 + str6;
     }
 
@@ -562,7 +562,7 @@ label_59:
       string str2 = "-A" + Math.Ceiling(num1 + num2).ToString();
       string str3 = "-E" + this.GetEParam(1);
       string str4 = "-F" + this.Properties["Position Z"];
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str3 + str4 + str2 + str5;
     }
 
@@ -666,7 +666,7 @@ label_59:
       string str2 = "-A" + Math.Ceiling(a).ToString();
       string str3 = "-B" + Math.Ceiling(num1 + num2).ToString();
       string str4 = "-E" + this.GetEParam(0, delta);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
     }
 
@@ -679,7 +679,7 @@ label_59:
       string str1 = PSUtil.MetricImperial(this.Properties["Size"]);
       string str2 = "-A" + Math.Ceiling(num1 + num2).ToString();
       string str3 = "-E" + this.GetEParam(1);
-      string str4 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str4 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4;
     }
 
@@ -700,7 +700,7 @@ label_59:
       num3 = Math.Ceiling(a);
       string str3 = "-H" + num3.ToString();
       string str4 = "-E" + this.GetEParam(no);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
     }
 
@@ -717,7 +717,7 @@ label_59:
     {
       int int32 = Convert.ToInt32(this.SupportParams["Dn"]);
       double a = Convert.ToDouble(this.SupportParams["A"]);
-      string str1 = PSUtil.MetricImperial(HANTEC.TrunnionProfile(int32).ToString());
+      string str1 = PSUtil.MetricImperial(StandardSupport.TrunnionProfile(int32).ToString());
       string property = this.Properties["Tag"].Replace("?", "");
       string str2 = PSUtil.MetricImperial(this.Properties["Size"]);
       string str3 = "-H" + Math.Ceiling(a).ToString();
@@ -730,7 +730,7 @@ label_59:
     {
       int int32 = Convert.ToInt32(this.SupportParams["Dn"]);
       double a = Convert.ToDouble(this.SupportParams["A"]);
-      string str1 = PSUtil.MetricImperial(HANTEC.TrunnionProfile(int32).ToString());
+      string str1 = PSUtil.MetricImperial(StandardSupport.TrunnionProfile(int32).ToString());
       string property = this.Properties["Tag"].Replace("?", "");
       string str2 = PSUtil.MetricImperial(this.Properties["Size"]);
       string str3 = "-A" + Math.Ceiling(a).ToString();
@@ -752,7 +752,7 @@ label_59:
       dictionary.Add(300, new double[2]{ 190.0, 300.0 });
       int int32 = Convert.ToInt32(this.SupportParams["Dn"]);
       double a1 = Convert.ToDouble(this.SupportParams["A"]);
-      string str1 = PSUtil.MetricImperial(HANTEC.TrunnionProfile(int32).ToString());
+      string str1 = PSUtil.MetricImperial(StandardSupport.TrunnionProfile(int32).ToString());
       double num = Convert.ToDouble(this.SupportParams["T"]);
       double a2 = num + dictionary[int32][0];
       double a3 = num + dictionary[int32][1];
@@ -793,7 +793,7 @@ label_59:
       string str5 = "";
       if (this.SupportParams.ContainsKey("BI"))
       {
-         var parts = HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ');
+         var parts = StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ');
          if(parts.Length > 0) str5 = "-" + ((IEnumerable<string>)parts).Last<string>();
       }
 
@@ -820,7 +820,7 @@ label_59:
       string str2 = "-A" + Math.Ceiling(num2 + num1).ToString();
       string str3 = "-H" + Math.Ceiling(a).ToString();
       string str4 = "-E" + this.GetEParam(2);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
     }
 
@@ -835,7 +835,7 @@ label_59:
       string str2 = "-A" + Math.Ceiling(num2 + num1).ToString();
       string str3 = "-H" + Math.Ceiling(a).ToString();
       string str4 = "-E" + this.GetEParam(2);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
     }
 
@@ -856,7 +856,7 @@ label_59:
       num3 = Math.Ceiling(a);
       string str3 = "-H" + num3.ToString();
       string str4 = "-E" + this.GetEParam(no);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
     }
 
@@ -873,7 +873,7 @@ label_59:
       string str3 = "-H" + Math.Ceiling(a1).ToString();
       string str4 = "-B" + Math.Ceiling(a2).ToString();
       string str5 = "-E" + this.GetEParam(5);
-      string str6 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str6 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str5 + str6;
     }
 
@@ -888,7 +888,7 @@ label_59:
       string str2 = "-A" + Math.Ceiling(num2 + num1).ToString();
       string str3 = "-H" + Math.Ceiling(a).ToString();
       string str4 = "-E" + this.GetEParam(5);
-      string str5 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str5 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5;
     }
 
@@ -901,7 +901,7 @@ label_59:
       string str1 = PSUtil.MetricImperial(this.Properties["Size"]);
       string str2 = "-A" + Math.Ceiling(num2 + num1).ToString();
       string str3 = "-E" + this.GetEParam(5);
-      string str4 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str4 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4;
     }
 
@@ -914,7 +914,7 @@ label_59:
       string str1 = PSUtil.MetricImperial(this.Properties["Size"]);
       string str2 = "-A" + Math.Ceiling(num2 + num1).ToString();
       string str3 = "-E" + this.GetEParam(3);
-      string str4 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str4 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4;
     }
 
@@ -931,7 +931,7 @@ label_59:
       string str3 = "-H1" + Math.Ceiling(a1).ToString();
       string str4 = "-H2" + Math.Ceiling(a2).ToString();
       string str5 = "-E" + this.GetEParam(6);
-      string str6 = "-" + ((IEnumerable<string>) HANTEC.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
+      string str6 = "-" + ((IEnumerable<string>) StandardSupport.BeamProfile(this.SupportParams["BI"]).Split(' ')).Last<string>();
       coding = property + "-" + str1 + str2 + str3 + str4 + str5 + str6;
     }
 

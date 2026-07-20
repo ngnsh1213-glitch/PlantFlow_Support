@@ -7999,7 +7999,7 @@ namespace PlantFlow_Support
       try
       {
         BOMs bom = new BOMs(supportId, new System.Collections.Generic.List<AttachmentInfo>());
-        System.Collections.Generic.List<string[]> rows = bom.ContentsByDesignStd("HANTEC");
+        System.Collections.Generic.List<string[]> rows = bom.ContentsByDesignStd(this.GetNotabBomDesignStd());
         PlantOrthoView.FileDiag("PFSNOTABDETAIL bom spike std=" + (bom.StandardName ?? "null") + " rowCount=" + (rows == null ? -1 : rows.Count));
         if (rows != null)
         {
@@ -8014,6 +8014,14 @@ namespace PlantFlow_Support
       }
     }
 
+    private string GetNotabBomDesignStd()
+    {
+      if (!string.IsNullOrWhiteSpace(s_isoDesignStd))
+        return s_isoDesignStd;
+
+      PlantOrthoView.FileDiag("PFSVBISOCLONE BOM DesignStd empty; legacy HANTEC fallback applied");
+      return "HANTEC";
+    }
     private void AugmentDesignationsFromBom(ObjectId supportId)
     {
       if (supportId == ObjectId.Null)
@@ -8022,7 +8030,7 @@ namespace PlantFlow_Support
       try
       {
         BOMs bom = new BOMs(supportId, new System.Collections.Generic.List<AttachmentInfo>());
-        System.Collections.Generic.List<string[]> rows = bom.ContentsByDesignStd("HANTEC");
+        System.Collections.Generic.List<string[]> rows = bom.ContentsByDesignStd(this.GetNotabBomDesignStd());
         if (rows == null || rows.Count == 0)
         {
           PlantOrthoView.FileDiag("PFSVBISOCLONE bom-augment skip: rows empty id=" + supportId);
@@ -8056,7 +8064,7 @@ namespace PlantFlow_Support
         System.Collections.Generic.List<string> bomDesignations = new System.Collections.Generic.List<string>();
         foreach (string memberValue in ordered)
         {
-          string bi = HANTEC.BeamProfileBI(memberValue);
+          string bi = StandardSupport.BeamProfileBI(memberValue);
           if (string.IsNullOrWhiteSpace(bi))
           {
             PlantOrthoView.FileDiag("PFSVBISOCLONE bom-augment 미매핑 member=" + memberValue);
@@ -8158,7 +8166,7 @@ namespace PlantFlow_Support
         }
 
         string normalizedBi = bi.Trim().Replace("_", string.Empty);
-        profile = HANTEC.DetailProfile(normalizedBi);
+        profile = StandardSupport.DetailProfile(normalizedBi);
         if (string.IsNullOrWhiteSpace(profile))
         {
           PlantOrthoView.FileDiag("PFSVBISOCLONE profile skip: DetailProfile empty BI=" + normalizedBi);

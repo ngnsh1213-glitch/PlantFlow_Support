@@ -9,7 +9,7 @@ using System.Linq;
 #nullable disable
 namespace PlantFlow_Support
 {
-  internal class HANTEC
+  internal class StandardSupport
   {
     private bool IsBaseplate;
     private Matrix3d UCS;
@@ -22,7 +22,7 @@ namespace PlantFlow_Support
     public Dictionary<string, Point3d[]> TaggingPoints = new Dictionary<string, Point3d[]>();
     public Dictionary<string, Point3d[]> WeldingPoints = new Dictionary<string, Point3d[]>();
 
-    public HANTEC(
+    public StandardSupport(
       Extents3d extents_3D,
       bool is_baseplate,
       Dictionary<string, string> support_params,
@@ -41,6 +41,18 @@ namespace PlantFlow_Support
       this.UCS = ucs;
     }
 
+
+    // 출하 표준(PFS STANDARD)과 기존 모델(HANTEC)을 함께 지원한다.
+    // 고객사 표준은 이 목록에만 추가한다.
+    private static readonly string[] SupportedDesignStandards = { "PFS STANDARD", "HANTEC" };
+
+    internal static bool IsSupportedStandard(string designStd)
+    {
+      string normalized = (designStd ?? string.Empty).Trim();
+      bool supported = SupportedDesignStandards.Any(value => string.Equals(value, normalized, StringComparison.OrdinalIgnoreCase));
+      PSUtil.Log("StandardSupport design standard value='" + normalized + "' supported=" + supported);
+      return supported;
+    }
     public void StandardInformation(string standard_name)
     {
       this.StandardName = standard_name;

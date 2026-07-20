@@ -1,4 +1,4 @@
-using Autodesk.AutoCAD.ApplicationServices;
+﻿using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
@@ -782,19 +782,20 @@ namespace PlantFlow_Support
         private void CreateAnnotations(Transaction trans, BlockTable bt, BlockTableRecord btr, ObjectId textStyleId, ObjectId dimStyleId, Extents3d extents, Dictionary<string, Extents3d> dict, List<string[]> bomData, ViewportProjection projection, Extents3d flatPaperExtents)
         {
             Dictionary<string, Point3d[]> dictionary4 = new Dictionary<string, Point3d[]>();
-            BOMs boMs = new BOMs(PlantOrthoView.SPInfo.Ids[0], PlantOrthoView.SPInfo.AttachmentList); // Needed for HANTEC args? Same instance?
-            // HANTEC Logic
-            if (PlantOrthoView.SPInfo.CPYDesignStd == "HANTEC")
+            BOMs boMs = new BOMs(PlantOrthoView.SPInfo.Ids[0], PlantOrthoView.SPInfo.AttachmentList);
+            boMs.ContentsByDesignStd(PlantOrthoView.SPInfo.CPYDesignStd);
+            // Standard-support annotation logic
+            if (StandardSupport.IsSupportedStandard(PlantOrthoView.SPInfo.CPYDesignStd))
             {
-                HANTEC hantec = new HANTEC(extents, boMs.IsBaseplate, boMs.SupportParams, PlantOrthoView.SPInfo.SupportDirection, PlantOrthoView.SPInfo.ViewType, PlantOrthoView.SPInfo.PPoints, PlantOrthoView.SPInfo.UCS);
-                hantec.StandardInformation(boMs.StandardName);
-                extents = hantec.Extents3D;
-                dictionary4 = hantec.TaggingPoints;
+                StandardSupport standardSupport = new StandardSupport(extents, boMs.IsBaseplate, boMs.SupportParams, PlantOrthoView.SPInfo.SupportDirection, PlantOrthoView.SPInfo.ViewType, PlantOrthoView.SPInfo.PPoints, PlantOrthoView.SPInfo.UCS);
+                standardSupport.StandardInformation(boMs.StandardName);
+                extents = standardSupport.Extents3D;
+                dictionary4 = standardSupport.TaggingPoints;
                 foreach (AttachmentInfo attachment in PlantOrthoView.SPInfo.AttachmentList)
-                    attachment.PortZero = hantec.ConvertPortToPoint(attachment.PPoints[0]);
+                    attachment.PortZero = standardSupport.ConvertPortToPoint(attachment.PPoints[0]);
                 
                 double num = PSUtil.PipeSize(Convert.ToInt32(PlantOrthoView.SPInfo.Size));
-                Point3d point = hantec.ConvertPortToPoint(PlantOrthoView.SPInfo.PPoints[0]);
+                Point3d point = standardSupport.ConvertPortToPoint(PlantOrthoView.SPInfo.PPoints[0]);
                 Point3d point3d1 = new Point3d(point.X, point.Y + num / 2.0, 0.0);
                 Point3d point3d2 = new Point3d(point3d1.X + 50.0, point3d1.Y + 50.0, 0.0);
                 Point3d point3d3 = new Point3d(point.X, point.Y - num / 2.0, 0.0);

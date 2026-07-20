@@ -1,8 +1,11 @@
-# CHANGELOG
+﻿# CHANGELOG
 
 이 프로젝트의 사람이 읽는 변경 이력 요약. 상세는 git 커밋 로그 참조.
 
 ## [Unreleased]
+### Changed
+- cycle93: HANTEC 클래스·파일·호출을 StandardSupport로 개명하고, PFS STANDARD/기존 HANTEC을 인식하는 단일 DesignStd 판정과 로그를 추가했다. 오쏘 주석 생성 전에 BOM을 초기화해 StandardName 누락을 해소했으며, 무탭 BOM은 실제 모델 DesignStd와 빈 값 폴백을 사용한다. — 2026-07-20
+
 ### Fixed
 - 무탭 RC 트랙 종결(cycle92 후속, `65cc9cb`/`cc0addc`/`647749b`): ①`AppendNotabPaperDimensions`에 `Viewport` 전달(CS0103) ②**기둥이 뻗는 방향이 타입마다 반대** — `S2`는 밑동이 아니라 자유단이라 RC1(상단 기준)에서 "항상 위로" 가정이 범위를 벗어나 폴백했다. 위/아래 중 서포트 범위에 들어오는 쪽을 채택하고 `port-S2(up)|(down)`로 기록 ③콜아웃 간 여백 도입 — 겹침 0인데 간격 3.05라 붙어 보였다. `PFS_NOTAB_CALLOUT_PAD`(기본 8=글자 높이)만큼 부풀려 검사. 사용자 판정 "RC 이상없음 종결, GD 회귀 없음" — 2026-07-20
 - 무탭 RC 가로 치수를 SupportParams로(cycle90): 가로재와 베이스 플레이트가 한 `Solid3d`라 bbox는 490이고 450은 기하에서 나오지 않는다. **총 폭=`A+A1`, 우측=`A2`(없으면 `A1`)** 로 전환해 RC1 450(350/100)·RC2 450(250/200)·RC3 500(250/250) 확정 — 2026-07-20

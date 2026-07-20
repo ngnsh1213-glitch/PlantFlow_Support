@@ -1,4 +1,4 @@
-using Autodesk.AutoCAD.ApplicationServices;
+﻿using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.ApplicationServices.Core;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.ProcessPower.DataLinks;
@@ -42,12 +42,12 @@ namespace PlantFlow_Support
 
     public List<string[]> ContentsByDesignStd(string design_std)
     {
-      if (design_std == "HANTEC")
-        this.HANTECContents();
+      if (StandardSupport.IsSupportedStandard(design_std))
+        this.StandardSupportContents();
       return this.bom_contents;
     }
 
-    public void HANTECContents()
+    public void StandardSupportContents()
     {
       StringCollection properties = this.dl_manager.GetProperties(this.id, new StringCollection()
       {
@@ -92,15 +92,15 @@ namespace PlantFlow_Support
             case 'F':
               if (!(standardName1 == "FS"))
                 return;
-              string str1 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+              string str1 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
               double num1 = Convert.ToDouble(this.SupportParams["A"]);
               int32_1 = Convert.ToInt32(this.SupportParams["Dn"]);
               double num2 = Convert.ToDouble(this.SupportParams["A1"]);
               string supportParam1 = this.SupportParams["TY"];
               string supportParam2 = this.SupportParams["SM"];
               double num3 = Math.Ceiling(num1 + num2);
-              string str2 = HANTEC.PlateProfile(this.StandardName, this.SupportParams["BI"]);
-              string str3 = HANTEC.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
+              string str2 = StandardSupport.PlateProfile(this.StandardName, this.SupportParams["BI"]);
+              string str3 = StandardSupport.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
               switch (supportParam1)
               {
                 case "-1":
@@ -335,14 +335,14 @@ namespace PlantFlow_Support
               int int32_2 = Convert.ToInt32(this.SupportParams["TY"]);
               double a = Convert.ToDouble(this.SupportParams["A"]);
               int int32_3 = Convert.ToInt32(this.SupportParams["Dn"]);
-              string BI = HANTEC.TrunnionProfile(int32_3).ToString();
-              HANTEC.BeamProfile("15");
-              string str5 = HANTEC.BeamProfile("210");
+              string BI = StandardSupport.TrunnionProfile(int32_3).ToString();
+              StandardSupport.BeamProfile("15");
+              string str5 = StandardSupport.BeamProfile("210");
               switch (int32_2)
               {
                 case -14:
                 case -13:
-                  string str6 = HANTEC.PlateProfile("TRPT2", BI);
+                  string str6 = StandardSupport.PlateProfile("TRPT2", BI);
                   double num8 = Math.Ceiling(a + PSUtil.PipeSize(int32_3) * 1.5);
                   if (int32_2 == -14)
                     num8 = Math.Ceiling(a);
@@ -546,7 +546,7 @@ namespace PlantFlow_Support
                   return;
                 case -2:
                 case -1:
-                  string str8 = HANTEC.PlateProfile(this.StandardName, BI);
+                  string str8 = StandardSupport.PlateProfile(this.StandardName, BI);
                   double num20 = Math.Ceiling(a + PSUtil.PipeSize(int32_3) * 1.5);
                   if (int32_2 == -2)
                     num20 = Math.Ceiling(a);
@@ -572,7 +572,7 @@ namespace PlantFlow_Support
                   {
                     "J1",
                     "SET ANCHOR",
-                    HANTEC.AnchorBoltDetail("TR", BI),
+                    StandardSupport.AnchorBoltDetail("TR", BI),
                     this.frame_material,
                     "4ea",
                     ""
@@ -613,17 +613,17 @@ namespace PlantFlow_Support
                   double num25 = Math.Ceiling(num21 + num22);
                   double num26 = Math.Ceiling(num21 + num22 - 20.0);
                   int int32_4 = Convert.ToInt32(this.SupportParams["TY"]);
-                  string str9 = HANTEC.BeamProfile("210");
-                  string str10 = HANTEC.BeamProfile("15");
+                  string str9 = StandardSupport.BeamProfile("210");
+                  string str10 = StandardSupport.BeamProfile("15");
                   switch (int32_4)
                   {
                     case -2:
-                      str9 = HANTEC.BeamProfile("215");
-                      str10 = HANTEC.BeamProfile("16");
+                      str9 = StandardSupport.BeamProfile("215");
+                      str10 = StandardSupport.BeamProfile("16");
                       break;
                     case -1:
-                      str9 = HANTEC.BeamProfile("210");
-                      str10 = HANTEC.BeamProfile("15");
+                      str9 = StandardSupport.BeamProfile("210");
+                      str10 = StandardSupport.BeamProfile("15");
                       break;
                   }
                   string[] strArray30 = new string[6]
@@ -693,15 +693,15 @@ namespace PlantFlow_Support
                   dictionary1.Add(650, 333.0);
                   dictionary1.Add(700, 359.0);
                   dictionary1.Add(850, 435.0);
-                  double num27 = Convert.ToDouble(HANTEC.DetailProfile(this.SupportParams["BI"]).Split('x')[1]);
+                  double num27 = Convert.ToDouble(StandardSupport.DetailProfile(this.SupportParams["BI"]).Split('x')[1]);
                   int int32_5 = Convert.ToInt32(this.SupportParams["Dn"]);
                   double num28 = dictionary1[int32_5];
                   double num29 = Convert.ToDouble(this.SupportParams["F1"]) + num28 + 85.0;
                   double num30 = Convert.ToDouble(this.SupportParams["F1"]) + num28 + 85.0;
                   double num31 = 2.0 * num28 + 2.0 * num27;
                   double num32 = 2.0 * num28 + 2.0 * num27;
-                  string str11 = HANTEC.BeamProfile(this.SupportParams["BI"]);
-                  string str12 = HANTEC.BeamProfile("17");
+                  string str11 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
+                  string str12 = StandardSupport.BeamProfile("17");
                   string[] strArray34 = new string[6]
                   {
                     "F1",
@@ -757,7 +757,7 @@ namespace PlantFlow_Support
                 case "RS4":
                   goto label_67;
                 case "RC4":
-                  string str13 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+                  string str13 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
                   double num33 = Convert.ToDouble(this.SupportParams["A"]);
                   int32_1 = Convert.ToInt32(this.SupportParams["Dn"]);
                   double num34 = Convert.ToDouble(this.SupportParams["A1"]);
@@ -765,8 +765,8 @@ namespace PlantFlow_Support
                   int int32_6 = Convert.ToInt32(this.SupportParams["TY"]);
                   double num36 = Math.Ceiling(num33 + num34);
                   double num37 = Math.Ceiling(Convert.ToDouble(this.SupportParams["F2"]));
-                  string str14 = HANTEC.PlateProfile(this.StandardName, this.SupportParams["BI"]);
-                  string str15 = HANTEC.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
+                  string str14 = StandardSupport.PlateProfile(this.StandardName, this.SupportParams["BI"]);
+                  string str15 = StandardSupport.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
                   string[] strArray38 = new string[6]
                   {
                     "F1",
@@ -807,13 +807,13 @@ namespace PlantFlow_Support
                   this.bom_contents.Add(strArray39);
                   if (int32_6 == -2)
                   {
-                    double num38 = Convert.ToDouble(HANTEC.DetailProfile(this.SupportParams["BI"]).Split('x')[0]);
+                    double num38 = Convert.ToDouble(StandardSupport.DetailProfile(this.SupportParams["BI"]).Split('x')[0]);
                     double num39 = Math.Ceiling((num36 - 10.0 - num38 - num35) / (Math.Sqrt(2.0) / 2.0));
                     this.bom_contents.Add(new string[6]
                     {
                       "F3",
                       "FRAMEWORK",
-                      HANTEC.BeamProfile("110"),
+                      StandardSupport.BeamProfile("110"),
                       this.frame_material,
                       num39.ToString(),
                       ""
@@ -853,15 +853,15 @@ namespace PlantFlow_Support
                 case "RS7":
                   goto label_67;
                 case "RC7":
-                  string str16 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+                  string str16 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
                   double num40 = Convert.ToDouble(this.SupportParams["A"]);
                   int32_1 = Convert.ToInt32(this.SupportParams["Dn"]);
                   double num41 = Convert.ToDouble(this.SupportParams["A1"]);
                   double num42 = 150.0; // RC7 B1 Overhang 하드코딩
                   double num43 = Math.Ceiling(num40 + num41);
                   double num44 = Math.Ceiling((num43 - num42) / (Math.Sqrt(2.0) / 2.0));
-                  string str17 = HANTEC.PlateProfile(this.StandardName, this.SupportParams["BI"]);
-                  string str18 = HANTEC.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
+                  string str17 = StandardSupport.PlateProfile(this.StandardName, this.SupportParams["BI"]);
+                  string str18 = StandardSupport.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
                   string[] strArray42 = new string[6]
                   {
                     "F1",
@@ -912,13 +912,13 @@ namespace PlantFlow_Support
                 case "RS8":
                   goto label_67;
                 case "RC8":
-                  string str19 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+                  string str19 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
                   double num45 = Convert.ToDouble(this.SupportParams["A"]);
                   int32_1 = Convert.ToInt32(this.SupportParams["Dn"]);
                   double num46 = Convert.ToDouble(this.SupportParams["A1"]);
                   double num47 = Math.Ceiling(num45 + num46);
-                  string str20 = HANTEC.PlateProfile(this.StandardName, this.SupportParams["BI"]);
-                  string str21 = HANTEC.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
+                  string str20 = StandardSupport.PlateProfile(this.StandardName, this.SupportParams["BI"]);
+                  string str21 = StandardSupport.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
                   string[] strArray46 = new string[6]
                   {
                     "F1",
@@ -959,15 +959,15 @@ namespace PlantFlow_Support
                 case "RS9":
                   goto label_67;
                 case "RC9":
-                  string str22 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+                  string str22 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
                   double num48 = Convert.ToDouble(this.SupportParams["A"]);
                   int32_1 = Convert.ToInt32(this.SupportParams["Dn"]);
                   double num49 = Convert.ToDouble(this.SupportParams["A1"]);
                   double num50 = Math.Ceiling(num48 + num49);
                   double num51 = Math.Ceiling(Convert.ToDouble(this.SupportParams["F2"]));
                   double num52 = Math.Ceiling(Convert.ToDouble(this.SupportParams["F3"]));
-                  string str23 = HANTEC.PlateProfile(this.StandardName, this.SupportParams["BI"]);
-                  string str24 = HANTEC.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
+                  string str23 = StandardSupport.PlateProfile(this.StandardName, this.SupportParams["BI"]);
+                  string str24 = StandardSupport.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
                   string[] strArray49 = new string[6]
                   {
                     "F1",
@@ -1066,14 +1066,14 @@ namespace PlantFlow_Support
                 190.0,
                 300.0
               });
-              string str25 = HANTEC.BeamProfile(this.SupportParams["BI"]);
-              HANTEC.BeamProfile("16");
+              string str25 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
+              StandardSupport.BeamProfile("16");
               double num53 = Convert.ToDouble(this.SupportParams["A"]);
               double num54 = Convert.ToDouble(this.SupportParams["T"]);
               int int32_7 = Convert.ToInt32(this.SupportParams["Dn"]);
               double num55 = num54 + dictionary2[int32_7][0];
               double num56 = num54 + dictionary2[int32_7][1];
-              string str26 = HANTEC.TrunnionProfile(int32_7).ToString() + "A";
+              string str26 = StandardSupport.TrunnionProfile(int32_7).ToString() + "A";
               double num57 = num53 + num55 + 75.0;
               double num58 = num53 + num55 + 75.0;
               double num59 = num55 * 2.0 + 150.0;
@@ -1143,7 +1143,7 @@ namespace PlantFlow_Support
             default:
               return;
           }
-          string str27 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+          string str27 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
           double num62 = Convert.ToDouble(this.SupportParams["A"]);
           int32_1 = Convert.ToInt32(this.SupportParams["Dn"]);
           double num63 = Convert.ToDouble(this.SupportParams["A1"]);
@@ -1151,12 +1151,12 @@ namespace PlantFlow_Support
           double num65 = Math.Ceiling(Convert.ToDouble(this.SupportParams["F2"]));
           if (this.StandardName == "RC1")
           {
-            double num66 = Convert.ToDouble(HANTEC.DetailProfile(this.SupportParams["BI"]).Split('x')[0]);
+            double num66 = Convert.ToDouble(StandardSupport.DetailProfile(this.SupportParams["BI"]).Split('x')[0]);
             if (this.SupportParams["BI"] != "210")
               num65 += num66;
           }
-          string str28 = HANTEC.PlateProfile(this.StandardName, this.SupportParams["BI"]);
-          string str29 = HANTEC.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
+          string str28 = StandardSupport.PlateProfile(this.StandardName, this.SupportParams["BI"]);
+          string str29 = StandardSupport.AnchorBoltDetail(this.StandardName, this.SupportParams["BI"]);
           string[] strArray60 = new string[6]
           {
             "F1",
@@ -1220,7 +1220,7 @@ namespace PlantFlow_Support
             case '3':
               if (!(standardName1 == "RS13"))
                 return;
-              string str30 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+              string str30 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
               double num67 = Convert.ToDouble(this.SupportParams["A"]);
               double num68 = Convert.ToDouble(this.SupportParams["A1"]);
               double num69 = Convert.ToDouble(this.SupportParams["P1"]);
@@ -1286,7 +1286,7 @@ namespace PlantFlow_Support
             case '4':
               if (!(standardName1 == "RS14"))
                 return;
-              string str31 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+              string str31 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
               double num78 = Convert.ToDouble(this.SupportParams["A1"]);
               double num79 = Convert.ToDouble(this.SupportParams["A2"]);
               int32_1 = Convert.ToInt32(this.SupportParams["Dn"]);
@@ -1305,7 +1305,7 @@ namespace PlantFlow_Support
               if (!(standardName1 == "RS15"))
                 return;
               string supportParam3 = this.SupportParams["BI"];
-              string str32 = HANTEC.BeamProfile(supportParam3);
+              string str32 = StandardSupport.BeamProfile(supportParam3);
               int int32_8 = Convert.ToInt32(this.SupportParams["TY"]);
               double num81 = Convert.ToDouble(this.SupportParams["A1"]);
               double num82 = Math.Ceiling(Convert.ToDouble(this.SupportParams["A2"]) + num81);
@@ -1333,7 +1333,7 @@ namespace PlantFlow_Support
               if (int32_8 != -2)
                 return;
               double num84 = Convert.ToDouble(this.SupportParams["L1"]);
-              double num85 = Convert.ToDouble(HANTEC.DetailProfile(supportParam3).Split('x')[0]);
+              double num85 = Convert.ToDouble(StandardSupport.DetailProfile(supportParam3).Split('x')[0]);
               switch (supportParam3)
               {
                 case "110":
@@ -1459,7 +1459,7 @@ namespace PlantFlow_Support
           return;
       }
 label_56:
-      string str33 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+      string str33 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
       double num86 = Convert.ToDouble(this.SupportParams["A"]);
       double num87 = PSUtil.PipeSize(Convert.ToInt32(this.SupportParams["Dn"])) / 2.0 + 100.0;
       if (this.StandardName == "RS11")
@@ -1477,8 +1477,8 @@ label_56:
       int int32_9 = Convert.ToInt32(this.SupportParams["TY"]);
       if (!(this.StandardName == "GD1") || int32_9 != -2)
         return;
-      string str34 = HANTEC.PlateProfile("GD1", this.SupportParams["BI"]);
-      string str35 = HANTEC.AnchorBoltDetail("GD1", this.SupportParams["BI"]);
+      string str34 = StandardSupport.PlateProfile("GD1", this.SupportParams["BI"]);
+      string str35 = StandardSupport.AnchorBoltDetail("GD1", this.SupportParams["BI"]);
       string[] strArray77 = new string[6]
       {
         "P1",
@@ -1501,7 +1501,7 @@ label_56:
       this.bom_contents.Add(strArray78);
       return;
 label_66:
-      string str36 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+      string str36 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
       double num89 = Math.Ceiling(Convert.ToDouble(this.SupportParams["A"]) + (PSUtil.PipeSize(Convert.ToInt32(this.SupportParams["Dn"])) / 2.0 + 100.0));
       double num90 = Math.Ceiling(Convert.ToDouble(this.SupportParams["F2"]));
       string[] strArray79 = new string[6]
@@ -1526,7 +1526,7 @@ label_66:
       this.bom_contents.Add(strArray80);
       return;
 label_67:
-      string str37 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+      string str37 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
       double num91 = Convert.ToDouble(this.SupportParams["A"]);
       int32_1 = Convert.ToInt32(this.SupportParams["Dn"]);
       double num92 = Convert.ToDouble(this.SupportParams["A1"]);
@@ -1534,7 +1534,7 @@ label_67:
       double num94 = Math.Ceiling(Convert.ToDouble(this.SupportParams["F2"]));
       if (this.StandardName == "RS10")
       {
-        double num95 = Convert.ToDouble(HANTEC.DetailProfile(this.SupportParams["BI"]).Split('x')[0]);
+        double num95 = Convert.ToDouble(StandardSupport.DetailProfile(this.SupportParams["BI"]).Split('x')[0]);
         if (this.SupportParams["BI"] != "210")
           num94 += num95;
       }
@@ -1560,7 +1560,7 @@ label_67:
       this.bom_contents.Add(strArray82);
       return;
 label_71:
-      string str38 = HANTEC.BeamProfile(this.SupportParams["BI"]);
+      string str38 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
       double num96 = Math.Ceiling(Convert.ToDouble(this.SupportParams["A"]) + Convert.ToDouble(this.SupportParams["A1"]));
       double num97 = Math.Ceiling(Convert.ToDouble(this.SupportParams["F2"]));
       double num98 = Math.Ceiling(Convert.ToDouble(this.SupportParams["F3"]));
