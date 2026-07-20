@@ -1,15 +1,16 @@
 # REPORT - Codex → Claude
 
-- **cycle**: 87
+- **cycle**: 88
 - **status**: done
 - **completed_at**: 2026-07-20
-- **title**: 콜아웃 장애물 소유자 예외 및 파이프 반경·방향 제어 교정
+- **title**: 무탭 콜아웃 좌우 하드 제약 및 단일 배치 경로
 
 ## 변경 요약
-- 빈 소유자 장애물(서포트·치수)은 더 이상 부재 콜아웃에서 제외되지 않는다. 성공 진단에 `scanned`와 `obst`를 남긴다.
-- 원본 도면에서 얻은 파이프 모델 반경을 정적 상태로 보존해 페이퍼 반경으로 변환한다. 해당 값이 없으면 상세 DB의 중심 인접 정사각 `Solid3d` 투영 폭을 폴백으로 사용한다.
-- `PFS_NOTAB_CALLOUT_ANGLE_W`(기본 0.3)로 바깥 방향 이탈 비용을 추가했고, `PFS_NOTAB_DIR_<TYPE>_<PIPE|M#>` 환경 변수로 바깥 방향을 오버라이드할 수 있다.
-- GD3 M0 앵커 기본값을 `0.305`로 조정했다.
+- `NotabCalloutPlacer.TryPlace`를 `RequiredSide` 하드 제약으로 전환했다. 후보의 좌우는 고정되고 상하·반경만 탐색한다.
+- 실제 `Viewport.CenterPoint/Width/Height`로 페이퍼 사각형과 중앙선을 산출했다. 파이프는 파이프 중심 X, 부재는 각 앵커 X를 기준으로 좌우를 결정한다. 중앙선은 우측으로 결정한다.
+- 호출부의 사전 `TryPlace`를 제거하고 직접 작도 직전의 한 곳에서만 배치한다. tier는 `All → PlacedCalloutsOnly → None`으로 완화한다.
+- 실패하면 MText를 삭제하고 작도를 생략한다. `callout-draw`/`callout-skip`에 좌우 출처, 기준 X, 뷰포트 중앙선, tier 및 거절 사유 카운트를 기록한다.
+- `PFS_NOTAB_DIR_*`는 `L`/`R`만 강제 오버라이드로 허용하며 다른 값은 deprecated 로그 후 무시한다. angle 비용 기본값은 `0.0`이다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
@@ -17,13 +18,12 @@
 
 ## 검증
 - `git diff --check` 통과.
-- 변경 주변 정적 확인: 잘못된 `System.Min` 호출 없음, 방향 노브·진단 필드·파이프 장애물 로그 연결 확인.
-- 빌드 미실행: 프로젝트 규칙에 따라 사용자의 명시 요청 없이 빌드를 실행하지 않음.
+- 정적 검색: 활성 `TryPlace` 호출은 직접 작도 경로 1곳뿐이며, 구 각도 계산 호출은 제거됨을 확인.
+- 빌드 미실행: 사용자 요청이 없어 프로젝트 규칙에 따라 실행하지 않음.
 
 ## 라이브 검증 필요
-- 권장 env: `PFS_NOTAB_DIR_GD1_M0=0`, `PFS_NOTAB_DIR_GD2_PIPE=0`, `PFS_NOTAB_DIR_GD2_M1=-135`, `PFS_NOTAB_DIR_GD3_PIPE=-135`, `PFS_NOTAB_DIR_GD3_M0=-45`.
-- GD1/GD2/GD3 추출 후 `pipe-obstacle box=... r=...`, `callout-draw`의 `out/fan/angleW/scanned/obst/dirSrc`, `tier=1` 또는 `FAIL` 여부를 확인한다.
-- 서포트·치수·파이프 관통 없음, GD1 M0 우측, GD2 PIPE 우측·M1 좌하, GD3 PIPE 좌하·M0 우하를 확인한다.
+- `dev_test.bat`로 GD1/GD2/GD3를 추출하고 `callout-draw`에서 GD2 PIPE=`requiredSide=right`, GD3 PIPE=`requiredSide=left`, `tier<=1`, `callout-skip` 0건을 확인한다.
+- 육안으로 문자/리더 간섭과 리더의 문자 관통이 없는지 확인한다.
 
 ## 커밋
-- 코드: `9273143` (`fix: correct notab callout obstacle placement`)
+- 이 REPORT와 코드 변경을 동일 커밋으로 기록.

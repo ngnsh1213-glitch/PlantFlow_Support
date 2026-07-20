@@ -13,6 +13,8 @@ namespace PlantFlow_Support
   // 페이퍼공간 콜아웃 전용: 디테일마다 새 인스턴스를 만들어 문자·리더 충돌 상태를 공유한다.
   internal sealed class NotabCalloutPlacer
   {
+    public enum RequiredSide { Left, Right }
+    private enum LeaderCheckScope { All, PlacedCalloutsOnly, None }
     private sealed class Obstacle { public Extents3d Box; public string Owner; }
     private readonly System.Collections.Generic.List<Obstacle> _obstacles = new System.Collections.Generic.List<Obstacle>();
     private readonly System.Collections.Generic.List<Extents3d> _placedBoxes = new System.Collections.Generic.List<Extents3d>();
@@ -41,37 +43,44 @@ namespace PlantFlow_Support
         new Point3d(System.Math.Max(supportExt.MaxPoint.X, anchor.X), System.Math.Max(supportExt.MaxPoint.Y, anchor.Y), 0.0));
     }
 
-    public bool TryPlace(Point3d anchor, double outwardAngleDeg, double width, double height, double gap, double minDx,
+    public bool TryPlace(Point3d anchor, RequiredSide requiredSide, double width, double height, double gap, double minDx,
       string ownerTag, out Point3d textCenter, out Point3d p1, out Point3d p2, out bool textLeftOfAnchor, out string diagnostic)
     {
       double startRadius = System.Math.Max(15.0, System.Math.Max(width, height) / 2.0 + gap);
-      for (int tier = 0; tier < 2; tier++)
+      double maxRadius = System.Math.Max(startRadius, System.Math.Sqrt(System.Math.Pow(System.Math.Max(anchor.X - _minX, _maxX - anchor.X), 2.0) + System.Math.Pow(System.Math.Max(anchor.Y - _minY, _maxY - anchor.Y), 2.0)) + width + height);
+      for (int tier = 0; tier < 3; tier++)
       {
-        bool checkLeader = tier == 0;
+        LeaderCheckScope leaderScope = tier == 0 ? LeaderCheckScope.All : tier == 1 ? LeaderCheckScope.PlacedCalloutsOnly : LeaderCheckScope.None;
         bool found = false;
         double bestCost = double.MaxValue;
         Point3d bestCenter = Point3d.Origin, bestP1 = Point3d.Origin, bestP2 = Point3d.Origin;
         bool bestLeft = false;
         string bestDiag = "FAIL";
-        int scanned = 0;
-        for (double radius = startRadius; radius <= startRadius + 60.0; radius += 2.5)
+        int scanned = 0, rejectOob = 0, rejectBox = 0, rejectExtLeader = 0, rejectCalloutLeader = 0;
+        double sign = requiredSide == RequiredSide.Left ? -1.0 : 1.0;
+        for (double radius = startRadius; radius <= maxRadius; radius += 2.5)
         {
           foreach (int fanOffset in Fan)
           {
-            double angle = (outwardAngleDeg + fanOffset) * System.Math.PI / 180.0;
-            double x = anchor.X + radius * System.Math.Cos(angle);
+            double angle = fanOffset * System.Math.PI / 180.0;
+            double horizontal = System.Math.Max(minDx, radius * System.Math.Abs(System.Math.Cos(angle)));
+            double x = anchor.X + sign * horizontal;
             double y = anchor.Y + radius * System.Math.Sin(angle);
-            if (System.Math.Abs(x - anchor.X) < minDx) continue;
-            bool textLeft = x < anchor.X;
-            double boxLeft = textLeft ? System.Math.Min(x, anchor.X - minDx) - width : System.Math.Max(x, anchor.X + minDx);
+            bool textLeft = requiredSide == RequiredSide.Left;
+            double boxLeft = textLeft ? x - width : x;
             Extents3d box = new Extents3d(new Point3d(boxLeft, y - height / 2.0, 0.0), new Point3d(boxLeft + width, y + height / 2.0, 0.0));
-            if (OutOfBounds(box)) continue;
+            if (OutOfBounds(box)) { rejectOob++; continue; }
             double baseY = y - height / 2.0 - ReadEnvDouble("PFS_NOTAB_CALLOUT_TEXT_GAP", 3.0);
             Point3d candP1 = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, baseY, 0.0);
             Point3d candP2 = new Point3d(textLeft ? box.MinPoint.X : box.MaxPoint.X, baseY, 0.0);
-            if (!Free(box, anchor, candP1, candP2, checkLeader, ownerTag)) continue;
+            string reject;
+            if (!Free(box, anchor, candP1, candP2, leaderScope, ownerTag, out reject))
+            {
+              if (reject == "box") rejectBox++; else if (reject == "extLeader") rejectExtLeader++; else if (reject == "calloutLeader") rejectCalloutLeader++;
+              continue;
+            }
             scanned++;
-            double angleW = System.Math.Max(0.0, ReadEnvDouble("PFS_NOTAB_CALLOUT_ANGLE_W", 0.3));
+            double angleW = System.Math.Max(0.0, ReadEnvDouble("PFS_NOTAB_CALLOUT_ANGLE_W", 0.0));
             double cost = System.Math.Max(0.0, box.MaxPoint.X - _costRefExt.MaxPoint.X)
               + System.Math.Max(0.0, _costRefExt.MinPoint.X - box.MinPoint.X)
               + System.Math.Max(0.0, box.MaxPoint.Y - _costRefExt.MaxPoint.Y)
@@ -86,7 +95,7 @@ namespace PlantFlow_Support
               bestLeft = textLeft;
               bestP1 = candP1;
               bestP2 = candP2;
-              bestDiag = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " out=" + outwardAngleDeg.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " actual=" + (outwardAngleDeg + fanOffset).ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " angleW=" + angleW.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " cost=" + cost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+              bestDiag = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " angleW=" + angleW.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " cost=" + cost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
             }
           }
         }
@@ -96,11 +105,13 @@ namespace PlantFlow_Support
           p1 = bestP1;
           p2 = bestP2;
           textLeftOfAnchor = bestLeft;
-          diagnostic = bestDiag + " scanned=" + scanned + " obst=" + _obstacles.Count;
+          diagnostic = bestDiag + " scanned=" + scanned + " obst=" + _obstacles.Count + " reject(oob/box/extLeader/calloutLeader)=" + rejectOob + "/" + rejectBox + "/" + rejectExtLeader + "/" + rejectCalloutLeader;
           return true;
         }
+        if (tier == 2)
+          diagnostic = "FAIL tier=2 scanned=" + scanned + " reject(oob/box/extLeader/calloutLeader)=" + rejectOob + "/" + rejectBox + "/" + rejectExtLeader + "/" + rejectCalloutLeader;
       }
-      textCenter = Point3d.Origin; p1 = Point3d.Origin; p2 = Point3d.Origin; textLeftOfAnchor = false; diagnostic = "FAIL";
+      textCenter = Point3d.Origin; p1 = Point3d.Origin; p2 = Point3d.Origin; textLeftOfAnchor = requiredSide == RequiredSide.Left;
       return false;
     }
 
@@ -117,27 +128,28 @@ namespace PlantFlow_Support
     private bool OutOfBounds(Extents3d box)
     { return box.MinPoint.X < _minX || box.MaxPoint.X > _maxX || box.MinPoint.Y < _minY || box.MaxPoint.Y > _maxY; }
 
-    private bool Free(Extents3d box, Point3d anchor, Point3d p1, Point3d p2, bool checkLeader, string ownerTag)
+    private bool Free(Extents3d box, Point3d anchor, Point3d p1, Point3d p2, LeaderCheckScope leaderScope, string ownerTag, out string reject)
     {
       foreach (Obstacle obstacle in _obstacles)
       {
         if (!string.IsNullOrEmpty(obstacle.Owner)
           && string.Equals(ownerTag ?? string.Empty, obstacle.Owner, System.StringComparison.Ordinal)) continue;
-        if (BoxOverlap(box, obstacle.Box)) return false;
-        if (checkLeader && (SegIntersectsBox(anchor, p1, obstacle.Box) || SegIntersectsBox(p1, p2, obstacle.Box))) return false;
+        if (BoxOverlap(box, obstacle.Box)) { reject = "box"; return false; }
+        if (leaderScope == LeaderCheckScope.All && (SegIntersectsBox(anchor, p1, obstacle.Box) || SegIntersectsBox(p1, p2, obstacle.Box))) { reject = "extLeader"; return false; }
       }
       foreach (Extents3d placed in _placedBoxes)
       {
-        if (BoxOverlap(box, placed)) return false;
-        if (checkLeader && (SegIntersectsBox(anchor, p1, placed) || SegIntersectsBox(p1, p2, placed))) return false;
+        if (BoxOverlap(box, placed)) { reject = "box"; return false; }
+        if (leaderScope != LeaderCheckScope.None && (SegIntersectsBox(anchor, p1, placed) || SegIntersectsBox(p1, p2, placed))) { reject = "calloutLeader"; return false; }
       }
-      if (checkLeader)
+      if (leaderScope != LeaderCheckScope.None)
       {
         foreach (Point3d[] leader in _placedLeaders)
         {
-          if (SegIntersectsBox(leader[0], leader[1], box) || SegsIntersect(anchor, p1, leader[0], leader[1]) || SegsIntersect(p1, p2, leader[0], leader[1])) return false;
+          if (SegIntersectsBox(leader[0], leader[1], box) || SegsIntersect(anchor, p1, leader[0], leader[1]) || SegsIntersect(p1, p2, leader[0], leader[1])) { reject = "calloutLeader"; return false; }
         }
       }
+      reject = string.Empty;
       return true;
     }
 
@@ -4620,7 +4632,8 @@ namespace PlantFlow_Support
           if (double.IsNaN(pipePaperRadius))
             pipePaperRadius = this.TryGetNotabPipePaperRadiusFromDetailSolids(tr, db, vp, pipeCenterXPaper, pipeCenterYPaper);
           PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe paper radius=" + this.FormatNumber(pipePaperRadius) + " source=" + (s_isoPipeRadiusModel > 1e-6 ? "model" : "detail-solid"));
-          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId, textStyleId, db);
+          Extents3d viewportPaperExt = new Extents3d(new Point3d(vp.CenterPoint.X - vp.Width / 2.0, vp.CenterPoint.Y - vp.Height / 2.0, 0.0), new Point3d(vp.CenterPoint.X + vp.Width / 2.0, vp.CenterPoint.Y + vp.Height / 2.0, 0.0));
+          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, viewportPaperExt, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId, textStyleId, db);
           tr.Commit();
         }
       }
@@ -4699,7 +4712,7 @@ namespace PlantFlow_Support
       }
     }
 
-    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double pipePaperRadius, double realW, double realH, ObjectId dimStyleId, ObjectId layerId, ObjectId textStyleId, Database db)
+    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, Extents3d viewportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double pipePaperRadius, double realW, double realH, ObjectId dimStyleId, ObjectId layerId, ObjectId textStyleId, Database db)
     {
       if (tr == null || layoutBtr == null)
         return;
@@ -4835,8 +4848,8 @@ namespace PlantFlow_Support
           ? new Point3d(pipeCenterXPaper, pipeCenterYPaper, 0.0)
           : new Point3d((minX + maxX) / 2.0, (minY + maxY) / 2.0, 0.0);
         calloutPlacer.SetCostReference(supportPaperExt, calloutCostAnchor);
-        this.AppendNotabPipeCallout(tr, layoutBtr, db, textStyleId, layerId, pipeCenterXPaper, pipeCenterYPaper, supportPaperExt, txt, calloutPlacer);
-        this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, calloutPlacer);
+        this.AppendNotabPipeCallout(tr, layoutBtr, db, textStyleId, layerId, pipeCenterXPaper, pipeCenterYPaper, supportPaperExt, viewportPaperExt, txt, calloutPlacer);
+        this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer);
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " vMode=" + verticalMode + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
@@ -5013,7 +5026,7 @@ namespace PlantFlow_Support
       }
     }
 
-    private void AppendNotabDirectCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer, string designation, Point3d anchor, Point3d fallbackNear, bool fallbackLeft, double gap, double minDx, string label)
+    private void AppendNotabDirectCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer, string designation, Point3d anchor, double viewportCenterX, NotabCalloutPlacer.RequiredSide requiredSide, string sideSource, double gap, double minDx, string label)
     {
       MText mt = new MText();
       try
@@ -5030,20 +5043,19 @@ namespace PlantFlow_Support
 
         double actualWidth = System.Math.Max(1.0, mt.ActualWidth);
         double actualHeight = System.Math.Max(1.0, mt.ActualHeight);
-        Point3d near = fallbackNear, p1 = Point3d.Origin, p2 = Point3d.Origin;
-        bool left = fallbackLeft;
-        string diagnostic = "fallback";
+        Point3d near = Point3d.Origin, p1 = Point3d.Origin, p2 = Point3d.Origin;
+        bool left = requiredSide == NotabCalloutPlacer.RequiredSide.Left;
+        string diagnostic = "FAIL";
         bool smartPlaced = false;
         if (placer != null)
         {
-          double dL = anchor.X - supportPaperExt.MinPoint.X, dR = supportPaperExt.MaxPoint.X - anchor.X;
-          double dB = anchor.Y - supportPaperExt.MinPoint.Y, dT = supportPaperExt.MaxPoint.Y - anchor.Y;
-          double m = System.Math.Min(System.Math.Min(dL, dR), System.Math.Min(dB, dT));
-          double outwardAngle = (m == dB) ? -90.0 : (m == dT) ? 90.0 : (m == dL) ? 180.0 : 0.0;
-          if (!placer.TryPlace(anchor, outwardAngle, actualWidth, actualHeight, gap, minDx, label == "pipe callout" ? "pipe" : string.Empty, out near, out p1, out p2, out left, out diagnostic))
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL " + label + " smart FAIL fallback designation=" + designation);
-          else
-            smartPlaced = true;
+          smartPlaced = placer.TryPlace(anchor, requiredSide, actualWidth, actualHeight, gap, minDx, label == "pipe callout" ? "pipe" : string.Empty, out near, out p1, out p2, out left, out diagnostic);
+        }
+        if (!smartPlaced)
+        {
+          mt.Erase();
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-skip designation=" + designation + " requiredSide=" + (requiredSide == NotabCalloutPlacer.RequiredSide.Left ? "left" : "right") + " sideSrc=" + sideSource + " referenceX=" + this.FormatNumber(anchor.X) + " viewportCenterX=" + this.FormatNumber(viewportCenterX) + " " + diagnostic);
+          return;
         }
 
         bool right = !left;
@@ -5051,9 +5063,9 @@ namespace PlantFlow_Support
         double rightX = leftX + actualWidth;
         double textGap = this.GetEnvDouble("PFS_NOTAB_CALLOUT_TEXT_GAP", 3.0, 0.0, 50.0);
         // placer가 확정한 리더 정점을 그대로 사용해 충돌 모델과 작도를 일치시킨다.
-        double baseY = smartPlaced ? p1.Y : near.Y - actualHeight / 2.0 - textGap;
-        double nearX = smartPlaced ? p1.X : (right ? leftX : rightX);
-        double farX = smartPlaced ? p2.X : (right ? rightX : leftX);
+        double baseY = p1.Y;
+        double nearX = p1.X;
+        double farX = p2.X;
         mt.Location = new Point3d(leftX, baseY + textGap, 0.0);
 
         Leader leader = new Leader();
@@ -5067,7 +5079,7 @@ namespace PlantFlow_Support
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
         if (placer != null) placer.Commit(anchor, new Point3d(nearX, baseY, 0.0), new Point3d(farX, baseY, 0.0), near, actualWidth, actualHeight);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-draw designation=" + designation + " anchor=" + anchor + " nearX=" + this.FormatNumber(nearX) + " farX=" + this.FormatNumber(farX) + " baseY=" + this.FormatNumber(baseY) + " W=" + this.FormatNumber(actualWidth) + " H=" + this.FormatNumber(actualHeight) + " side=" + (right ? "right" : "left") + " sep=" + this.FormatNumber(right ? nearX - anchor.X : anchor.X - nearX) + " " + diagnostic);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-draw designation=" + designation + " anchor=" + anchor + " nearX=" + this.FormatNumber(nearX) + " farX=" + this.FormatNumber(farX) + " baseY=" + this.FormatNumber(baseY) + " W=" + this.FormatNumber(actualWidth) + " H=" + this.FormatNumber(actualHeight) + " requiredSide=" + (requiredSide == NotabCalloutPlacer.RequiredSide.Left ? "left" : "right") + " sideSrc=" + sideSource + " referenceX=" + this.FormatNumber(anchor.X) + " viewportCenterX=" + this.FormatNumber(viewportCenterX) + " side=" + (right ? "right" : "left") + " sep=" + this.FormatNumber(right ? nearX - anchor.X : anchor.X - nearX) + " " + diagnostic);
       }
       catch (System.Exception ex)
       {
@@ -5075,7 +5087,18 @@ namespace PlantFlow_Support
       }
     }
 
-    private void AppendNotabProfileCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer)
+    private NotabCalloutPlacer.RequiredSide ResolveNotabRequiredSide(string envKey, double referenceX, double viewportCenterX, out string source)
+    {
+      string raw = System.Environment.GetEnvironmentVariable(envKey);
+      if (string.Equals(raw, "L", System.StringComparison.OrdinalIgnoreCase)) { source = "override"; return NotabCalloutPlacer.RequiredSide.Left; }
+      if (string.Equals(raw, "R", System.StringComparison.OrdinalIgnoreCase)) { source = "override"; return NotabCalloutPlacer.RequiredSide.Right; }
+      if (!string.IsNullOrWhiteSpace(raw))
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL deprecated direction env ignored key=" + envKey + " value=" + raw + " (use L/R)");
+      source = "rule";
+      return referenceX >= viewportCenterX ? NotabCalloutPlacer.RequiredSide.Right : NotabCalloutPlacer.RequiredSide.Left;
+    }
+
+    private void AppendNotabProfileCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, Extents3d viewportPaperExt, double txt, NotabCalloutPlacer placer)
     {
       if (tr == null || layoutBtr == null || db == null)
         return;
@@ -5185,35 +5208,8 @@ namespace PlantFlow_Support
           // anchor(부재 지정점)는 노브 미적용으로 고정, elbow/text만 idx별 노브로 이동
           elbow = new Point3d(elbow.X + mdxI, elbow.Y + mdyI, 0.0);
           textPoint = new Point3d(textPoint.X + mdxI, textPoint.Y + mdyI, 0.0);
-          bool smartPlaced = false;
-          string smartDiag = "FAIL";
-          if (placer != null)
-          {
-            double textWidth = System.Math.Max(1.0, designation.Length * txt * 0.7);
-            double textHeight = System.Math.Max(1.0, txt * 1.4);
-            double eMinX = supportPaperExt.MinPoint.X, eMaxX = supportPaperExt.MaxPoint.X;
-            double eMinY = supportPaperExt.MinPoint.Y, eMaxY = supportPaperExt.MaxPoint.Y;
-            double dL = anchor.X - eMinX, dR = eMaxX - anchor.X, dB = anchor.Y - eMinY, dT = eMaxY - anchor.Y;
-            double m = System.Math.Min(System.Math.Min(dL, dR), System.Math.Min(dB, dT));
-            double outwardAngle = (m == dB) ? -90.0 : (m == dT) ? 90.0 : (m == dL) ? 180.0 : 0.0;
-            string dirKey = "PFS_NOTAB_DIR_" + notabTypePrefix + "_M" + i;
-            double requestedAngle = this.GetEnvDouble(dirKey, double.NaN, -360.0, 360.0);
-            bool directionFromEnv = !double.IsNaN(requestedAngle);
-            if (directionFromEnv)
-              outwardAngle = requestedAngle;
-            Point3d smartCenter, smartElbow, smartFar;
-            bool smartLeft;
-            if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, minDx, string.Empty, out smartCenter, out smartElbow, out smartFar, out smartLeft, out smartDiag))
-            {
-              smartDiag += " dirSrc=" + (directionFromEnv ? "env" : "auto") + " out=" + this.FormatNumber(outwardAngle);
-              textPoint = smartCenter;
-              elbow = smartElbow;
-              leftHalf = smartLeft;
-              smartPlaced = true;
-            }
-            else
-              PlantOrthoView.FileDiag("PFSNOTABDETAIL " + designation + " smart FAIL fallback");
-          }
+          string sideSource;
+          NotabCalloutPlacer.RequiredSide requiredSide = this.ResolveNotabRequiredSide("PFS_NOTAB_DIR_" + notabTypePrefix + "_M" + i, anchor.X, (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0, out sideSource);
           // cycle83: MLeader 경로는 접속점을 확정할 수 없어 직접 MText+Leader 작도로 교체했다.
           #if false
           MText content = new MText();
@@ -5312,8 +5308,7 @@ namespace PlantFlow_Support
           if (smartPlaced)
             placer.Commit(anchor, elbow, textPoint, System.Math.Max(1.0, designation.Length * txt * 0.7), System.Math.Max(1.0, txt * 1.4));
           #endif
-          this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, designation, anchor, textPoint, leftHalf, gap, minDx, "callout");
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + (multiDesignation ? " leftHalf=" + leftHalf : string.Empty) + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " textSide=" + (textPoint.X < anchor.X ? "left" : "right") + " anchorX=" + this.FormatNumber(anchor.X) + " textX=" + this.FormatNumber(textPoint.X) + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " fx=" + this.FormatNumber(fx) + " anchorFx=" + this.FormatNumber(anchorFx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
+          this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, designation, anchor, (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0, requiredSide, sideSource, gap, minDx, "callout");
         }
       }
       catch (System.Exception ex)
@@ -5322,7 +5317,7 @@ namespace PlantFlow_Support
       }
     }
 
-    private void AppendNotabPipeCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, double pipeCenterXPaper, double pipeCenterYPaper, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer)
+    private void AppendNotabPipeCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, double pipeCenterXPaper, double pipeCenterYPaper, Extents3d supportPaperExt, Extents3d viewportPaperExt, double txt, NotabCalloutPlacer placer)
     {
       if (tr == null || layoutBtr == null || db == null)
         return;
@@ -5362,38 +5357,12 @@ namespace PlantFlow_Support
         if (!string.IsNullOrWhiteSpace(bop))
           contents = string.IsNullOrWhiteSpace(contents) ? "B.O.P +" + bop : contents + "\\P" + "B.O.P +" + bop;
 
-        bool textLeftOfAnchor = false;
-        bool smartPlaced = false;
-        string smartDiag = "FAIL";
         int longestLine = 0;
         string[] lines = contents.Split(new string[] { "\\P" }, System.StringSplitOptions.None);
         for (int i = 0; i < lines.Length; i++)
           if (lines[i].Length > longestLine) longestLine = lines[i].Length;
-        double textWidth = System.Math.Max(1.0, longestLine * txt * 0.7);
-        double textHeight = System.Math.Max(1.0, lines.Length * txt * 1.4);
-        if (placer != null)
-        {
-          double eMinX = supportPaperExt.MinPoint.X, eMaxX = supportPaperExt.MaxPoint.X;
-          double eMinY = supportPaperExt.MinPoint.Y, eMaxY = supportPaperExt.MaxPoint.Y;
-          double dL = anchor.X - eMinX, dR = eMaxX - anchor.X, dB = anchor.Y - eMinY, dT = eMaxY - anchor.Y;
-          double m = System.Math.Min(System.Math.Min(dL, dR), System.Math.Min(dB, dT));
-          double outwardAngle = (m == dB) ? -90.0 : (m == dT) ? 90.0 : (m == dL) ? 180.0 : 0.0;
-          string dirKey = "PFS_NOTAB_DIR_" + this.GetSupportTypePrefix(s_isoSupportTag) + "_PIPE";
-          double requestedAngle = this.GetEnvDouble(dirKey, double.NaN, -360.0, 360.0);
-          bool directionFromEnv = !double.IsNaN(requestedAngle);
-          if (directionFromEnv)
-            outwardAngle = requestedAngle;
-          Point3d smartCenter, smartElbow, smartFar;
-          if (placer.TryPlace(anchor, outwardAngle, textWidth, textHeight, gap, minDx, "pipe", out smartCenter, out smartElbow, out smartFar, out textLeftOfAnchor, out smartDiag))
-          {
-            smartDiag += " dirSrc=" + (directionFromEnv ? "env" : "auto") + " out=" + this.FormatNumber(outwardAngle);
-            textPoint = smartCenter;
-            elbow = smartElbow;
-            smartPlaced = true;
-          }
-          else
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe smart FAIL fallback");
-        }
+        string sideSource;
+        NotabCalloutPlacer.RequiredSide requiredSide = this.ResolveNotabRequiredSide("PFS_NOTAB_DIR_" + this.GetSupportTypePrefix(s_isoSupportTag) + "_PIPE", anchor.X, (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0, out sideSource);
 
         // cycle83: MLeader 경로는 접속점을 확정할 수 없어 직접 MText+Leader 작도로 교체했다.
         #if false
@@ -5493,8 +5462,7 @@ namespace PlantFlow_Support
         if (smartPlaced)
           placer.Commit(anchor, elbow, textPoint, textWidth, textHeight);
         #endif
-        this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, contents, anchor, textPoint, textLeftOfAnchor, gap, minDx, "pipe callout");
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe callout append PLN=" + (string.IsNullOrWhiteSpace(pln) ? "skip" : pln) + " BOP=" + (string.IsNullOrWhiteSpace(bop) ? "skip" : bop) + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " textSide=" + (textPoint.X < anchor.X ? "left" : "right") + " anchorX=" + this.FormatNumber(anchor.X) + " textX=" + this.FormatNumber(textPoint.X) + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " pipeSide=" + pipeSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pdx=" + this.FormatNumber(pdx) + " pdy=" + this.FormatNumber(pdy));
+        this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, contents, anchor, (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0, requiredSide, sideSource, gap, minDx, "pipe callout");
       }
       catch (System.Exception ex)
       {
