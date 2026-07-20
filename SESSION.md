@@ -1,5 +1,109 @@
 ﻿# SESSION — 현재 작업 상태
 
+## ★★★이관 스레드 상태 (2026-07-21, 다음 세션 시작점)
+
+### ① 진행 중 트랙 — 무탭 BOM 표 + 밸룬 (cycle 94~96)
+오쏘의 BOM/밸룬 자산을 무탭에 합치는 트랙. **밸룬은 이식이 아니라 신규 설계**다.
+- **cycle 94(계측) 종결**: 오쏘 `CreateAnnotations()`의 밸룬 루프는 `P*`/`R*` ITEM만 처리하고
+  **`F*` 분기가 없다** → `bom-item item='F1' branch=NONE anchorExact=True`.
+  **부재 밸룬은 오쏘에도 존재한 적이 없다.** 생성되는 리더는 `PLN`/`BOP` 둘뿐.
+- **cycle 95(BOM 표+밸룬) 집도 완료**: 표·밸룬 모두 도면에 나온다(사용자 확인).
+- **cycle 96(밸룬 배치)** 진행 중. 핸드오프 발행(`f8dc2c7`)했으나 **사용자 지시로 Claude가 직접 집도**.
+
+### ② 직전 실측 (2026-07-21 08:03~08:04 로그)
+```
+RC2 F1 anchor=(339.5,368.9) center=(369.1,239.6) r=129.3 cost=48.79 scanned=181
+       reject(oob/box/extLeader/calloutLeader)=1852/659/630/974  extLeaderBy{unnamed=630}
+RC3 F1 r=149.3 cost=43.99   RC3 F2 r=134.3 cost=95.34 scanned=37
+```
+**★밀집 원인 확정(자문 검증)**: `costRefExt`는 밸룬별 앵커가 아니라
+`AppendNotabPaperDimensions()`에서 **한 번** 설정된다(서포트+파이프 bbox).
+`preferDown=false`·`angleW=0`이라 실질 비용은
+`cost = costRefExt 밖으로 나간 양 + radius × 0.01` →
+**거리가 사실상 공짜**라 "멀지만 기준상자 안쪽" 후보가 항상 이긴다.
+`extLeaderBy{unnamed}` = 차단자는 서포트가 아니라 **치수**.
+
+### ③ 대기 중 액션 — `28237e7` 라이브 미검증
+마지막 집도(`28237e7`)를 **아직 추출해보지 않았다.** `dev_test.bat` 후 로그 확인이 다음 단계.
+확인 키:
+- `balloon-draw`의 `dir=/dist=/clear=/score=` — **`dist`가 리더 길이**(기존 129~149 → 20~40 기대)
+- 밸룬이 각 부재 옆 빈 공간에 흩어졌는지(F1 우측 / F2 기둥 옆 / P1 하단)
+- 유볼트 화살표가 원 바깥 quadrant에 닿는지, `ubolt-box 없음` 로그 유무
+- `balloon-skip ... reason=` / 기존 콜아웃(치수·라인넘버·부재) 회귀
+
+### ④ 사용자 확정 배치 규칙 (수작업 그림 기준, 재논의 금지)
+1. **화살표는 부재 중심이 아니라 외곽 접점**. 유볼트는 원형이므로 **quadrant 포인트**.
+2. **리더는 꺾임 없이 직선 1개**.
+3. **밸룬은 부재 옆 "한적한" 자리** — 서포트 bbox 밖이 아니라 **도면 내부 빈 공간도 사용**.
+4. 밸룬 옆 부재 코드는 **가로 방향**(원 바깥쪽). `ANGLE A6` → `A6`.
+
+### ⑤ 구현 상태 (cycle 96, 세 번 갈아엎음)
+| 시도 | 커밋 | 결과 |
+|---|---|---|
+| 전역 비용 탐색(`TryPlace` 재사용) | `6e423f8` | **밀집**(r=129~149) |
+| 둘레 배치(서포트 bbox 밖 4변) | `a45d9b0` | 방향은 맞으나 **내부 빈 공간 미사용** |
+| **부재 외곽 접점 + 한적도 점수** | **`28237e7`** | **미검증** |
+
+현행 로직:
+```
+부재 사각형 = 세로재(기둥구간 cycle92) / 가로재(A+A1 cycle90) / 그 외(포트 주변 소형)
+후보 = 부재 사각형에서 8방향 × 거리 단계
+score = placer.ClearanceTo(box) − 리더길이 × PFS_NOTAB_BALLOON_LEADER_W(0.6)
+화살표 = NotabCalloutPlacer.BoxEdgeToward(부재 사각형, 밸룬 중심)
+판정 = placer.IsBalloonFree — 상자 겹침은 전 장애물 금지,
+       리더 교차는 기존 콜아웃만(서포트·치수 위 통과는 정상)
+```
+
+### ⑥ 미결 정책 (사용자 결정 대기)
+- **(가) 밸룬 대체 vs (나) 텍스트 콜아웃 공존** — 현재 기본 **(가)**.
+  `PFS_NOTAB_MEMBER_TEXT=1`이면 (나). 단 (나)는 designation 중복 제거로
+  **밸룬 3개 + 텍스트 1개**가 되어 짝이 안 맞는다(RC는 가로·세로가 같은 `ANGLE A6`).
+  제3안 = 텍스트를 BOM 행에서 생성(`F1 → L-65×65×6 L=450`).
+- 밸룬 반지름·코드 위치 기본값 확정(`PFS_NOTAB_BALLOON_R`, `PFS_NOTAB_BALLOON_SUB=below|side`).
+
+### ⑦ 이번 세션에서 잡은 자체 결함 (재발 주의)
+- **`PFS_NOTAB_CALLOUT_PAD` 이름 결합**(`ef09036`): `AddObstacle` 패딩이 같은 노브를 읽어,
+  cycle92에서 콜아웃 여백용으로 기본 8을 도입하자 **모든 장애물이 2→8로 부풀었다**.
+  → `PFS_NOTAB_OBSTACLE_PAD`(기본 2)로 분리. **밸룬과 무관하게 기존 배치에도 영향을 주던 결함.**
+- **BOM 표 `FlowDirection` 누락**(`01bcbb4`): 기본값이면 표가 아래로 자라 타이틀블록에 묻힌다.
+- **`PSUtil.Log`는 파일 로그가 아니다**(`6d71127`): `Editor.WriteMessage`라 사후 검증 불가.
+  진단은 반드시 `PlantOrthoView.FileDiag`.
+- **계측 코드 자체의 결함**: 무탭 BOM 행에는 헤더가 없는데 행 0을 헤더로 건너뛰어
+  `balloon-diff`에서 F1이 누락됐다(`9a6abff`).
+
+### ⑧ 재조사 금지 (확정 실측)
+- `BOMs`는 Plant 프로젝트·DataLinksManager 의존 → **side DB 호출 불가**. 원본 단계 캡처 필수.
+- `TaggingPoints`의 `p1`은 `p0+(50,50,z=0)` **방향 힌트**, 실좌표 아님.
+- `S<n> → F<n>` 일반 규칙 없음. 타입별 메서드가 포트 인덱스를 개별 지정
+  (RC1: `F1←PPorts[2]`, `F2←PPorts[1]`, `P1_0←PPorts[3]`).
+- 세로 기둥은 독립 솔리드가 아니다(`7A`가 기둥+가로재+플레이트 병합). 유볼트는 독립.
+- 상세도에 **2D 선분이 없다**(복제 `Solid3d` + 뷰포트 와이어프레임).
+- `NotabProjectWcsToPaper`는 실패 시 `Point3d.Origin` 반환 → 밸룬은 `TryNotabProjectWcsToPaper` 사용.
+
+### ⑨ 관련 파일·경로
+- 계획서: `.plans/plan_notab_bom_balloon_measure_20260720.md`(cycle94 계측)
+  · `plan_notab_bom_balloon_design_20260720.md`(cycle95 설계)
+  · `plan_notab_balloon_placement_20260721.md`(cycle96 밀집)
+- 핸드오프: `.plans/HANDOFF.md`(cycle 96, **Claude 직접 집도로 대체됨**)
+- 코드: `PlantFlow_Support/Core/Commands.cs`
+  - `NotabCalloutPlacer`(상단 ~200): `TryPlace`/`Free`/`IsBalloonFree`/`ClearanceTo`/`CommitBalloonBox`/`BoxEdgeToward`
+  - `AppendNotabBomTable` · `AppendNotabBalloons` · `AppendNotabUboltCallouts` · `AppendNotabDirectCallout`(anchorBox 오버로드)
+  - `MeasureNotabBomBalloonSources`(원본 DB BOM·TaggingPoints 스냅샷)
+- 로그 `C:\Temp\pfs_diag.log`. 키: `balloon-draw`/`balloon-skip`/`bom-table`/`ubolt-box`/`MEASURE *`
+- 최근 커밋: `6e423f8`(표+밸룬) `01bcbb4`(FlowDirection) `717cb98`(직선리더) `9c1e4c3`(코드표기)
+  `253c967`(코드 옆배치) `7a66482`(앵커 중앙) `0ee7d75`(서포트 리더면제) `bca5efa`(차단자 계측)
+  `ef09036`(패딩 분리) `a45d9b0`(둘레배치) `28237e7`(**외곽접점+한적도, 미검증**)
+
+### ⑩ 프로세스 교훈
+- **같은 문제 3회 실패 시 상수 튜닝 중단** — cycle96에서 앵커 이동·리더 면제·패딩 분리가
+  연속 실패한 뒤 계획→자문→핸드오프로 전환해 원인(비용식)을 확정했다.
+- **자문이 "거리 가중치만 올리면 네 번째 튜닝 실패"라고 사전 경고**했고 그대로였다.
+- **로그 수치가 한 자리도 안 바뀌면 그 가설은 틀린 것** — 서포트 리더 면제가 무효였던 판정 근거.
+- **배포 DLL 시각과 로그 시각을 먼저 대조**할 것. 한 번은 수정 전 바이너리 결과를 보고 있었다.
+
+---
+
+
 _최종 갱신: 2026-07-20 (cycle93 StandardSupport 개명·DesignStd 외부화 집도 완료, 라이브 검증 대기)_
 
 ## ★★★ cycle 93 종결 — StandardSupport 개명 + DesignStd 외부화 (2026-07-20, 전 항목 검증)
