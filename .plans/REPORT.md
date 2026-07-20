@@ -27,4 +27,4 @@
 - GD3 `PFS_NOTAB_GD3_ANCHOR_FX0=0.305` 적용 시 L 앵커 중심 정합과 `anchorFx=0.305` 로그를 확인한다.
 
 ## 커밋
-- 집도 완료 후 기록.
+- `6418e79` (`fix: avoid notab callout dimension collisions`)
