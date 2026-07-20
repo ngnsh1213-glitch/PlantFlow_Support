@@ -2,6 +2,21 @@
 
 _완료 항목은 여기서 지우고 `CHANGELOG.md`로 옮긴다._
 
+## 예약 — RC 트랙 종료 후 착수 (2026-07-20 사용자 확정)
+- [ ] **`HANTEC` → `StandardSupport` 이름 변경 (방식 (가): 이름만, 내용·구조 불변)**
+  - 목적: 벤더(회사)명이 코드 전면에 드러나는 것 제거. 대외 공개·제품화 대비.
+  - 범위: 클래스명 `HANTEC`, 파일명 `HANTEC.cs`, 내부 변수/메서드/주석. 총 181곳 중 리터럴 제외분.
+  - **★절대 바꾸지 말 것 — 문자열 리터럴 `"HANTEC"`**: Plant3D 카탈로그에 실제 저장된
+    DesignStd 값이라 외부 데이터다. 바꾸면 조회가 전부 깨진다.
+    `BOMs.cs:45`(`design_std == "HANTEC"`), `Commands.cs:7902/7925`(`ContentsByDesignStd("HANTEC")`),
+    `OrthoViewportManager.cs:787`(`CPYDesignStd == "HANTEC"`).
+  - 결과 의미: "표준 서포트 주석 엔진"이 "DesignStd=HANTEC인 데이터"를 다룬다 — 관계가 이름에 드러남.
+  - `PlantFlow_Support_Backup_Stable/`은 백업 폴더이므로 대상 제외.
+  - **추상화(인터페이스+구현체 분리)는 하지 않는다** — 현재 HANTEC 외 표준 요구가 없다.
+    다른 벤더 표준이 실제로 생기면 그때 (나)안으로 재검토.
+  - **착수 시점**: RC 트랙(cycle 91~) 한 단락 후. 지금은 `HANTEC.cs`/`Commands.cs`를
+    계속 수정 중이라 대규모 rename이 충돌한다.
+
 ## ★무탭 엔진 (현재 트랙, 2026-07-14)
 - [x] 무탭 Main 라이브 PASS (은선 정투영, cycle 30)
 - [x] RECOVER 해결 (H5=sourceDb 조기 Dispose, cycle 37, 커밋 d7897e5)
