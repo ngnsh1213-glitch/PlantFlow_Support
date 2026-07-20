@@ -30,4 +30,4 @@
 - 로그 `StandardSupport design standard value=... supported=True` 확인.
 
 ## 커밋
-- 완료 후 기록
+- `d5b237f` `refactor: rename HANTEC standard support`
