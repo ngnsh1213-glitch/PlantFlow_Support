@@ -48,6 +48,8 @@ namespace PlantFlow_Support
     {
       double startRadius = System.Math.Max(15.0, System.Math.Max(width, height) / 2.0 + gap);
       double maxRadius = System.Math.Max(startRadius, System.Math.Sqrt(System.Math.Pow(System.Math.Max(anchor.X - _minX, _maxX - anchor.X), 2.0) + System.Math.Pow(System.Math.Max(anchor.Y - _minY, _maxY - anchor.Y), 2.0)) + width + height);
+      // 루프가 한 번도 돌지 않는 경우까지 컴파일러가 out 할당을 증명할 수 있도록 루프 밖에 둔다.
+      string failDiag = "FAIL";
       for (int tier = 0; tier < 3; tier++)
       {
         LeaderCheckScope leaderScope = tier == 0 ? LeaderCheckScope.All : tier == 1 ? LeaderCheckScope.PlacedCalloutsOnly : LeaderCheckScope.None;
@@ -109,9 +111,10 @@ namespace PlantFlow_Support
           return true;
         }
         if (tier == 2)
-          diagnostic = "FAIL tier=2 scanned=" + scanned + " reject(oob/box/extLeader/calloutLeader)=" + rejectOob + "/" + rejectBox + "/" + rejectExtLeader + "/" + rejectCalloutLeader;
+          failDiag = "FAIL tier=2 scanned=" + scanned + " reject(oob/box/extLeader/calloutLeader)=" + rejectOob + "/" + rejectBox + "/" + rejectExtLeader + "/" + rejectCalloutLeader;
       }
       textCenter = Point3d.Origin; p1 = Point3d.Origin; p2 = Point3d.Origin; textLeftOfAnchor = requiredSide == RequiredSide.Left;
+      diagnostic = failDiag;
       return false;
     }
 
