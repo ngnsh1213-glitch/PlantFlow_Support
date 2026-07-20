@@ -133,13 +133,13 @@ namespace PlantFlow_Support
 
     // 밸룬은 원이라 Commit의 "textCenter.X < anchor.X" 좌우 추론이 성립하지 않는다.
     // 외접 사각형과 리더 선분을 명시적으로 등록한다.
-    public void CommitBalloon(Point3d anchor, Point3d elbow, Point3d center, double radius)
+    public void CommitBalloon(Point3d anchor, Point3d touch, Point3d center, double radius)
     {
       _placedBoxes.Add(new Extents3d(
         new Point3d(center.X - radius, center.Y - radius, 0.0),
         new Point3d(center.X + radius, center.Y + radius, 0.0)));
-      _placedLeaders.Add(new Point3d[] { anchor, elbow });
-      _placedLeaders.Add(new Point3d[] { elbow, center });
+      // 리더는 앵커→원주 직선 1개다(꺾임 없음). 원 안 구간은 등록하지 않는다.
+      _placedLeaders.Add(new Point3d[] { anchor, touch });
     }
 
     private bool OutOfBounds(Extents3d box)
@@ -8095,7 +8095,10 @@ namespace PlantFlow_Support
 
         // TryPlace는 텍스트 상자 좌변/우변을 반환한다. 원 중심은 그 지점에서 반지름만큼 안쪽이다.
         Point3d ballCenter = new Point3d(left ? center.X - radius : center.X + radius, center.Y, 0.0);
-        Point3d elbow = new Point3d(p1.X, p1.Y, 0.0);
+        // 밸룬 리더는 꺾지 않는다. 앵커에서 원주까지 직선 1개.
+        Vector3d toCenter = ballCenter - anchor;
+        if (toCenter.Length < 1e-9) toCenter = Vector3d.XAxis;
+        Point3d touch = ballCenter - toCenter.GetNormal() * radius;
 
         try
         {
@@ -8118,8 +8121,7 @@ namespace PlantFlow_Support
 
           Leader leader = new Leader();
           leader.AppendVertex(anchor);
-          leader.AppendVertex(elbow);
-          leader.AppendVertex(new Point3d(left ? ballCenter.X + radius : ballCenter.X - radius, ballCenter.Y, 0.0));
+          leader.AppendVertex(touch);
           leader.HasArrowHead = true;
           leader.Dimasz = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
           if (layerId != ObjectId.Null) leader.LayerId = layerId;
@@ -8127,7 +8129,7 @@ namespace PlantFlow_Support
           layoutBtr.AppendEntity(leader);
           tr.AddNewlyCreatedDBObject(leader, true);
 
-          placer.CommitBalloon(anchor, elbow, ballCenter, radius);
+          placer.CommitBalloon(anchor, touch, ballCenter, radius);
           PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-draw key=" + item + " item=" + bomItem
             + " anchor=" + this.FormatPoint(anchor) + " center=" + this.FormatPoint(ballCenter)
             + " r=" + this.FormatNumber(radius) + " side=" + (left ? "left" : "right") + " " + diag);
