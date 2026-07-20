@@ -44,7 +44,7 @@ namespace PlantFlow_Support
     }
 
     public bool TryPlace(Point3d anchor, RequiredSide requiredSide, double width, double height, double gap, double minDx,
-      string ownerTag, out Point3d textCenter, out Point3d p1, out Point3d p2, out bool textLeftOfAnchor, out string diagnostic)
+      string ownerTag, bool preferDown, out Point3d textCenter, out Point3d p1, out Point3d p2, out bool textLeftOfAnchor, out string diagnostic)
     {
       double startRadius = System.Math.Max(15.0, System.Math.Max(width, height) / 2.0 + gap);
       double maxRadius = System.Math.Max(startRadius, System.Math.Sqrt(System.Math.Pow(System.Math.Max(anchor.X - _minX, _maxX - anchor.X), 2.0) + System.Math.Pow(System.Math.Max(anchor.Y - _minY, _maxY - anchor.Y), 2.0)) + width + height);
@@ -88,7 +88,10 @@ namespace PlantFlow_Support
               + System.Math.Max(0.0, box.MaxPoint.Y - _costRefExt.MaxPoint.Y)
               + System.Math.Max(0.0, _costRefExt.MinPoint.Y - box.MinPoint.Y)
               + radius * 0.01
-              + System.Math.Abs(fanOffset) * angleW;
+              + System.Math.Abs(fanOffset) * angleW
+              // 하단 선호: 앵커보다 위로 올라간 만큼만 가산한다. 제약이 아니라 편향이므로
+              // 아래가 막히면 위로 올라가는 탐색은 그대로 살아 있다.
+              + ((preferDown && y > anchor.Y) ? (y - anchor.Y) * ReadEnvDouble("PFS_NOTAB_CALLOUT_DOWN_W", 1.0) : 0.0);
             if (cost < bestCost)
             {
               found = true;
@@ -4842,8 +4845,16 @@ namespace PlantFlow_Support
         RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(minX, minY, 0.0), new Point3d(minX, dimVTopY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, realH, txt, "dimV", dimVText);
         // 치수가 먼저 자리를 확정하고, 모든 콜아웃이 같은 충돌 상태를 공유한다.
+        // 콜아웃 허용영역은 실제 뷰포트 사각형이다. 서포트 extents ± 100은 폭 넓은
+        // 라인넘버 텍스트가 좌우 고정 상태에서 전량 영역 밖으로 떨어지게 만든다.
         double calloutMargin = 100.0;
-        NotabCalloutPlacer calloutPlacer = new NotabCalloutPlacer(minX - calloutMargin, minY - calloutMargin, maxX + calloutMargin, maxY + calloutMargin);
+        bool viewportBoundsOk = viewportPaperExt.MaxPoint.X - viewportPaperExt.MinPoint.X > 1.0
+          && viewportPaperExt.MaxPoint.Y - viewportPaperExt.MinPoint.Y > 1.0;
+        NotabCalloutPlacer calloutPlacer = viewportBoundsOk
+          ? new NotabCalloutPlacer(viewportPaperExt.MinPoint.X, viewportPaperExt.MinPoint.Y, viewportPaperExt.MaxPoint.X, viewportPaperExt.MaxPoint.Y)
+          : new NotabCalloutPlacer(minX - calloutMargin, minY - calloutMargin, maxX + calloutMargin, maxY + calloutMargin);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-bounds src=" + (viewportBoundsOk ? "viewport" : "supportExt±100")
+          + " ext=" + this.FormatExtents(viewportBoundsOk ? viewportPaperExt : supportPaperExt));
         calloutPlacer.AddObstacle(supportPaperExt);
         this.AddNotabDimensionObstacles(tr, layoutBtr, calloutPlacer, txt);
         this.AddNotabPipeObstacle(calloutPlacer, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius);
@@ -5052,7 +5063,9 @@ namespace PlantFlow_Support
         bool smartPlaced = false;
         if (placer != null)
         {
-          smartPlaced = placer.TryPlace(anchor, requiredSide, actualWidth, actualHeight, gap, minDx, label == "pipe callout" ? "pipe" : string.Empty, out near, out p1, out p2, out left, out diagnostic);
+          bool isPipeCallout = label == "pipe callout";
+          // 부재 콜아웃은 하단 선호(치수가 항상 상단·좌측에 놓인다). 라인넘버는 상하 자유.
+          smartPlaced = placer.TryPlace(anchor, requiredSide, actualWidth, actualHeight, gap, minDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, out near, out p1, out p2, out left, out diagnostic);
         }
         if (!smartPlaced)
         {
