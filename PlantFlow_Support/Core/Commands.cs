@@ -67,9 +67,9 @@ namespace PlantFlow_Support
             Extents3d box = new Extents3d(new Point3d(boxLeft, y - height / 2.0, 0.0), new Point3d(boxLeft + width, y + height / 2.0, 0.0));
             if (OutOfBounds(box)) continue;
             double baseY = y - height / 2.0 - ReadEnvDouble("PFS_NOTAB_CALLOUT_TEXT_GAP", 3.0);
-            Point3d p1 = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, baseY, 0.0);
-            Point3d p2 = new Point3d(textLeft ? box.MinPoint.X : box.MaxPoint.X, baseY, 0.0);
-            if (!Free(box, anchor, p1, p2, checkLeader, ownerTag)) continue;
+            Point3d candP1 = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, baseY, 0.0);
+            Point3d candP2 = new Point3d(textLeft ? box.MinPoint.X : box.MaxPoint.X, baseY, 0.0);
+            if (!Free(box, anchor, candP1, candP2, checkLeader, ownerTag)) continue;
             scanned++;
             double cost = System.Math.Max(0.0, box.MaxPoint.X - _costRefExt.MaxPoint.X)
               + System.Math.Max(0.0, _costRefExt.MinPoint.X - box.MinPoint.X)
@@ -82,8 +82,8 @@ namespace PlantFlow_Support
               bestCost = cost;
               bestCenter = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, y, 0.0);
               bestLeft = textLeft;
-              bestP1 = p1;
-              bestP2 = p2;
+              bestP1 = candP1;
+              bestP2 = candP2;
               bestDiag = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " out=" + outwardAngleDeg.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " actual=" + (outwardAngleDeg + fanOffset).ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " cost=" + cost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
             }
           }
@@ -4605,7 +4605,17 @@ namespace PlantFlow_Support
           ObjectId textStyleId;
           ObjectId dimStyleId;
           this.EnsureIsoAnnotationResources(db, tr, out layerId, out textStyleId, out dimStyleId);
-          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, pipeCenterXPaper, pipeCenterYPaper, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId, textStyleId, db);
+          double pipePaperRadius = double.NaN;
+          try
+          {
+            Point3d p0; Vector3d dir; double modelRadius;
+            PSUtil ps = Commands.PSUtil ?? new PSUtil();
+            if (this.TryGetPipeAxisFromId(tr, s_isoPipeId, ps, out p0, out dir, out modelRadius) && modelRadius > 1e-6)
+              pipePaperRadius = modelRadius * this.GetNotabViewportScale(vp);
+          }
+          catch (System.Exception ex)
+          { PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe paper radius 예외: " + ex.GetType().Name + ": " + ex.Message); }
+          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId, textStyleId, db);
           tr.Commit();
         }
       }
@@ -4684,7 +4694,7 @@ namespace PlantFlow_Support
       }
     }
 
-    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double realW, double realH, ObjectId dimStyleId, ObjectId layerId, ObjectId textStyleId, Database db)
+    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double pipePaperRadius, double realW, double realH, ObjectId dimStyleId, ObjectId layerId, ObjectId textStyleId, Database db)
     {
       if (tr == null || layoutBtr == null)
         return;
@@ -4815,7 +4825,7 @@ namespace PlantFlow_Support
         NotabCalloutPlacer calloutPlacer = new NotabCalloutPlacer(minX - calloutMargin, minY - calloutMargin, maxX + calloutMargin, maxY + calloutMargin);
         calloutPlacer.AddObstacle(supportPaperExt);
         this.AddNotabDimensionObstacles(tr, layoutBtr, calloutPlacer, txt);
-        this.AddNotabPipeObstacle(tr, vp, calloutPlacer, pipeCenterXPaper, pipeCenterYPaper);
+        this.AddNotabPipeObstacle(calloutPlacer, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius);
         Point3d calloutCostAnchor = (!double.IsNaN(pipeCenterXPaper) && !double.IsNaN(pipeCenterYPaper))
           ? new Point3d(pipeCenterXPaper, pipeCenterYPaper, 0.0)
           : new Point3d((minX + maxX) / 2.0, (minY + maxY) / 2.0, 0.0);
@@ -4931,23 +4941,18 @@ namespace PlantFlow_Support
       PlantOrthoView.FileDiag("PFSNOTABDETAIL dim-obstacle count=" + count);
     }
 
-    private void AddNotabPipeObstacle(Transaction tr, Viewport vp, NotabCalloutPlacer placer, double centerX, double centerY)
+    private void AddNotabPipeObstacle(NotabCalloutPlacer placer, double centerX, double centerY, double pipePaperRadius)
     {
-      if (tr == null || vp == null || placer == null || s_isoPipeId == ObjectId.Null || double.IsNaN(centerX) || double.IsNaN(centerY))
+      if (placer == null || double.IsNaN(centerX) || double.IsNaN(centerY) || double.IsNaN(pipePaperRadius) || pipePaperRadius <= 1e-6)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe-obstacle skip: paper radius invalid");
         return;
+      }
       try
       {
-        Point3d p0; Vector3d dir; double modelRadius;
-        PSUtil ps = Commands.PSUtil ?? new PSUtil();
-        if (!this.TryGetPipeAxisFromId(tr, s_isoPipeId, ps, out p0, out dir, out modelRadius) || modelRadius <= 1e-6)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe-obstacle skip: radius unavailable id=" + s_isoPipeId);
-          return;
-        }
-        double paperRadius = modelRadius * this.GetNotabViewportScale(vp);
-        Extents3d box = new Extents3d(new Point3d(centerX - paperRadius, centerY - paperRadius, 0.0), new Point3d(centerX + paperRadius, centerY + paperRadius, 0.0));
+        Extents3d box = new Extents3d(new Point3d(centerX - pipePaperRadius, centerY - pipePaperRadius, 0.0), new Point3d(centerX + pipePaperRadius, centerY + pipePaperRadius, 0.0));
         placer.AddObstacle(box, "pipe");
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe-obstacle count=1 center=(" + this.FormatNumber(centerX) + "," + this.FormatNumber(centerY) + ") r=" + this.FormatNumber(paperRadius));
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe-obstacle count=1 center=(" + this.FormatNumber(centerX) + "," + this.FormatNumber(centerY) + ") r=" + this.FormatNumber(pipePaperRadius));
       }
       catch (System.Exception ex)
       {
@@ -4996,7 +5001,7 @@ namespace PlantFlow_Support
         double baseY = smartPlaced ? p1.Y : near.Y - actualHeight / 2.0 - textGap;
         double nearX = smartPlaced ? p1.X : (right ? leftX : rightX);
         double farX = smartPlaced ? p2.X : (right ? rightX : leftX);
-        mt.Location = new Point3d(leftX, baseY, 0.0);
+        mt.Location = new Point3d(leftX, baseY + textGap, 0.0);
 
         Leader leader = new Leader();
         leader.AppendVertex(anchor);
