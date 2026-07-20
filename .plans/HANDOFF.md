@@ -3,76 +3,102 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 91
+- **cycle**: 92
 - **status**: ready
 - **issued_at**: 2026-07-20
-- **title**: 포트 덤프(기둥 앵커 원천) + 세로 치수 기준 정합 + U-bolt 태그 조사
+- **title**: RC 세로치수·부재앵커를 포트 S2 기준으로 + U-bolt 태그 콜아웃
 - **작업 경로**: `d:\PlantFlow\PlantFlow_Support\PlantFlow_Support\Core\Commands.cs`
-- **계획서**: `d:\PlantFlow\PlantFlow_Support\.plans\plan_notab_rc_post_and_ubolt_20260720.md` (**먼저 정독**)
+- **계획서**: `d:\PlantFlow\PlantFlow_Support\.plans\plan_notab_rc_port_anchor_20260720.md` (**먼저 정독**)
 - **핸드오프 위치**: `d:\PlantFlow\PlantFlow_Support\.plans\HANDOFF.md`
 
-## 배경 (재조사 금지)
-- 세로 기둥은 **독립 솔리드가 아니다**. `7A`가 기둥+가로재+베이스 플레이트를 통째로 덮고,
-  `7C`(페이퍼 17.82×17.82 정사각형)는 볼트류다. **기하 분류로는 기둥을 찾을 수 없다.**
-- 상세도에는 **2D 선분이 없다**(복제 `Solid3d` + 뷰포트 와이어프레임). 선분 기반 계측 불가.
-- `7A` bbox ↔ `A/A1/A2` 역산은 **순환 논증**이라 독립 관측값이 아니다.
-
-## ★A. 포트 덤프 — 기둥 앵커의 진짜 원천 (이번 사이클 핵심, **로그만**)
-
-`HANTEC.RC1()`이 앵커를 bbox가 아니라 **포트**에서 뽑고 있다:
-```csharp
-// HANTEC.cs:868~888
-ConvertPortToPoint(this.PPorts[2]);   // F1
-ConvertPortToPoint(this.PPorts[1]);   // F2 ← 세로 부재
-ConvertPortToPoint(this.PPorts[3]);   // P1
+## 확보된 실측 (재조사 금지)
 ```
-포트는 병합 솔리드와 무관하게 **부재별 부착점을 보유**한다.
+RC2  S2 paper=(311,268.9) role=F2-candidate   RC3  S2 paper=(342,258.9)
+     S1=파이프중심  S3=우측끝                  (S2.y = minY = 기둥 밑동)
+```
+`x`가 타입마다 다르다(RC2 좌측 25%, RC3 56%) — **비율 상수로는 맞출 수 없던 값**.
+`HANTEC.RC1()`의 `PPorts[1]`(F2)과 인덱스 일치.
 
-요구:
-1. **원본 DB**에서 대상 서포트의 **포트 전량 덤프** — 인덱스·이름·WCS 좌표.
-   `Part.GetPorts` 경로 존재(메모리 `p5-topology-identification`). `HANTEC.ConvertPortToPoint`도 참고.
-2. 각 포트를 `NotabProjectWcsToPaper()`로 투영해 **페이퍼 좌표를 함께** 남긴다.
-3. RC1/RC2/RC3에서 `PPorts[1]`(F2)이 실제 기둥 위에 오는지 **REPORT에 수치로 대조**.
-4. **앵커 작도는 변경하지 않는다.** 이번엔 덤프·대조까지.
-   포트가 기둥을 정확히 지시함이 확인되면 다음 사이클에서 앵커를 포트로 전환한다.
+U-bolt 태그도 취득 확인:
+```
+ubolt-probe datalinks { SupportName=UB-002 | ShortDescription=UB | Tag=UB-002 }
+                      { SupportName=UB-003 | ShortDescription=UB | Tag=UB-003 }
+```
+RC1-001에 U-bolt **2개**. 읽기 경로는 이미 동작한다(데이터만 없었던 것).
 
-주의: `PSUtil`은 Plant 프로젝트/DataLinksManager 의존이라 **원본 활성 문서에서만** 호출하고
-side DB·복제 이후에는 호출하지 말 것(자문 지적).
+## 사용자 확정 목표 (그림 2장 대조)
+| 항목 | 현재 | 목표 |
+|---|---|---|
+| 세로 500 치수 | 플레이트 좌측 기준, 멀리 떨어짐 | **기둥 바로 옆**, 보조선이 기둥 상·하단에 접촉 |
+| L 부재 콜아웃 | 허공(7A 박스 중앙) | **기둥 몸통**에 화살표 접촉 |
+| U-bolt | 표기 없음 | **개당 1개씩** 태그 콜아웃 |
 
-## B. 세로 치수 기준 정합
-`verticalX = minX - offset - dimClear`인데 `minX`가 플레이트 기준(490)이라
-부재 기준(450)으로 옮긴 가로 치수와 어긋난다(RC2에서 500 치수가 안 움직인 원인).
+## A. 기둥 기하를 포트에서 확정
+전달 경로는 **이미 존재한다**(자문 확인). 새 인자 불필요:
+- 원본 캡처 = `s_isoSupportPorts`(`NotabSupportPortSnapshot{Index,Name,Wcs}`), `CaptureIsoSupportPorts()`
+- 상세 투영 = `LogNotabSupportPortProjection(vp)`가 `AppendNotabPaperDimensions` 진입 전 호출됨
+```
+postX     = S2.x        postBaseY = S2.y (= minY)
+postTopY  = postBaseY + F2 * vScale
+```
+- `Index==1`뿐 아니라 **`Name=="S2"`도 함께 로그 검증**. 불일치 시 기존 앵커 폴백.
+- `AppendNotabPaperDimensions`에서 산출해 `AppendNotabProfileCallout`에 **인자로 전달**.
 
-- 수정 지점은 `AppendNotabPaperDimensions(...)` **한 곳**이다.
-- `dimHSource`에서 파생한 **`dimReferenceMinX` / `dimReferenceSource`를 명시 변수로** 만들고
-  `verticalX`, **세로 치수의 두 extension point**, 로그가 모두 같은 값을 쓰게 한다.
-- `verticalX`만 바꾸면 보조선이 여전히 다른 기준을 가리킨다(자문 지적) — **불완전 수정 금지**.
-- params 경로면 params 기준, legacy 폴백이면 legacy 기준. **기준 혼용 금지.**
+## B. 세로 치수를 기둥 기준으로 (가로와 **의도적 분리**)
+cycle 91에서 가로·세로 기준을 통일했으나, **재는 대상이 다르므로 분리가 맞다**.
+되돌림이 아니라 각자 올바른 기준을 갖게 하는 것이다.
 
-## C. U-bolt 태그 조사 (조사·덤프까지)
-- 상세도 솔리드는 `TryStripCleanSolidMetadata()`로 XData·확장사전이 제거되므로 **읽을 수 없다.**
-  반드시 **원본 DB**에서 캡처한다.
-- 덤프 위치 = `AutoIncludeRelatedParts()`의 `isSup` 분기, `result.Add(eid)` 전후.
-  원본 트랜잭션 안이고 실제 자동포함된 객체만 대상이다.
-- 방법: `PSUtil.GetSupportDimension(eid)` **전량 덤프** + DataLinks는 이름 열거 API가 없으므로
-  후보 키 명시 조회(`SupportName`, `ShortDescription`, `PartNumber`, `Tag`, `TagName`,
-  `SupportDetail`, `Description`).
-- **선행 확인**: auto-include는 클래스명에 `Support`가 있어야 포함한다.
-  U-bolt가 그 조건을 못 맞추면 `otherPart`로 빠진다 → **실제 class/type명을 먼저 로그로 확인.**
+변수 의미를 고정할 것(자문 권고):
+- `dimReferenceMinX` / `dimReferenceSource` — **가로 전용**(현행 `dimHSource`에서 유도)
+- `verticalAnchorX` / `verticalAnchorBaseY` / `verticalAnchorTopY` / `verticalAnchorSource` — **세로 전용**
+- `verticalX` = `verticalAnchorX - offset - dimClear` **오직 이것만**
+- 현재 세로 extension point가 `dimReferenceMinX`를 쓴다 → **`verticalAnchorX`로 교체**
+- 로그는 한 줄에 두 기준을 함께:
+  `dimH src=... x=(...) | dimV src=port-S2 x=... baseY=... topY=... lineX=... | fallback=...`
+
+## C. 부재 콜아웃 앵커를 기둥으로
+```
+anchor = ( postX, postBaseY + (postTopY - postBaseY) * 0.5 )
+RC2 → (311, 318.9)    현행 오류 앵커 (335.5,318.9) 대비 x 24 어긋남
+```
+- `MemberAnchorSide`의 `vertical`/`top`/`bottom` **비율 추정식은 폴백 전용으로 강등**.
+- 좌우는 cycle 88 R1~R4 그대로. **변경 금지.**
+
+## D. U-bolt 태그 콜아웃
+- **`designations` 리스트에 섞지 말 것.** 그 리스트는 BOM 기반 구조 부재이고
+  GD2/GD3 다중 배치 규칙과 결합돼 있다(자문 지적).
+- 별도 `NotabUboltSnapshot` 목록을 만든다:
+  - 원본 자동포함 분기에서 **`Tag` + 원본 `GeometricExtents` 중심(WCS)** 캡처
+    (현 `DumpNotabAutoIncludedSupportMetadata`는 덤프만 하고 저장하지 않음)
+  - 상세 단계에서 WCS 중심을 `NotabProjectWcsToPaper`로 투영 → 페이퍼 앵커
+  - **포트보다 bbox 중심 우선**(U-bolt 포트의 의미가 실측되지 않았다)
+- `AppendNotabUboltCallouts(...)`를 별도로 만들고 스냅샷마다
+  `AppendNotabDirectCallout(..., label:"ubolt callout")` **1회씩** 호출.
+  이 경로는 성공 시 장애물로 `Commit`하므로 UB-002/003이 서로 회피한다.
+- **중복·잡객체 배제**: 빈 `Tag` 제외, `HashSet<Tag>` 중복 제거, `ShortDescription=="UB"` 보조 확인.
+- **배치 순서 = 치수 → 파이프 → 부재 → U-bolt**(기존 확정 배치 회귀 최소화).
+  U-bolt가 자리를 못 찾으면 `callout-skip`으로 남기고 넘어간다.
+
+## E. 폴백·가드 (자문 지적)
+- 포트 미확보·`F2` 누락·`vScale` 이상 → **기존 경로 유지** + `source=port | fallback=사유` 로그.
+- **`postBaseY`가 support paper extents를 벗어나거나 `postTopY < postBaseY`면 사용 금지·폴백.**
+  (S2의 `y=minY`는 현재 뷰 방향에서만 확인된 사실이다. 회전/반전 뷰 대비.)
+- 정적 상태(`s_isoSupportPorts`, U-bolt 목록)는 **캡처 실패 시에도 빈 상태와 사유를 명시 로그**.
+- 자동포함 클래스 게이트를 못 통과한 U-bolt는 `skip=class-gate`로 **구분해 로그**
+  (다른 카탈로그에서 `otherPart`로 빠질 수 있다).
+- GD 계열은 포트 경로를 **소비하지 않는다**(현행 유지).
 
 ## 완료 기준
-1. 빌드 성공(`dev_test.bat`은 사용자가 수동 실행).
-2. RC1/RC2/RC3에서 포트 덤프(WCS+페이퍼)가 남고, `PPorts[1]`과 기둥 위치 대조가 REPORT에 수치로 정리.
-3. RC2 세로 치수가 가로와 **같은 기준**으로 이동(보조선 포함).
-4. U-bolt의 class/type명과 속성 덤프로 태그 가용성 판정.
-5. **GD1/GD2/GD3 회귀 없음.**
+1. 빌드 성공(`dev_test.bat`은 사용자 수동 실행).
+2. RC1/RC2/RC3 세로 치수가 기둥 옆에 붙고 보조선이 기둥 상·하단 접촉.
+3. L 콜아웃 화살표가 기둥 몸통 접촉(허공 0).
+4. RC1-001에 U-bolt 콜아웃 **2개**(UB-002, UB-003), 서로 겹치지 않음.
+5. 가로 치수 450/450/500·분할 유지, **GD1/GD2/GD3 회귀 없음**.
 
 ## 하지 말 것
-- 기둥 앵커에 새 비율 상수 도입(이번 사이클의 존재 이유가 계측이다).
-- `Solid3d` 면 순회로 기둥 기하 분리(union 후 이력 없음).
-- cycle 88 좌우 규칙 R1~R4, 세로 치수 `param(F2)` 변경.
+- 비율 상수 추가 튜닝. cycle 88 좌우 규칙 R1~R4 변경. `param(F2)` 세로 치수 로직 변경.
+- `DesignStd` 외부화·`StandardSupport` 개명 — `TODO.md` 예약 항목이며 이번 범위 밖.
 
 ## 자문 출처
-**Codex MCP**(2026-07-20, read-only) — (b) 불가 확인, (a) 순환 논증 위험, B의 최소 변경 지점과
-`verticalX`만 고치면 불완전하다는 지적, C의 덤프 위치·API 경로·auto-include 클래스명 게이트,
-`PSUtil` 호출 범위 제한. 포트 원천 발견은 Claude(HANTEC.cs 리딩). Gemini 미호출.
+**Codex MCP**(2026-07-20, read-only) — 포트 전달 경로 기존 존재 확인, 변수 분리 설계,
+U-bolt를 designations에서 분리할 것, bbox 중심 우선, 배치 순서 위험, 정적 상태·뷰 반전 가드.
