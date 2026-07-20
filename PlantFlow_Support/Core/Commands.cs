@@ -153,6 +153,33 @@ namespace PlantFlow_Support
     private string _leaderExemptOwner = string.Empty;
     public void SetLeaderExemptOwner(string owner) { _leaderExemptOwner = owner ?? string.Empty; }
 
+    // 밸룬은 전역 비용 탐색이 아니라 둘레 배치로 자리를 정한다(cycle96).
+    // 배치기는 "이 자리가 비었는가"만 판정한다.
+    public bool WithinBounds(Extents3d box) { return !OutOfBounds(box); }
+
+    // 상자 겹침은 모든 장애물·기존 콜아웃에 대해 금지한다.
+    // 리더 교차는 기존 콜아웃(문자·리더)만 본다 — 밸룬 리더가 서포트·치수 위를 지나는 것은 정상이다.
+    public bool IsBalloonFree(Extents3d box, Point3d leaderFrom, Point3d leaderTo, out string reject)
+    {
+      foreach (Obstacle obstacle in _obstacles)
+      {
+        if (BoxOverlap(box, obstacle.Box))
+        { reject = "box:" + (string.IsNullOrEmpty(obstacle.Owner) ? "unnamed" : obstacle.Owner); return false; }
+      }
+      foreach (Extents3d placed in _placedBoxes)
+      {
+        if (BoxOverlap(box, placed)) { reject = "box:callout"; return false; }
+        if (SegIntersectsBox(leaderFrom, leaderTo, placed)) { reject = "leader:calloutBox"; return false; }
+      }
+      foreach (Point3d[] leader in _placedLeaders)
+      {
+        if (SegIntersectsBox(leader[0], leader[1], box) || SegsIntersect(leaderFrom, leaderTo, leader[0], leader[1]))
+        { reject = "leader:calloutLeader"; return false; }
+      }
+      reject = string.Empty;
+      return true;
+    }
+
     public void CommitBalloonBox(Point3d anchor, Point3d touch, Extents3d box)
     {
       _placedBoxes.Add(box);
@@ -8170,40 +8197,85 @@ namespace PlantFlow_Support
           anchorAdjust = "horizontal-mid";
         }
 
-        NotabCalloutPlacer.RequiredSide side = anchor.X >= viewportCenterX
-          ? NotabCalloutPlacer.RequiredSide.Right : NotabCalloutPlacer.RequiredSide.Left;
-
-        // 밸룬 옆/아래 부재 코드(ANGLE A6 → A6). 표를 보지 않아도 규격을 알 수 있다.
-        // 아래 배치는 세로 공간을 원 지름만큼 더 먹으므로 기본은 옆(side)이다.
+        // 밸룬 옆 부재 코드(ANGLE A6 → A6). 표를 보지 않아도 규격을 알 수 있다.
         string subLabel = this.GetNotabBalloonSubLabel(bomDesc);
-        bool subBelow = string.Equals(System.Environment.GetEnvironmentVariable("PFS_NOTAB_BALLOON_SUB"),
-          "below", System.StringComparison.OrdinalIgnoreCase);
         double subGap = subLabel.Length == 0 ? 0.0 : txt * 0.4;
         double subW = subLabel.Length == 0 ? 0.0 : subLabel.Length * txt * 0.7;
-        double boxH = subBelow
-          ? radius * 2.0 + subGap + (subLabel.Length == 0 ? 0.0 : txt)
-          : System.Math.Max(radius * 2.0, txt);
-        double boxW = subBelow
-          ? System.Math.Max(radius * 2.0, subW)
-          : radius * 2.0 + subGap + subW;
 
-        Point3d center, p1, p2;
-        bool left;
-        string diag;
-        if (!placer.TryPlace(anchor, side, boxW, boxH, gap, minDx, string.Empty, false,
-          out center, out p1, out p2, out left, out diag))
+        // ── 둘레 배치 ──────────────────────────────────────────────
+        // 전역 비용 탐색은 세 밸룬을 같은 "싼 영역"으로 몰아넣는다(cycle96 실측 r=129~149).
+        // 대신 각 부재에서 가장 가까운 서포트 외곽으로 밀어내고, 막히면 그 변을 따라
+        // 미끄러뜨린다. 방향은 유지되므로 밸룬이 부재 위치에 따라 자연히 분산된다.
+        bool placed = false;
+        Point3d ballCenter = Point3d.Origin;
+        Extents3d ballBox = new Extents3d(Point3d.Origin, Point3d.Origin);
+        bool outwardLeft = false;
+        string placeDiag = "none";
+
+        double[] distToEdge = new double[]
         {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item + " reason=no-space " + diag);
+          anchor.X - supportPaperExt.MinPoint.X,   // 0 = 좌
+          supportPaperExt.MaxPoint.X - anchor.X,   // 1 = 우
+          anchor.Y - supportPaperExt.MinPoint.Y,   // 2 = 하
+          supportPaperExt.MaxPoint.Y - anchor.Y    // 3 = 상
+        };
+        int[] order = new int[] { 0, 1, 2, 3 };
+        for (int a = 0; a < order.Length - 1; a++)
+          for (int b = a + 1; b < order.Length; b++)
+            if (distToEdge[order[b]] < distToEdge[order[a]])
+            { int t = order[a]; order[a] = order[b]; order[b] = t; }
+
+        double slideStep = System.Math.Max(radius, txt);
+        for (int oi = 0; oi < order.Length && !placed; oi++)
+        {
+          int edge = order[oi];
+          for (double push = 0.0; push <= 60.0 && !placed; push += slideStep)
+          {
+            for (int s = 0; s <= 10 && !placed; s++)
+            {
+              for (int sign = -1; sign <= 1 && !placed; sign += 2)
+              {
+                double slide = s * slideStep * sign;
+                if (s == 0 && sign > 0) continue; // slide 0은 한 번만
+
+                double cx, cy;
+                bool toLeft;
+                if (edge == 0)      { cx = supportPaperExt.MinPoint.X - gap - push - radius; cy = anchor.Y + slide; toLeft = true; }
+                else if (edge == 1) { cx = supportPaperExt.MaxPoint.X + gap + push + radius; cy = anchor.Y + slide; toLeft = false; }
+                else if (edge == 2) { cx = anchor.X + slide; cy = supportPaperExt.MinPoint.Y - gap - push - radius; toLeft = cx < anchor.X; }
+                else                { cx = anchor.X + slide; cy = supportPaperExt.MaxPoint.Y + gap + push + radius; toLeft = cx < anchor.X; }
+
+                Point3d c = new Point3d(cx, cy, 0.0);
+                // 코드 문자는 원의 바깥쪽(앵커 반대편)에 붙는다.
+                double bMinX = toLeft ? cx - radius - subGap - subW : cx - radius;
+                double bMaxX = toLeft ? cx + radius : cx + radius + subGap + subW;
+                Extents3d box = new Extents3d(
+                  new Point3d(bMinX, cy - System.Math.Max(radius, txt / 2.0), 0.0),
+                  new Point3d(bMaxX, cy + System.Math.Max(radius, txt / 2.0), 0.0));
+                if (!placer.WithinBounds(box)) continue;
+
+                Vector3d dir = c - anchor;
+                if (dir.Length < 1e-9) continue;
+                Point3d touchPt = c - dir.GetNormal() * radius;
+                string rej;
+                if (!placer.IsBalloonFree(box, anchor, touchPt, out rej)) continue;
+
+                ballCenter = c; ballBox = box; outwardLeft = toLeft; placed = true;
+                placeDiag = "edge=" + edge + " push=" + this.FormatNumber(push)
+                  + " slide=" + this.FormatNumber(slide) + " dist=" + this.FormatNumber(dir.Length);
+              }
+            }
+          }
+        }
+
+        if (!placed)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item + " reason=no-space perimeter");
           continue;
         }
 
-        // TryPlace는 상자 좌변/우변의 세로 중앙을 반환한다.
-        // below = 원이 위, 코드가 아래. side = 원이 앵커쪽, 코드가 바깥쪽(리더를 짧게 유지).
-        double boxCenterX = left ? center.X - boxW / 2.0 : center.X + boxW / 2.0;
-        double boxTopY = center.Y + boxH / 2.0;
-        Point3d ballCenter = subBelow
-          ? new Point3d(boxCenterX, boxTopY - radius, 0.0)
-          : new Point3d(left ? center.X - radius : center.X + radius, center.Y, 0.0);
+        bool left = outwardLeft;
+        string diag = placeDiag;
         // 밸룬 리더는 꺾지 않는다. 앵커에서 원주까지 직선 1개.
         Vector3d toCenter = ballCenter - anchor;
         if (toCenter.Length < 1e-9) toCenter = Vector3d.XAxis;
@@ -8233,19 +8305,11 @@ namespace PlantFlow_Support
             MText sub = new MText();
             sub.Contents = subLabel;
             sub.TextHeight = txt;
-            if (subBelow)
-            {
-              sub.Attachment = AttachmentPoint.TopCenter;
-              sub.Location = new Point3d(ballCenter.X, ballCenter.Y - radius - subGap, 0.0);
-            }
-            else
-            {
-              // 코드는 앵커 반대편(바깥)으로. 리더가 원을 지나 문자를 통과하지 않는다.
-              sub.Attachment = left ? AttachmentPoint.MiddleRight : AttachmentPoint.MiddleLeft;
-              sub.Location = new Point3d(
-                left ? ballCenter.X - radius - subGap : ballCenter.X + radius + subGap,
-                ballCenter.Y, 0.0);
-            }
+            // 코드는 앵커 반대편(바깥)으로. 리더가 원을 지나 문자를 통과하지 않는다.
+            sub.Attachment = left ? AttachmentPoint.MiddleRight : AttachmentPoint.MiddleLeft;
+            sub.Location = new Point3d(
+              left ? ballCenter.X - radius - subGap : ballCenter.X + radius + subGap,
+              ballCenter.Y, 0.0);
             if (textStyleId != ObjectId.Null) sub.TextStyleId = textStyleId;
             if (layerId != ObjectId.Null) sub.LayerId = layerId;
             sub.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)3);
@@ -8264,13 +8328,12 @@ namespace PlantFlow_Support
           tr.AddNewlyCreatedDBObject(leader, true);
 
           // 등록은 원만이 아니라 코드 문자까지 포함한 상자로 한다.
-          placer.CommitBalloonBox(anchor, touch,
-            new Extents3d(new Point3d(boxCenterX - boxW / 2.0, boxTopY - boxH, 0.0),
-                          new Point3d(boxCenterX + boxW / 2.0, boxTopY, 0.0)));
+          placer.CommitBalloonBox(anchor, touch, ballBox);
           PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-draw key=" + item + " item=" + bomItem
             + " sub='" + subLabel + "' adjust=" + anchorAdjust
             + " anchor=" + this.FormatPoint(anchor) + " center=" + this.FormatPoint(ballCenter)
-            + " r=" + this.FormatNumber(radius) + " box=" + this.FormatNumber(boxW) + "x" + this.FormatNumber(boxH)
+            + " r=" + this.FormatNumber(radius)
+            + " box=" + this.FormatExtents(ballBox)
             + " side=" + (left ? "left" : "right") + " " + diag);
         }
         catch (System.Exception ex)
