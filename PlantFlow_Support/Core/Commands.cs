@@ -133,6 +133,10 @@ namespace PlantFlow_Support
 
     // 밸룬은 원이라 Commit의 "textCenter.X < anchor.X" 좌우 추론이 성립하지 않는다.
     // 외접 사각형과 리더 선분을 명시적으로 등록한다.
+    // 리더 검사를 면제할 장애물 소유자. 밸룬 배치 구간에서만 켜고 끈다.
+    private string _leaderExemptOwner = string.Empty;
+    public void SetLeaderExemptOwner(string owner) { _leaderExemptOwner = owner ?? string.Empty; }
+
     public void CommitBalloonBox(Point3d anchor, Point3d touch, Extents3d box)
     {
       _placedBoxes.Add(box);
@@ -150,6 +154,10 @@ namespace PlantFlow_Support
         if (!string.IsNullOrEmpty(obstacle.Owner)
           && string.Equals(ownerTag ?? string.Empty, obstacle.Owner, System.StringComparison.Ordinal)) continue;
         if (BoxOverlap(box, obstacle.Box)) { reject = "box"; return false; }
+        // 밸룬은 부재를 가리키므로 리더가 서포트 위를 지나는 것이 정상이다.
+        // 이 장애물의 리더 검사만 면제한다(문자 상자 겹침 검사는 유지).
+        if (!string.IsNullOrEmpty(_leaderExemptOwner)
+          && string.Equals(obstacle.Owner ?? string.Empty, _leaderExemptOwner, System.StringComparison.Ordinal)) continue;
         if (leaderScope == LeaderCheckScope.All && (SegIntersectsBox(anchor, p1, obstacle.Box) || SegIntersectsBox(p1, p2, obstacle.Box))) { reject = "extLeader"; return false; }
       }
       // 콜아웃끼리는 겹치지만 않으면 되는 게 아니라 읽을 여백이 필요하다.
@@ -5168,7 +5176,8 @@ namespace PlantFlow_Support
           : new NotabCalloutPlacer(minX - calloutMargin, minY - calloutMargin, maxX + calloutMargin, maxY + calloutMargin);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-bounds src=" + (viewportBoundsOk ? "viewport" : "supportExt±100")
           + " ext=" + this.FormatExtents(viewportBoundsOk ? viewportPaperExt : supportPaperExt));
-        calloutPlacer.AddObstacle(supportPaperExt);
+        // 소유자 태그를 달아 밸룬 배치 때 리더 검사만 면제할 수 있게 한다.
+        calloutPlacer.AddObstacle(supportPaperExt, "support");
         this.AddNotabDimensionObstacles(tr, layoutBtr, calloutPlacer, txt);
         this.AddNotabPipeObstacle(calloutPlacer, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius);
         // 표를 먼저 그리고 장애물로 등록해야 이후 콜아웃·밸룬이 표를 피한다.
@@ -8085,6 +8094,10 @@ namespace PlantFlow_Support
         return;
       }
 
+      // 밸룬 리더는 서포트 위를 지나는 것이 정상이다. 이 구간에서만 면제한다.
+      placer.SetLeaderExemptOwner("support");
+      try
+      {
       double radius = this.GetEnvDouble("PFS_NOTAB_BALLOON_R", txt * 1.2, 1.0, 100.0);
       double gap = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
       double minDx = this.GetEnvDouble("PFS_NOTAB_CALLOUT_MIN_DX", 40.0, 0.0, 500.0);
@@ -8245,6 +8258,11 @@ namespace PlantFlow_Support
         {
           PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon 작도 예외 key=" + item + ": " + ex.GetType().Name + ": " + ex.Message);
         }
+      }
+      }
+      finally
+      {
+        placer.SetLeaderExemptOwner(string.Empty);
       }
     }
 
