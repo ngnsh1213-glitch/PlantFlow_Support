@@ -131,6 +131,17 @@ namespace PlantFlow_Support
       _placedLeaders.Add(new Point3d[] { p1, p2 });
     }
 
+    // 밸룬은 원이라 Commit의 "textCenter.X < anchor.X" 좌우 추론이 성립하지 않는다.
+    // 외접 사각형과 리더 선분을 명시적으로 등록한다.
+    public void CommitBalloon(Point3d anchor, Point3d elbow, Point3d center, double radius)
+    {
+      _placedBoxes.Add(new Extents3d(
+        new Point3d(center.X - radius, center.Y - radius, 0.0),
+        new Point3d(center.X + radius, center.Y + radius, 0.0)));
+      _placedLeaders.Add(new Point3d[] { anchor, elbow });
+      _placedLeaders.Add(new Point3d[] { elbow, center });
+    }
+
     private bool OutOfBounds(Extents3d box)
     { return box.MinPoint.X < _minX || box.MaxPoint.X > _maxX || box.MinPoint.Y < _minY || box.MaxPoint.Y > _maxY; }
 
@@ -253,6 +264,26 @@ namespace PlantFlow_Support
     }
     // 자동 포함 원본에서만 확보한다. 상세 DB 복제본은 Plant 속성을 보존하지 않는다.
     private static System.Collections.Generic.List<NotabUboltSnapshot> s_isoUbolts = new System.Collections.Generic.List<NotabUboltSnapshot>();
+
+    // BOMs/PSUtil은 Plant 프로젝트·DataLinksManager 의존이라 side DB에서 호출할 수 없다.
+    // 원본 DB 단계에서 값만 복사해 두고, 상세 DB에서는 이 스냅샷만 참조한다.
+    // 행 길이가 framework 6칸 / attachment 9칸으로 불균일하므로 명시 필드로 정규화한다.
+    private sealed class NotabBomRow
+    {
+      public string Item;
+      public string Category;
+      public string Description;
+      public string Material;
+      public string QuantityOrLength;
+      public string Remark;
+    }
+    private static System.Collections.Generic.List<NotabBomRow> s_isoBomRows = new System.Collections.Generic.List<NotabBomRow>();
+    private sealed class NotabBalloonAnchor
+    {
+      public string Item;
+      public Point3d WcsP0;
+    }
+    private static System.Collections.Generic.List<NotabBalloonAnchor> s_isoBalloonAnchors = new System.Collections.Generic.List<NotabBalloonAnchor>();
     private static Document s_isoOpenPendingTempDoc;
     private static Document s_isoOpenPendingOriginalDoc;
     private static int s_isoOpenSecondIdleAttempts;
@@ -1412,11 +1443,14 @@ namespace PlantFlow_Support
       s_isoSupportProfileHeight = string.Empty;
       s_isoSupportPorts.Clear();
       s_isoUbolts.Clear();
+      s_isoBomRows.Clear();
+      s_isoBalloonAnchors.Clear();
       // [MEASURE cycle94-M5] 배치 처리(PFSNOTABBATCH)에서 정적 상태가 대상 간 누출되지 않는지 검증.
       // 여기서 전부 0이어야 한다.
       PlantOrthoView.FileDiag("MEASURE state-reset ports=" + s_isoSupportPorts.Count
         + " ubolts=" + s_isoUbolts.Count + " params=" + s_isoSupportParams.Count
         + " designations=" + s_isoSupportDesignations.Count
+        + " bomRows=" + s_isoBomRows.Count + " balloonAnchors=" + s_isoBalloonAnchors.Count
         + " designStd='" + (s_isoDesignStd ?? string.Empty) + "'");
 
       Editor ed = doc.Editor;
@@ -4581,6 +4615,41 @@ namespace PlantFlow_Support
       }
     }
 
+    // 실패 시 Point3d.Origin을 반환하는 기존 함수는 정상값(원점)과 폴백을 구분할 수 없다.
+    // 밸룬처럼 "실패하면 그리지 않아야" 하는 경로는 반드시 이쪽을 쓴다.
+    private bool TryNotabProjectWcsToPaper(Viewport vp, Point3d wcs, out Point3d paper)
+    {
+      paper = Point3d.Origin;
+      if (vp == null)
+        return false;
+
+      try
+      {
+        Vector3d viewDir = vp.ViewDirection;
+        if (viewDir.Length < 1e-9)
+          viewDir = Vector3d.ZAxis;
+
+        Point3d viewTarget = vp.ViewTarget;
+        Matrix3d dcsToWcs =
+          Matrix3d.Rotation(-vp.TwistAngle, viewDir, viewTarget) *
+          Matrix3d.Displacement(viewTarget - Point3d.Origin) *
+          Matrix3d.PlaneToWorld(viewDir);
+        Point3d dcs = wcs.TransformBy(dcsToWcs.Inverse());
+        double scale = this.GetNotabViewportScale(vp);
+        double px = vp.CenterPoint.X + (dcs.X - vp.ViewCenter.X) * scale;
+        double py = vp.CenterPoint.Y + (dcs.Y - vp.ViewCenter.Y) * scale;
+        if (double.IsNaN(px) || double.IsNaN(py) || double.IsInfinity(px) || double.IsInfinity(py))
+          return false;
+        paper = new Point3d(px, py, 0.0);
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL try-project 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
     private Point3d NotabProjectWcsToPaper(Viewport vp, Point3d wcs)
     {
       if (vp == null)
@@ -5104,14 +5173,30 @@ namespace PlantFlow_Support
         calloutPlacer.AddObstacle(supportPaperExt);
         this.AddNotabDimensionObstacles(tr, layoutBtr, calloutPlacer, txt);
         this.AddNotabPipeObstacle(calloutPlacer, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius);
+        // 표를 먼저 그리고 장애물로 등록해야 이후 콜아웃·밸룬이 표를 피한다.
+        this.AppendNotabBomTable(tr, layoutBtr, db, textStyleId, layerId, calloutPlacer);
         Point3d calloutCostAnchor = (!double.IsNaN(pipeCenterXPaper) && !double.IsNaN(pipeCenterYPaper))
           ? new Point3d(pipeCenterXPaper, pipeCenterYPaper, 0.0)
           : new Point3d((minX + maxX) / 2.0, (minY + maxY) / 2.0, 0.0);
         calloutPlacer.SetCostReference(supportPaperExt, calloutCostAnchor);
         this.AppendNotabPipeCallout(tr, layoutBtr, db, textStyleId, layerId, pipeCenterXPaper, pipeCenterYPaper, supportPaperExt, viewportPaperExt, txt, calloutPlacer);
         Point3d verticalMemberAnchor = new Point3d(verticalAnchorX, verticalAnchorBaseY + (verticalAnchorTopY - verticalAnchorBaseY) * 0.5, 0.0);
-        this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, memberBoxes, hasVerticalPortAnchor, verticalMemberAnchor);
+        // 기본은 밸룬이 부재 표기를 대신한다(규격은 BOM 표에서 읽는다).
+        // PFS_NOTAB_MEMBER_TEXT=1이면 기존 텍스트 콜아웃도 함께 그려 두 형태를 비교할 수 있다.
+        bool memberText = this.GetEnvDouble("PFS_NOTAB_MEMBER_TEXT", 0.0, 0.0, 1.0) >= 0.5;
+        bool balloonsAvailable = s_isoBalloonAnchors.Count > 0 && s_isoBomRows.Count > 0;
+        if (memberText || !balloonsAvailable)
+        {
+          this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, memberBoxes, hasVerticalPortAnchor, verticalMemberAnchor);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL member-text drawn reason=" + (memberText ? "env" : "no-balloon-source"));
+        }
+        else
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL member-text skip: balloon replaces (anchors=" + s_isoBalloonAnchors.Count + " bomRows=" + s_isoBomRows.Count + ")");
+        }
         this.AppendNotabUboltCallouts(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, vp);
+        // 밸룬은 마지막. 기존 확정 배치(치수·파이프·부재·U-bolt)의 회귀를 최소화한다.
+        this.AppendNotabBalloons(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, vp);
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " vMode=" + verticalMode + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
@@ -7863,6 +7948,195 @@ namespace PlantFlow_Support
     }
 
     // 활성 원본 DB에서만 호출한다. 이후 상세 DB에서는 이 스냅샷을 투영만 한다.
+    // BOM 표. 원본에서 캡처한 s_isoBomRows만 참조한다(side DB엔 Plant 컨텍스트가 없다).
+    // 좌표·열폭은 오쏘 실측값에서 출발한다. 표는 뷰포트(30.5~640.5) 바깥 우측에 놓인다.
+    private void AppendNotabBomTable(Transaction tr, BlockTableRecord layoutBtr, Database db,
+      ObjectId textStyleId, ObjectId layerId, NotabCalloutPlacer placer)
+    {
+      if (tr == null || layoutBtr == null || db == null)
+        return;
+      if (s_isoBomRows.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL bom-table skip: rows 0");
+        return;
+      }
+
+      try
+      {
+        double originX = this.GetEnvDouble("PFS_NOTAB_BOM_X", 640.5, -5000.0, 5000.0);
+        double originY = this.GetEnvDouble("PFS_NOTAB_BOM_Y", 84.5, -5000.0, 5000.0);
+        double rowH = this.GetEnvDouble("PFS_NOTAB_BOM_ROW_H", 8.0, 1.0, 50.0);
+        double cellTxt = this.GetEnvDouble("PFS_NOTAB_BOM_TXT", 3.0, 0.5, 20.0);
+        double[] colW = new double[] { 15.0, 30.0, 40.0, 40.0, 30.0, 25.0 };
+        string[] header = new string[] { "ITEM", "ANCILLARY", "DESCRIPTION", "MATERIAL", "QUAN/LEN", "REMARK" };
+
+        Table table = new Table();
+        table.TableStyle = db.Tablestyle;
+        table.SetSize(s_isoBomRows.Count + 2, colW.Length);
+        table.SetRowHeight(rowH);
+        for (int c = 0; c < colW.Length; c++)
+          table.Columns[c].Width = colW[c];
+
+        table.Cells[0, 0].TextString = "BILL OF MATERIALS";
+        for (int c = 0; c < colW.Length; c++)
+          table.Cells[1, c].TextString = header[c];
+        for (int i = 0; i < s_isoBomRows.Count; i++)
+        {
+          NotabBomRow row = s_isoBomRows[i];
+          string[] vals = new string[] { row.Item, row.Category, row.Description, row.Material, row.QuantityOrLength, row.Remark };
+          for (int c = 0; c < colW.Length; c++)
+            table.Cells[i + 2, c].TextString = vals[c] ?? string.Empty;
+        }
+        for (int r = 0; r < s_isoBomRows.Count + 2; r++)
+        {
+          table.Rows[r].Height = rowH;
+          for (int c = 0; c < colW.Length; c++)
+          {
+            table.Cells[r, c].TextHeight = cellTxt;
+            if (textStyleId != ObjectId.Null)
+              table.Cells[r, c].TextStyleId = textStyleId;
+          }
+        }
+
+        ((BlockReference)table).Position = new Point3d(originX, originY, 0.0);
+        if (layerId != ObjectId.Null)
+          ((Entity)table).LayerId = layerId;
+
+        // GenerateLayout은 반드시 AppendEntity 전에 호출한다.
+        table.GenerateLayout();
+        layoutBtr.AppendEntity(table);
+        tr.AddNewlyCreatedDBObject(table, true);
+
+        Extents3d ext;
+        try { ext = ((Entity)table).GeometricExtents; }
+        catch (System.Exception gx)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL bom-table extents 실패: " + gx.GetType().Name + ": " + gx.Message);
+          return;
+        }
+
+        if (placer != null)
+          placer.AddObstacle(ext, "bomtable");
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL bom-table rows=" + s_isoBomRows.Count
+          + " pos=(" + this.FormatNumber(originX) + "," + this.FormatNumber(originY) + ")"
+          + " ext=" + this.FormatExtents(ext)
+          + " w=" + this.FormatNumber(ext.MaxPoint.X - ext.MinPoint.X)
+          + " h=" + this.FormatNumber(ext.MaxPoint.Y - ext.MinPoint.Y));
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL bom-table 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    // 밸룬(원 + 리더 + 번호). MLeader는 제어 불가로 폐기됐으므로 직접 작도한다.
+    // 앵커는 원본에서 캡처한 TaggingPoints p0을 투영해 얻는다. 투영 실패·범위 이탈이면 그리지 않는다.
+    private void AppendNotabBalloons(Transaction tr, BlockTableRecord layoutBtr, Database db,
+      ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, Extents3d viewportPaperExt,
+      double txt, NotabCalloutPlacer placer, Viewport vp)
+    {
+      if (tr == null || layoutBtr == null || db == null || placer == null)
+        return;
+      if (s_isoBalloonAnchors.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon skip: anchors 0");
+        return;
+      }
+
+      double radius = this.GetEnvDouble("PFS_NOTAB_BALLOON_R", txt * 1.2, 1.0, 100.0);
+      double gap = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
+      double minDx = this.GetEnvDouble("PFS_NOTAB_CALLOUT_MIN_DX", 40.0, 0.0, 500.0);
+      double viewportCenterX = (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0;
+
+      foreach (NotabBalloonAnchor anchorInfo in s_isoBalloonAnchors)
+      {
+        // BOM 표에 없는 번호는 그리지 않는다. P1_0 처럼 확장된 키는 접두 Item으로 대응한다.
+        string item = anchorInfo.Item ?? string.Empty;
+        string bomItem = null;
+        foreach (NotabBomRow row in s_isoBomRows)
+        {
+          if (string.Equals(row.Item, item, System.StringComparison.OrdinalIgnoreCase)
+            || item.StartsWith(row.Item + "_", System.StringComparison.OrdinalIgnoreCase))
+          { bomItem = row.Item; break; }
+        }
+        if (string.IsNullOrWhiteSpace(bomItem))
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item + " reason=no-bom-row");
+          continue;
+        }
+
+        Point3d anchor;
+        if (!this.TryNotabProjectWcsToPaper(vp, anchorInfo.WcsP0, out anchor))
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item + " reason=projection-failed");
+          continue;
+        }
+        if (anchor.X < viewportPaperExt.MinPoint.X || anchor.X > viewportPaperExt.MaxPoint.X
+          || anchor.Y < viewportPaperExt.MinPoint.Y || anchor.Y > viewportPaperExt.MaxPoint.Y)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item + " reason=outside-viewport anchor=" + this.FormatPoint(anchor));
+          continue;
+        }
+
+        NotabCalloutPlacer.RequiredSide side = anchor.X >= viewportCenterX
+          ? NotabCalloutPlacer.RequiredSide.Right : NotabCalloutPlacer.RequiredSide.Left;
+
+        Point3d center, p1, p2;
+        bool left;
+        string diag;
+        if (!placer.TryPlace(anchor, side, radius * 2.0, radius * 2.0, gap, minDx, string.Empty, false,
+          out center, out p1, out p2, out left, out diag))
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item + " reason=no-space " + diag);
+          continue;
+        }
+
+        // TryPlace는 텍스트 상자 좌변/우변을 반환한다. 원 중심은 그 지점에서 반지름만큼 안쪽이다.
+        Point3d ballCenter = new Point3d(left ? center.X - radius : center.X + radius, center.Y, 0.0);
+        Point3d elbow = new Point3d(p1.X, p1.Y, 0.0);
+
+        try
+        {
+          Circle circle = new Circle(ballCenter, Vector3d.ZAxis, radius);
+          if (layerId != ObjectId.Null) circle.LayerId = layerId;
+          circle.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)3);
+          layoutBtr.AppendEntity(circle);
+          tr.AddNewlyCreatedDBObject(circle, true);
+
+          MText mt = new MText();
+          mt.Contents = bomItem;
+          mt.TextHeight = txt;
+          mt.Attachment = AttachmentPoint.MiddleCenter;
+          mt.Location = ballCenter;
+          if (textStyleId != ObjectId.Null) mt.TextStyleId = textStyleId;
+          if (layerId != ObjectId.Null) mt.LayerId = layerId;
+          mt.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)3);
+          layoutBtr.AppendEntity(mt);
+          tr.AddNewlyCreatedDBObject(mt, true);
+
+          Leader leader = new Leader();
+          leader.AppendVertex(anchor);
+          leader.AppendVertex(elbow);
+          leader.AppendVertex(new Point3d(left ? ballCenter.X + radius : ballCenter.X - radius, ballCenter.Y, 0.0));
+          leader.HasArrowHead = true;
+          leader.Dimasz = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
+          if (layerId != ObjectId.Null) leader.LayerId = layerId;
+          leader.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)1);
+          layoutBtr.AppendEntity(leader);
+          tr.AddNewlyCreatedDBObject(leader, true);
+
+          placer.CommitBalloon(anchor, elbow, ballCenter, radius);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-draw key=" + item + " item=" + bomItem
+            + " anchor=" + this.FormatPoint(anchor) + " center=" + this.FormatPoint(ballCenter)
+            + " r=" + this.FormatNumber(radius) + " side=" + (left ? "left" : "right") + " " + diag);
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon 작도 예외 key=" + item + ": " + ex.GetType().Name + ": " + ex.Message);
+        }
+      }
+    }
+
     // [MEASURE cycle94] 오쏘 BOM·밸룬 자산의 무탭 이식 가능성 계측 (로그 전용, 작도 변경 없음).
     // M1=BOM 행을 원본 DB에서 얻을 수 있는가 / M3=TaggingPoints 앵커 원천 / ITEM↔앵커 키 차집합.
     private void MeasureNotabBomBalloonSources(ObjectId supportId)
@@ -7887,7 +8161,19 @@ namespace PlantFlow_Support
           {
             string[] r = rows[i] ?? new string[0];
             // 무탭 경로의 BOM 행에는 헤더가 없다(오쏘만 RemoveAt(0)로 제거). 행 0도 데이터다.
-            if (r.Length > 0 && !string.IsNullOrWhiteSpace(r[0])) itemKeys.Add(r[0].Trim());
+            if (r.Length > 0 && !string.IsNullOrWhiteSpace(r[0]))
+            {
+              itemKeys.Add(r[0].Trim());
+              s_isoBomRows.Add(new NotabBomRow
+              {
+                Item = r[0].Trim(),
+                Category = r.Length > 1 ? r[1] : string.Empty,
+                Description = r.Length > 2 ? r[2] : string.Empty,
+                Material = r.Length > 3 ? r[3] : string.Empty,
+                QuantityOrLength = r.Length > 4 ? r[4] : string.Empty,
+                Remark = r.Length > 5 ? r[5] : string.Empty
+              });
+            }
             PlantOrthoView.FileDiag("MEASURE bom-row i=" + i + " cols=" + r.Length + " { " + string.Join(" | ", r) + " }");
           }
         }
@@ -7937,6 +8223,9 @@ namespace PlantFlow_Support
             foreach (System.Collections.Generic.KeyValuePair<string, Point3d[]> kv in tp)
             {
               Point3d[] pts = kv.Value ?? new Point3d[0];
+              // p0만 보관한다. p1은 p0+(50,50,z=0) 방향 힌트일 뿐 실좌표가 아니다(cycle94 실측).
+              if (pts.Length > 0)
+                s_isoBalloonAnchors.Add(new NotabBalloonAnchor { Item = kv.Key, WcsP0 = pts[0] });
               PlantOrthoView.FileDiag("MEASURE balloon-anchor key=" + kv.Key + " pts=" + pts.Length
                 + (pts.Length > 0 ? " p0=" + this.FormatPoint(pts[0]) : string.Empty)
                 + (pts.Length > 1 ? " p1=" + this.FormatPoint(pts[1]) : string.Empty));
