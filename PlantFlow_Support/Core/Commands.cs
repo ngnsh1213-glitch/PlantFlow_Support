@@ -4750,8 +4750,9 @@ namespace PlantFlow_Support
         }
 
         double txt = this.GetEnvDouble("PFS_NOTAB_DIM_TXT", 8.0, 0.5, 50.0);
-        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
-        double stack = this.GetEnvDouble("PFS_NOTAB_DIM_STACK", 30.0, 1.0, 100.0);
+        // 간격은 글자 높이 비례. 고정값이면 글자 크기를 바꿀 때 치수선이 허공에 뜬다.
+        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", txt * 1.5, 1.0, 100.0);
+        double stack = this.GetEnvDouble("PFS_NOTAB_DIM_STACK", txt * 2.0, 1.0, 100.0);
         double centerY = (minY + maxY) / 2.0;
         string standardName = this.GetNotabStandardName();
         string horizontalSide = this.GetNotabHorizontalDimSide(standardName);
@@ -5190,7 +5191,15 @@ namespace PlantFlow_Support
         if (barPaperH <= 1e-6 || barPaperH > h)
           barPaperH = h * 0.4;
         bool multiDesignation = designations.Count > 1 && width > 1e-6;
-        Point3d singleAnchor = new Point3d(maxX, minY + barPaperH * 0.5, 0.0);
+        // GD 계열은 가로 부재가 하단, RC 계열은 상단에 있다. 기준면을 타입 설정으로 뒤집는다.
+        bool memberAnchorTop = this.IsNotabMemberAnchorTop(this.GetNotabStandardName());
+        double memberAnchorY = memberAnchorTop
+          ? supportPaperExt.MaxPoint.Y - barPaperH * 0.5
+          : minY + barPaperH * 0.5;
+        Point3d singleAnchor = new Point3d(maxX, memberAnchorY, 0.0);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL member-anchor side=" + (memberAnchorTop ? "top" : "bottom")
+          + " anchorY=" + this.FormatNumber(memberAnchorY) + " barPaperH=" + this.FormatNumber(barPaperH)
+          + " minY=" + this.FormatNumber(minY) + " maxY=" + this.FormatNumber(supportPaperExt.MaxPoint.Y));
 
         for (int i = 0; i < designations.Count; i++)
         {
@@ -5672,6 +5681,9 @@ namespace PlantFlow_Support
       public string VerticalParamKey;
       public string PipeCalloutSide;
       public string HorizontalSide;
+      // 가로 부재가 도면 위아래 어디에 있는가. "bottom"(GD 계열, 기본) | "top"(RC 계열).
+      // 부재 콜아웃 앵커의 상하 기준면을 결정한다.
+      public string MemberAnchorSide;
       public string[] MemberBIs;
     }
 
@@ -5704,11 +5716,11 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "GD1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "bottom" };
       if (string.Equals(standardName, "RC1", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "bottom" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "bottom", MemberAnchorSide = "top" };
       if (string.Equals(standardName, "RC2", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "top" };
       if (string.Equals(standardName, "RC3", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "top" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "pipecenter", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "16", "215" } };
       if (string.Equals(standardName, "GD3", System.StringComparison.OrdinalIgnoreCase))
@@ -5725,6 +5737,12 @@ namespace PlantFlow_Support
     private string GetNotabVerticalDimMode(string supportType)
     {
       return this.GetNotabTypeConfig(supportType).VerticalMode;
+    }
+
+    // 가로 부재가 도면 상단에 있는 타입(RC 계열)은 앵커 기준면을 위로 뒤집는다.
+    private bool IsNotabMemberAnchorTop(string supportType)
+    {
+      return string.Equals(this.GetNotabTypeConfig(supportType).MemberAnchorSide, "top", System.StringComparison.OrdinalIgnoreCase);
     }
 
     private string GetNotabVerticalParamKey(string supportType)
