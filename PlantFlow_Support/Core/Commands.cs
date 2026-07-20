@@ -133,11 +133,9 @@ namespace PlantFlow_Support
 
     // 밸룬은 원이라 Commit의 "textCenter.X < anchor.X" 좌우 추론이 성립하지 않는다.
     // 외접 사각형과 리더 선분을 명시적으로 등록한다.
-    public void CommitBalloon(Point3d anchor, Point3d touch, Point3d center, double radius)
+    public void CommitBalloonBox(Point3d anchor, Point3d touch, Extents3d box)
     {
-      _placedBoxes.Add(new Extents3d(
-        new Point3d(center.X - radius, center.Y - radius, 0.0),
-        new Point3d(center.X + radius, center.Y + radius, 0.0)));
+      _placedBoxes.Add(box);
       // 리더는 앵커→원주 직선 1개다(꺾임 없음). 원 안 구간은 등록하지 않는다.
       _placedLeaders.Add(new Point3d[] { anchor, touch });
     }
@@ -7995,6 +7993,8 @@ namespace PlantFlow_Support
           for (int c = 0; c < colW.Length; c++)
           {
             table.Cells[r, c].TextHeight = cellTxt;
+            // 기본값이면 문자가 셀 상단에 붙어 행 경계선과 겹친다. 세로 중앙 정렬로 맞춘다.
+            table.Cells[r, c].Alignment = CellAlignment.MiddleCenter;
             if (textStyleId != ObjectId.Null)
               table.Cells[r, c].TextStyleId = textStyleId;
           }
@@ -8031,6 +8031,28 @@ namespace PlantFlow_Support
       }
     }
 
+    // 밸룬 아래 표기할 부재 코드. BOM DESCRIPTION "ANGLE A6" → "A6".
+    // 코드 형태(영문1+숫자)가 없으면 표기를 생략한다(BASE PLATE 치수 등은 표에서 읽는다).
+    private string GetNotabBalloonSubLabel(string description)
+    {
+      if (string.IsNullOrWhiteSpace(description))
+        return string.Empty;
+      try
+      {
+        string[] tokens = description.Trim().Split(new char[] { ' ', '\t' }, System.StringSplitOptions.RemoveEmptyEntries);
+        for (int i = tokens.Length - 1; i >= 0; i--)
+        {
+          if (System.Text.RegularExpressions.Regex.IsMatch(tokens[i], "^[A-Za-z]{1,2}[0-9]{1,3}$"))
+            return tokens[i].ToUpperInvariant();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon sub-label 파싱 예외 desc=" + description + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+      return string.Empty;
+    }
+
     // 밸룬(원 + 리더 + 번호). MLeader는 제어 불가로 폐기됐으므로 직접 작도한다.
     // 앵커는 원본에서 캡처한 TaggingPoints p0을 투영해 얻는다. 투영 실패·범위 이탈이면 그리지 않는다.
     private void AppendNotabBalloons(Transaction tr, BlockTableRecord layoutBtr, Database db,
@@ -8055,11 +8077,12 @@ namespace PlantFlow_Support
         // BOM 표에 없는 번호는 그리지 않는다. P1_0 처럼 확장된 키는 접두 Item으로 대응한다.
         string item = anchorInfo.Item ?? string.Empty;
         string bomItem = null;
+        string bomDesc = string.Empty;
         foreach (NotabBomRow row in s_isoBomRows)
         {
           if (string.Equals(row.Item, item, System.StringComparison.OrdinalIgnoreCase)
             || item.StartsWith(row.Item + "_", System.StringComparison.OrdinalIgnoreCase))
-          { bomItem = row.Item; break; }
+          { bomItem = row.Item; bomDesc = row.Description ?? string.Empty; break; }
         }
         if (string.IsNullOrWhiteSpace(bomItem))
         {
@@ -8083,18 +8106,27 @@ namespace PlantFlow_Support
         NotabCalloutPlacer.RequiredSide side = anchor.X >= viewportCenterX
           ? NotabCalloutPlacer.RequiredSide.Right : NotabCalloutPlacer.RequiredSide.Left;
 
+        // 밸룬 아래 부재 코드(ANGLE A6 → A6). 표를 보지 않아도 규격을 알 수 있다.
+        string subLabel = this.GetNotabBalloonSubLabel(bomDesc);
+        double subGap = subLabel.Length == 0 ? 0.0 : txt * 0.4;
+        double subH = subLabel.Length == 0 ? 0.0 : txt;
+        double boxH = radius * 2.0 + subGap + subH;
+        double boxW = System.Math.Max(radius * 2.0, subLabel.Length * txt * 0.7);
+
         Point3d center, p1, p2;
         bool left;
         string diag;
-        if (!placer.TryPlace(anchor, side, radius * 2.0, radius * 2.0, gap, minDx, string.Empty, false,
+        if (!placer.TryPlace(anchor, side, boxW, boxH, gap, minDx, string.Empty, false,
           out center, out p1, out p2, out left, out diag))
         {
           PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item + " reason=no-space " + diag);
           continue;
         }
 
-        // TryPlace는 텍스트 상자 좌변/우변을 반환한다. 원 중심은 그 지점에서 반지름만큼 안쪽이다.
-        Point3d ballCenter = new Point3d(left ? center.X - radius : center.X + radius, center.Y, 0.0);
+        // TryPlace는 상자 좌변/우변의 세로 중앙을 반환한다. 원은 상자 위쪽, 코드 문자는 그 아래에 둔다.
+        double boxCenterX = left ? center.X - boxW / 2.0 : center.X + boxW / 2.0;
+        double boxTopY = center.Y + boxH / 2.0;
+        Point3d ballCenter = new Point3d(boxCenterX, boxTopY - radius, 0.0);
         // 밸룬 리더는 꺾지 않는다. 앵커에서 원주까지 직선 1개.
         Vector3d toCenter = ballCenter - anchor;
         if (toCenter.Length < 1e-9) toCenter = Vector3d.XAxis;
@@ -8119,6 +8151,20 @@ namespace PlantFlow_Support
           layoutBtr.AppendEntity(mt);
           tr.AddNewlyCreatedDBObject(mt, true);
 
+          if (subLabel.Length > 0)
+          {
+            MText sub = new MText();
+            sub.Contents = subLabel;
+            sub.TextHeight = txt;
+            sub.Attachment = AttachmentPoint.TopCenter;
+            sub.Location = new Point3d(ballCenter.X, ballCenter.Y - radius - subGap, 0.0);
+            if (textStyleId != ObjectId.Null) sub.TextStyleId = textStyleId;
+            if (layerId != ObjectId.Null) sub.LayerId = layerId;
+            sub.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)3);
+            layoutBtr.AppendEntity(sub);
+            tr.AddNewlyCreatedDBObject(sub, true);
+          }
+
           Leader leader = new Leader();
           leader.AppendVertex(anchor);
           leader.AppendVertex(touch);
@@ -8129,10 +8175,15 @@ namespace PlantFlow_Support
           layoutBtr.AppendEntity(leader);
           tr.AddNewlyCreatedDBObject(leader, true);
 
-          placer.CommitBalloon(anchor, touch, ballCenter, radius);
+          // 등록은 원만이 아니라 코드 문자까지 포함한 상자로 한다.
+          placer.CommitBalloonBox(anchor, touch,
+            new Extents3d(new Point3d(boxCenterX - boxW / 2.0, boxTopY - boxH, 0.0),
+                          new Point3d(boxCenterX + boxW / 2.0, boxTopY, 0.0)));
           PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-draw key=" + item + " item=" + bomItem
+            + " sub='" + subLabel + "'"
             + " anchor=" + this.FormatPoint(anchor) + " center=" + this.FormatPoint(ballCenter)
-            + " r=" + this.FormatNumber(radius) + " side=" + (left ? "left" : "right") + " " + diag);
+            + " r=" + this.FormatNumber(radius) + " box=" + this.FormatNumber(boxW) + "x" + this.FormatNumber(boxH)
+            + " side=" + (left ? "left" : "right") + " " + diag);
         }
         catch (System.Exception ex)
         {
