@@ -4789,10 +4789,11 @@ namespace PlantFlow_Support
 
         RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(minX, minY, 0.0), new Point3d(minX, dimVTopY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, realH, txt, "dimV", dimVText);
-        // 파이프가 항상 먼저 자리를 확정하고, 모든 부재 콜아웃이 같은 충돌 상태를 공유한다.
+        // 치수가 먼저 자리를 확정하고, 모든 콜아웃이 같은 충돌 상태를 공유한다.
         double calloutMargin = 100.0;
         NotabCalloutPlacer calloutPlacer = new NotabCalloutPlacer(minX - calloutMargin, minY - calloutMargin, maxX + calloutMargin, maxY + calloutMargin);
         calloutPlacer.AddObstacle(supportPaperExt);
+        this.AddNotabDimensionObstacles(tr, layoutBtr, calloutPlacer, txt);
         Point3d calloutCostAnchor = (!double.IsNaN(pipeCenterXPaper) && !double.IsNaN(pipeCenterYPaper))
           ? new Point3d(pipeCenterXPaper, pipeCenterYPaper, 0.0)
           : new Point3d((minX + maxX) / 2.0, (minY + maxY) / 2.0, 0.0);
@@ -4859,6 +4860,55 @@ namespace PlantFlow_Support
       }
     }
 
+    // append 직후 치수 블록을 재계산해 실제 렌더 영역을 콜아웃 배치 장애물로 사용한다.
+    private void AddNotabDimensionObstacles(Transaction tr, BlockTableRecord layoutBtr, NotabCalloutPlacer placer, double txt)
+    {
+      if (tr == null || layoutBtr == null || placer == null)
+        return;
+
+      int count = 0;
+      foreach (ObjectId id in layoutBtr)
+      {
+        Dimension dim = tr.GetObject(id, OpenMode.ForRead, false) as Dimension;
+        if (dim == null)
+          continue;
+
+        Extents3d extents;
+        try
+        {
+          dim.UpgradeOpen();
+          dim.RecomputeDimensionBlock(true);
+          dim.DowngradeOpen();
+          extents = dim.GeometricExtents;
+        }
+        catch (System.Exception dex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL dim-obstacle 폴백 " + dex.GetType().Name + ": " + dex.Message);
+          try
+          {
+            Point3d textPosition = dim.TextPosition;
+            double pad = txt * 3.0;
+            extents = new Extents3d(
+              new Point3d(textPosition.X - pad, textPosition.Y - pad, 0.0),
+              new Point3d(textPosition.X + pad, textPosition.Y + pad, 0.0));
+          }
+          catch (System.Exception fallbackEx)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL dim-obstacle 폴백 skip " + fallbackEx.GetType().Name + ": " + fallbackEx.Message);
+            continue;
+          }
+        }
+
+        Extents3d copied = new Extents3d(
+          new Point3d(extents.MinPoint.X, extents.MinPoint.Y, 0.0),
+          new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, 0.0));
+        placer.AddObstacle(copied);
+        count++;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL dim-obstacle box=(" + this.FormatNumber(copied.MinPoint.X) + "," + this.FormatNumber(copied.MinPoint.Y) + ")~(" + this.FormatNumber(copied.MaxPoint.X) + "," + this.FormatNumber(copied.MaxPoint.Y) + ")");
+      }
+      PlantOrthoView.FileDiag("PFSNOTABDETAIL dim-obstacle count=" + count);
+    }
+
     private void AppendNotabDirectCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer, string designation, Point3d anchor, Point3d fallbackNear, bool fallbackLeft, double gap, double minDx, string label)
     {
       MText mt = new MText();
@@ -4870,6 +4920,7 @@ namespace PlantFlow_Support
         mt.Location = Point3d.Origin;
         if (textStyleId != ObjectId.Null) mt.TextStyleId = textStyleId;
         if (layerId != ObjectId.Null) mt.LayerId = layerId;
+        mt.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)3);
         layoutBtr.AppendEntity(mt);
         tr.AddNewlyCreatedDBObject(mt, true);
 
@@ -4891,7 +4942,8 @@ namespace PlantFlow_Support
         bool right = !left;
         double leftX = right ? System.Math.Max(near.X, anchor.X + minDx) : System.Math.Min(near.X, anchor.X - minDx) - actualWidth;
         double rightX = leftX + actualWidth;
-        double baseY = near.Y;
+        // placer의 후보 y는 bbox 중심이다. BottomLeft MText의 삽입점은 bbox 하단이므로 여기서만 보정한다.
+        double baseY = near.Y - actualHeight / 2.0;
         double nearX = right ? leftX : rightX;
         double farX = right ? rightX : leftX;
         mt.Location = new Point3d(leftX, baseY, 0.0);
@@ -4903,10 +4955,10 @@ namespace PlantFlow_Support
         leader.HasArrowHead = true;
         leader.Dimasz = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         if (layerId != ObjectId.Null) leader.LayerId = layerId;
-        if (db.Dimstyle != ObjectId.Null) leader.DimensionStyle = db.Dimstyle;
+        leader.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)1);
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
-        if (placer != null) placer.Commit(anchor, new Point3d(nearX, baseY, 0.0), new Point3d(nearX, baseY, 0.0), actualWidth, actualHeight);
+        if (placer != null) placer.Commit(anchor, new Point3d(nearX, baseY, 0.0), new Point3d(nearX, near.Y, 0.0), actualWidth, actualHeight);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-draw designation=" + designation + " anchor=" + anchor + " nearX=" + this.FormatNumber(nearX) + " farX=" + this.FormatNumber(farX) + " baseY=" + this.FormatNumber(baseY) + " W=" + this.FormatNumber(actualWidth) + " H=" + this.FormatNumber(actualHeight) + " side=" + (right ? "right" : "left") + " sep=" + this.FormatNumber(right ? nearX - anchor.X : anchor.X - nearX) + " " + diagnostic);
       }
       catch (System.Exception ex)
@@ -4966,6 +5018,7 @@ namespace PlantFlow_Support
           bool twoMember = multiDesignation && designations.Count == 2;
           bool gd2Two = twoMember && string.Equals(notabTypePrefix, "GD2", System.StringComparison.OrdinalIgnoreCase);
           bool gd3Two = twoMember && string.Equals(notabTypePrefix, "GD3", System.StringComparison.OrdinalIgnoreCase);
+          double anchorFx = fx;
           // 부재별 라이브 미세조정용 개별 노브(기본 0): DX0/DY0=idx0, DX1/DY1=idx1
           double mdxI = mdx + this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DX" + i, 0.0, -2000.0, 2000.0);
           double mdyI = mdy + this.GetEnvDouble("PFS_NOTAB_MEMBER_CALLOUT_DY" + i, 0.0, -2000.0, 2000.0);
@@ -4976,28 +5029,32 @@ namespace PlantFlow_Support
           if (gd2Two && i == 0)
           {
             // idx0 = 중앙 수직재 몸통 지정, 텍스트는 좌측 하단 유지
-            anchor = new Point3d(centerX, minY + h * 0.5, 0.0);
+            anchorFx = this.GetEnvDouble("PFS_NOTAB_GD2_ANCHOR_FX0", 0.5, 0.0, 1.0);
+            anchor = new Point3d(minX + width * anchorFx, minY + h * 0.5, 0.0);
             elbow = new Point3d(minX - offset, minY - offset, 0.0);
             leftHalf = true;
           }
           else if (gd2Two && i == 1)
           {
             // idx1 = 하단 수평재 우측 지정, 텍스트 우측 하단
-            anchor = new Point3d(minX + width * 0.8, minY, 0.0);
+            anchorFx = this.GetEnvDouble("PFS_NOTAB_GD2_ANCHOR_FX1", 0.8, 0.0, 1.0);
+            anchor = new Point3d(minX + width * anchorFx, minY, 0.0);
             elbow = new Point3d(maxX + offset, minY - offset * 2.0, 0.0);
             leftHalf = false;
           }
           else if (gd3Two && i == 0)
           {
             // GD3 납작기하: 좌측 1/4 지점의 수직재(앵글)를 지시, 텍스트 좌측 하단
-            anchor = new Point3d(minX + width * 0.25, minY + h * 0.5, 0.0);
+            anchorFx = this.GetEnvDouble("PFS_NOTAB_GD3_ANCHOR_FX0", 0.25, 0.0, 1.0);
+            anchor = new Point3d(minX + width * anchorFx, minY + h * 0.5, 0.0);
             elbow = new Point3d(minX - offset, minY - offset, 0.0);
             leftHalf = true;
           }
           else if (gd3Two && i == 1)
           {
             // GD3 채널: 하단 수평재 우측, 텍스트 far-right(파이프 콜아웃과 이격)
-            anchor = new Point3d(minX + width * 0.8, minY, 0.0);
+            anchorFx = this.GetEnvDouble("PFS_NOTAB_GD3_ANCHOR_FX1", 0.8, 0.0, 1.0);
+            anchor = new Point3d(minX + width * anchorFx, minY, 0.0);
             elbow = new Point3d(maxX + offset, minY - offset * 2.0, 0.0);
             leftHalf = false;
           }
@@ -5142,7 +5199,7 @@ namespace PlantFlow_Support
             placer.Commit(anchor, elbow, textPoint, System.Math.Max(1.0, designation.Length * txt * 0.7), System.Math.Max(1.0, txt * 1.4));
           #endif
           this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, designation, anchor, textPoint, leftHalf, gap, minDx, "callout");
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + (multiDesignation ? " leftHalf=" + leftHalf : string.Empty) + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " textSide=" + (textPoint.X < anchor.X ? "left" : "right") + " anchorX=" + this.FormatNumber(anchor.X) + " textX=" + this.FormatNumber(textPoint.X) + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " fx=" + this.FormatNumber(fx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append" + (multiDesignation ? "(multi)" : string.Empty) + " idx=" + i + (multiDesignation ? " leftHalf=" + leftHalf : string.Empty) + " designation=" + designation + " anchor=" + anchor + " elbow=" + elbow + " text=" + textPoint + " textSide=" + (textPoint.X < anchor.X ? "left" : "right") + " anchorX=" + this.FormatNumber(anchor.X) + " textX=" + this.FormatNumber(textPoint.X) + " smart=" + (smartPlaced ? "placed diag=" + smartDiag : "fallback") + " fx=" + this.FormatNumber(fx) + " anchorFx=" + this.FormatNumber(anchorFx) + " barPaperH=" + this.FormatNumber(barPaperH) + " gap=" + this.FormatNumber(gap) + " arr=" + this.FormatNumber(arr) + " mdx=" + this.FormatNumber(mdx) + " mdy=" + this.FormatNumber(mdy));
         }
       }
       catch (System.Exception ex)
