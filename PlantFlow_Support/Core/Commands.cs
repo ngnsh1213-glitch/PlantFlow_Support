@@ -29,7 +29,9 @@ namespace PlantFlow_Support
 
     public void AddObstacle(Extents3d obstacle, string owner = "")
     {
-      double pad = System.Math.Max(0.0, System.Math.Min(50.0, ReadEnvDouble("PFS_NOTAB_CALLOUT_PAD", 2.0)));
+      // 장애물 패딩과 콜아웃 간 여백은 별개다. 이름을 공유하면 여백을 키울 때
+      // 모든 장애물이 함께 부풀어 자유 공간이 사라진다(cycle95 실측).
+      double pad = System.Math.Max(0.0, System.Math.Min(50.0, ReadEnvDouble("PFS_NOTAB_OBSTACLE_PAD", 2.0)));
       _obstacles.Add(new Obstacle { Owner = owner ?? string.Empty, Box = new Extents3d(
         new Point3d(obstacle.MinPoint.X - pad, obstacle.MinPoint.Y - pad, 0.0),
         new Point3d(obstacle.MaxPoint.X + pad, obstacle.MaxPoint.Y + pad, 0.0)) });
@@ -8116,7 +8118,8 @@ namespace PlantFlow_Support
       {
       double radius = this.GetEnvDouble("PFS_NOTAB_BALLOON_R", txt * 1.2, 1.0, 100.0);
       double gap = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
-      double minDx = this.GetEnvDouble("PFS_NOTAB_CALLOUT_MIN_DX", 40.0, 0.0, 500.0);
+      // 밸룬은 작은 기호라 텍스트 콜아웃과 같은 이격(40)을 요구하면 멀리 밀려난다.
+      double minDx = this.GetEnvDouble("PFS_NOTAB_BALLOON_MIN_DX", 20.0, 0.0, 500.0);
       double viewportCenterX = (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0;
 
       foreach (NotabBalloonAnchor anchorInfo in s_isoBalloonAnchors)
