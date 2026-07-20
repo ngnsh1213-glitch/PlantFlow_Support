@@ -4742,7 +4742,7 @@ namespace PlantFlow_Support
           return;
         }
 
-        double txt = this.GetEnvDouble("PFS_NOTAB_DIM_TXT", 10.0, 0.5, 50.0);
+        double txt = this.GetEnvDouble("PFS_NOTAB_DIM_TXT", 8.0, 0.5, 50.0);
         double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", 30.0, 1.0, 100.0);
         double stack = this.GetEnvDouble("PFS_NOTAB_DIM_STACK", 30.0, 1.0, 100.0);
         double centerY = (minY + maxY) / 2.0;
@@ -4917,6 +4917,8 @@ namespace PlantFlow_Support
         dim.Dimtoh = false;
         dim.Dimtad = 1;
         dim.Dimdec = 1;
+        // Dim line forced=On. 보조선 간격이 좁아 문자가 밖으로 밀려도 치수선을 그린다.
+        dim.Dimtofl = true;
       }
       catch (System.Exception ex)
       {
