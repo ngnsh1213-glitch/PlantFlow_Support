@@ -3,6 +3,10 @@
 이 프로젝트의 사람이 읽는 변경 이력 요약. 상세는 git 커밋 로그 참조.
 
 ## [Unreleased]
+### Fixed
+- 무탭 RC 트랙 종결(cycle92 후속, `65cc9cb`/`cc0addc`/`647749b`): ①`AppendNotabPaperDimensions`에 `Viewport` 전달(CS0103) ②**기둥이 뻗는 방향이 타입마다 반대** — `S2`는 밑동이 아니라 자유단이라 RC1(상단 기준)에서 "항상 위로" 가정이 범위를 벗어나 폴백했다. 위/아래 중 서포트 범위에 들어오는 쪽을 채택하고 `port-S2(up)|(down)`로 기록 ③콜아웃 간 여백 도입 — 겹침 0인데 간격 3.05라 붙어 보였다. `PFS_NOTAB_CALLOUT_PAD`(기본 8=글자 높이)만큼 부풀려 검사. 사용자 판정 "RC 이상없음 종결, GD 회귀 없음" — 2026-07-20
+- 무탭 RC 가로 치수를 SupportParams로(cycle90): 가로재와 베이스 플레이트가 한 `Solid3d`라 bbox는 490이고 450은 기하에서 나오지 않는다. **총 폭=`A+A1`, 우측=`A2`(없으면 `A1`)** 로 전환해 RC1 450(350/100)·RC2 450(250/200)·RC3 500(250/250) 확정 — 2026-07-20
+
 ### Added
 - 무탭 RC 기둥 포트 앵커 + U-bolt 태그 콜아웃(cycle92): RC1/RC2/RC3 세로 치수·세로 부재 콜아웃을 S2(index=1, 이름 검증)와 F2 높이 기준으로 전환하고, 포트/F2/투영/범위 가드 실패 시 기존 기준으로 폴백. 자동 포함 U-bolt는 Tag+bbox 중심을 별도 스냅샷해 개별 콜아웃으로 배치 — 2026-07-20
 - 무탭 N3 치수 핵심(cycle47~49, cfa1fb7~9576258): 페이퍼공간 비연관 치수 직접 제도. ①스케일 표준배율 라운딩+주석여백(`PFS_NOTAB_TARGET_FILL` 0.4, `vp.CustomScale` 명시) ②WCS→paper 투영(`NotabProjectWcsToPaper`, ViewportProjection 이식) ③가로총폭·pipeCenter분할·세로 치수(텍스트=실측mm, 페이퍼 고정크기 `PFS_NOTAB_DIM_TXT` 2.5mm) ④배관 참조: 분할=실배관중심X, 가로치수 상/하단=배관 근접쪽. 라이브 split=(350,100) side=bottom PASS — 2026-07-16
