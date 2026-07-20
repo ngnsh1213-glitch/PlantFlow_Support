@@ -1412,6 +1412,12 @@ namespace PlantFlow_Support
       s_isoSupportProfileHeight = string.Empty;
       s_isoSupportPorts.Clear();
       s_isoUbolts.Clear();
+      // [MEASURE cycle94-M5] 배치 처리(PFSNOTABBATCH)에서 정적 상태가 대상 간 누출되지 않는지 검증.
+      // 여기서 전부 0이어야 한다.
+      PlantOrthoView.FileDiag("MEASURE state-reset ports=" + s_isoSupportPorts.Count
+        + " ubolts=" + s_isoUbolts.Count + " params=" + s_isoSupportParams.Count
+        + " designations=" + s_isoSupportDesignations.Count
+        + " designStd='" + (s_isoDesignStd ?? string.Empty) + "'");
 
       Editor ed = doc.Editor;
       selectedIds = this.AutoIncludeRelatedParts(doc.Database, selectedIds);
@@ -7785,6 +7791,9 @@ namespace PlantFlow_Support
       this.CaptureIsoSupportProfile(supportId);
       this.CaptureIsoSupportPorts(supportId);
       this.AugmentDesignationsFromBom(supportId);
+      // [MEASURE cycle94] 원본 DB 컨텍스트에서만 가능한 BOM·밸룬 원천을 계측한다.
+      // BOMs/PSUtil은 Plant 프로젝트·DataLinksManager 의존이라 side DB에서 호출 불가.
+      this.MeasureNotabBomBalloonSources(supportId);
       bool bomSpike = this.GetEnvDouble("PFS_NOTAB_BOM_SPIKE", 0.0, 0.0, 1.0) >= 0.5;
       if (bomSpike)
         this.NotabBomSpike(supportId);
@@ -7854,6 +7863,115 @@ namespace PlantFlow_Support
     }
 
     // 활성 원본 DB에서만 호출한다. 이후 상세 DB에서는 이 스냅샷을 투영만 한다.
+    // [MEASURE cycle94] 오쏘 BOM·밸룬 자산의 무탭 이식 가능성 계측 (로그 전용, 작도 변경 없음).
+    // M1=BOM 행을 원본 DB에서 얻을 수 있는가 / M3=TaggingPoints 앵커 원천 / ITEM↔앵커 키 차집합.
+    private void MeasureNotabBomBalloonSources(ObjectId supportId)
+    {
+      if (supportId == ObjectId.Null)
+      {
+        PlantOrthoView.FileDiag("MEASURE bom-source skip: supportId null");
+        return;
+      }
+
+      System.Collections.Generic.List<string> itemKeys = new System.Collections.Generic.List<string>();
+      try
+      {
+        BOMs bom = new BOMs(supportId, new System.Collections.Generic.List<AttachmentInfo>());
+        System.Collections.Generic.List<string[]> rows = bom.ContentsByDesignStd(this.GetNotabBomDesignStd());
+        PlantOrthoView.FileDiag("MEASURE bom-source std=" + (bom.StandardName ?? "null")
+          + " designStd=" + (string.IsNullOrWhiteSpace(s_isoDesignStd) ? "(empty)" : s_isoDesignStd)
+          + " rowCount=" + (rows == null ? -1 : rows.Count));
+        if (rows != null)
+        {
+          for (int i = 0; i < rows.Count && i < 40; i++)
+          {
+            string[] r = rows[i] ?? new string[0];
+            if (i > 0 && r.Length > 0 && !string.IsNullOrWhiteSpace(r[0])) itemKeys.Add(r[0].Trim());
+            PlantOrthoView.FileDiag("MEASURE bom-row i=" + i + " cols=" + r.Length + " { " + string.Join(" | ", r) + " }");
+          }
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("MEASURE bom-source 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      // M3: TaggingPoints(밸룬 앵커)를 원본 DB에서 생성해 WCS로 스냅샷한다.
+      // 포트 이름(S1~S4)과 마크(F1~F4)는 1:1이 아니며, 타입별 메서드가 포트 인덱스를 개별 지정한다.
+      try
+      {
+        Database db = supportId.Database;
+        if (db == null)
+        {
+          PlantOrthoView.FileDiag("MEASURE balloon-source skip: database null");
+          return;
+        }
+
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          Part part = tr.GetObject(supportId, OpenMode.ForRead, false) as Part;
+          if (part == null)
+          {
+            PlantOrthoView.FileDiag("MEASURE balloon-source skip: not Part id=" + supportId);
+            tr.Commit();
+            return;
+          }
+
+          PortCollection ports = part.GetPorts((PortType)7);
+          Extents3d ext = ((Entity)part).GeometricExtents;
+          BOMs bom2 = new BOMs(supportId, new System.Collections.Generic.List<AttachmentInfo>());
+          StandardSupport ss = new StandardSupport(ext, bom2.IsBaseplate, bom2.SupportParams,
+            s_isoPipeAxis, Commands.ViewType.Front, ports, Matrix3d.Identity);
+          string stdName = this.GetNotabStandardName();
+          ss.StandardInformation(stdName);
+
+          System.Collections.Generic.Dictionary<string, Point3d[]> tp = ss.TaggingPoints;
+          PlantOrthoView.FileDiag("MEASURE balloon-source std=" + stdName
+            + " portCount=" + (ports == null ? -1 : ports.Count)
+            + " tagCount=" + (tp == null ? -1 : tp.Count)
+            + " keys={" + (tp == null ? string.Empty : string.Join("|", tp.Keys)) + "}");
+
+          if (tp != null)
+          {
+            foreach (System.Collections.Generic.KeyValuePair<string, Point3d[]> kv in tp)
+            {
+              Point3d[] pts = kv.Value ?? new Point3d[0];
+              PlantOrthoView.FileDiag("MEASURE balloon-anchor key=" + kv.Key + " pts=" + pts.Length
+                + (pts.Length > 0 ? " p0=" + this.FormatPoint(pts[0]) : string.Empty)
+                + (pts.Length > 1 ? " p1=" + this.FormatPoint(pts[1]) : string.Empty));
+            }
+
+            // ITEM ↔ 앵커 키 차집합. 어느 쪽에만 있는지가 이식 설계의 입력이다.
+            System.Collections.Generic.List<string> bomOnly = new System.Collections.Generic.List<string>();
+            foreach (string item in itemKeys)
+            {
+              bool matched = false;
+              foreach (string k in tp.Keys)
+                if (k == item || k.StartsWith(item + "_")) { matched = true; break; }
+              if (!matched) bomOnly.Add(item);
+            }
+            System.Collections.Generic.List<string> anchorOnly = new System.Collections.Generic.List<string>();
+            foreach (string k in tp.Keys)
+            {
+              bool matched = false;
+              foreach (string item in itemKeys)
+                if (k == item || k.StartsWith(item + "_")) { matched = true; break; }
+              if (!matched) anchorOnly.Add(k);
+            }
+            PlantOrthoView.FileDiag("MEASURE balloon-diff items={" + string.Join("|", itemKeys.ToArray()) + "}"
+              + " bomOnly={" + string.Join("|", bomOnly.ToArray()) + "}"
+              + " anchorOnly={" + string.Join("|", anchorOnly.ToArray()) + "}");
+          }
+
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("MEASURE balloon-source 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
     private void CaptureIsoSupportPorts(ObjectId supportId)
     {
       s_isoSupportPorts.Clear();

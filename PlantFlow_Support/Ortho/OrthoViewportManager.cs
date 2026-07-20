@@ -775,6 +775,25 @@ namespace PlantFlow_Support
                 table.GenerateLayout();
                 btr.AppendEntity((Entity)table);
                 trans.AddNewlyCreatedDBObject((DBObject)table, true);
+
+                // [MEASURE cycle94-M4] 표의 실제 점유 영역. 무탭 이식 시 NotabCalloutPlacer
+                // 장애물로 등록해야 하므로 행 수별 extents와 뷰포트(30.5,84.5)~(640.5,573.5) 겹침을 남긴다.
+                try
+                {
+                    Extents3d tableExt = ((Entity)table).GeometricExtents;
+                    bool overlapVp = tableExt.MaxPoint.X >= 30.5 && tableExt.MinPoint.X <= 640.5
+                        && tableExt.MaxPoint.Y >= 84.5 && tableExt.MinPoint.Y <= 573.5;
+                    PlantOrthoView.FileDiag("MEASURE bomtable-space rows=" + (count + 2)
+                        + " pos=(640.5,84.5) ext=(" + tableExt.MinPoint.X + "," + tableExt.MinPoint.Y + ")~("
+                        + tableExt.MaxPoint.X + "," + tableExt.MaxPoint.Y + ")"
+                        + " w=" + (tableExt.MaxPoint.X - tableExt.MinPoint.X)
+                        + " h=" + (tableExt.MaxPoint.Y - tableExt.MinPoint.Y)
+                        + " overlapViewport=" + overlapVp);
+                }
+                catch (System.Exception ex)
+                {
+                    PlantOrthoView.FileDiag("MEASURE bomtable-space extents 실패: " + ex.GetType().Name + ": " + ex.Message);
+                }
             }
             return strArrayList;
         }
@@ -852,6 +871,23 @@ namespace PlantFlow_Support
             bool flag2 = true;
             if (bomData != null && bomData.Count > 0) bomData.RemoveAt(0); // Remove Header
             
+            // [MEASURE cycle94-M0] ITEM별 밸룬 분기 도달 여부. F* 는 P/R 어느 분기에도 걸리지 않는다는
+            // 자문 지적을 실측으로 굳힌다. anchorKeys = 해당 ITEM으로 만들어진 TaggingPoints 키.
+            foreach (string[] strArray6m in bomData)
+            {
+                string itemm = strArray6m.Length > 0 ? (strArray6m[0] ?? string.Empty) : string.Empty;
+                string branchm = itemm.Contains("P") ? "P" : (itemm.Contains("R") ? "R" : "NONE");
+                bool anchorExactm = dictionary4.ContainsKey(itemm);
+                System.Text.StringBuilder expandedm = new System.Text.StringBuilder();
+                foreach (string k in dictionary4.Keys)
+                    if (k == itemm || k.StartsWith(itemm + "_")) { if (expandedm.Length > 0) expandedm.Append("|"); expandedm.Append(k); }
+                PlantOrthoView.FileDiag("MEASURE bom-item view='" + m_owner.CurrentViewTypeString
+                    + "' item='" + itemm + "' cols=" + strArray6m.Length + " branch=" + branchm
+                    + " anchorExact=" + anchorExactm + " anchorKeys={" + expandedm.ToString() + "}");
+            }
+            PlantOrthoView.FileDiag("MEASURE taggingpoints view='" + m_owner.CurrentViewTypeString
+                + "' count=" + dictionary4.Count + " keys={" + string.Join("|", dictionary4.Keys) + "}");
+
             foreach (string[] strArray6 in bomData)
             {
                 string str13 = strArray6[0];
