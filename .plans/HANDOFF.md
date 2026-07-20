@@ -3,83 +3,67 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 88
+- **cycle**: 89
 - **status**: ready
 - **issued_at**: 2026-07-20
-- **title**: 무탭 콜아웃 좌우 규칙 확립 + 이중 TryPlace 단일화
+- **title**: RC 패밀리 세로 치수(F2→H) + 세로 부재 앵커 (단계 A: 계측 선행)
 - **작업 경로**: `d:\PlantFlow\PlantFlow_Support\PlantFlow_Support\Core\Commands.cs`
-- **계획서**: `d:\PlantFlow\PlantFlow_Support\.plans\plan_notab_callout_side_rule_20260720.md` (**먼저 정독**)
+- **계획서**: `d:\PlantFlow\PlantFlow_Support\.plans\plan_notab_rc_family_20260720.md` (**먼저 정독**)
 - **핸드오프 위치**: `d:\PlantFlow\PlantFlow_Support\.plans\HANDOFF.md`
 
-## 배경
-사용자가 콜아웃 배치 규칙을 확정했다(계획서 §1). 좌우는 결정론, 상하는 탐색, 좌우는 불변.
-자문(Codex)에서 현행 구조가 이 규칙을 **구조적으로 보장할 수 없음**이 드러났고 Claude가 실측 확인했다.
+## 확정 사실 (사용자 + 규격집 RC1 시트, 재조사 금지)
+- **RC1은 용접 구조** — 세로 `MEMBER "M"`과 가로가 별개 다리(절곡 아님).
+- **세로·가로는 같은 프로파일** — BOM 행 1개(`BI=16 → L-65×65×6`)가 **정상**.
+  세로 콜아웃은 **같은 designation 재사용**, 앵커만 추가.
+- **세로 치수 = 3D `F2` 값을 도면 `H` 자리**(베이스 플레이트 아래면 ~ 가로 부재).
+- BOM의 `180x180x6mm`=베이스 플레이트, `(M12)1/2"x125`=앵커 볼트.
+  `bom-augment 미매핑` 로그는 **결함 아님**. → **`BeamProfileMap` 확장 금지**(초기 오진단).
 
-## 확정 규칙
-- **R1** 라인넘버(B.O.P) 콜아웃의 좌우 = 파이프 중심 X가 **뷰포트 사각형 중앙선**의 어느 쪽인가. 타입 무관.
-- **R2** 부재(L-/C-) 콜아웃의 좌우 = 같은 방식, 기준은 **부재 자신의 앵커 X**.
-- **R3** 상하는 고정값 없음. 간섭 회피로 탐색.
-- **R4** 좌우 절대 불변. 막히면 상하·거리만 조정. 반전 금지.
-- 경계(정확히 중앙)는 `referenceX >= centerX` → **우측**으로 결정론 고정.
+## 이번 사이클 = 단계 A (계측·저수준 정비까지). 앵커 추가는 단계 B로 분리.
 
-## 집도 항목
+### A-1. F2 캡처 (선행 게이트 G1)
+`dims`는 `CaptureIsoSupportProfile()`(7559 부근) **지역 변수**라 치수 작성 시점
+(`AppendNotabPaperDimensions()` 4721)에는 접근 불가.
+- `CaptureIsoSupportProfile()`에서 **정적 필드로 보관**(`s_isoSupportParams` 사전 복사 권장).
+- 캡처 직후 **키·값 전량을 진단 로그로 덤프**한다(F2 존재·표기·소수점 형식 확인 목적).
+- `double.TryParse`는 **`InvariantCulture` 우선**으로 파싱한다(문화권 의존 위험).
 
-### [선행-치명] A. 이중 TryPlace 단일화
-`5198`, `5380`의 `TryPlace` 호출은 이후 `AppendNotabDirectCallout`(5016)이 `5043`에서
-다시 호출해 덮어쓴다 → 현재 방향 제어가 **최종 작도에 도달하지 않는다**.
-- 5198/5380의 사전 `TryPlace` 및 그에 딸린 방향 계산·env 조회를 **제거**한다.
-- 배치는 `AppendNotabDirectCallout` 내 1회로 단일화한다.
-- 호출부는 `RequiredSide`(및 필요한 기준 X)를 인자로 전달만 한다.
+### A-2. 세로 치수 모드 `param` 신설
+- `NotabTypeConfig`에 `VerticalParamKey` 추가, `VerticalMode = "param"` 분기 신설.
+- **텍스트만 바꾸면 안 된다** — 치수선 형상도 함께: 상단 = `minY + F2 * vScale`,
+  `AppendNotabPaperDimensionEntity`의 `realValue`도 F2로 전달.
+- `0 < F2 <= realH` 검사. 실패 시 **`full` 폴백 + 진단 로그**(무음 실패 금지).
+- **F2 기준점 검증**: support extents의 `minY`가 실제 base plate 아래면인지 로그로 확인.
+  어긋나면 임의 보정하지 말고 REPORT에 실측값을 적을 것.
 
-### [선행-치명] B. 뷰포트 사각형 전달
-`NotabCalloutPlacer`의 `_minX/_maxX`는 `supportPaperExt ± 100`(4830)이라 **뷰포트가 아니다**.
-- 실제 뷰포트 사각형 extents를 구해 placer에 별도 필드로 전달한다.
-- 중앙선 = `(viewportMinX + viewportMaxX) / 2.0`.
-- **뷰포트 extents 취득 경로가 불명확하면 임의 추정하지 말고 REPORT에 막힌 지점을 적고 중단할 것.**
+### A-3. RC 행 등록
+`GetNotabTypeConfig`에 `RC1`/`RC2`/`RC3` 행 추가, `VerticalMode="param"`, `VerticalParamKey="F2"`.
+- `PipeCalloutSide`/`HorizontalSide`는 **현 관측값 유지**(RC1=top/bottom, RC2·RC3=top/auto).
+  추정으로 바꾸지 말 것 — 라이브 실측 후 다음 사이클에서 확정한다.
+- `s_isoShortDesc`가 `RC2`/`RC3`로 정확히 파싱되는지 로그로 확인(타입 판정 원천).
 
-### [핵심] C. 좌우를 하드 제약으로 승격
-- `TryPlace`에 `RequiredSide { Left, Right }` 도입.
-- 후보 좌표 생성을 계획서 §3-3-A 식으로 교체(`sign`/`horizontal`/`textLeft` 고정).
-- 좌우 불일치 후보는 `Free()`·비용 계산 **전에** 탈락.
-- `PFS_NOTAB_CALLOUT_ANGLE_W` 기본값 0.3 → **0.0**(역할 중복).
+### A-4. 세로 MEMBER 식별 계측 (선행 게이트 G2) — **집도 아님, 로그만**
+현행 `member-spike`는 엔티티를 나열만 하고 세로 MEMBER를 식별하지 못한다.
+종횡비·높이·파이프 거리만으로 고르면 **파이프·볼트 오인** 위험.
+- `NotabMemberGeometrySpike()`에 각 엔티티의 **타입/레이어/색상/원본 대응 등
+  식별 가능한 속성을 추가 로깅**한다(paper box는 이미 있음).
+- **이번 사이클에서 앵커를 만들지 않는다.** 무엇으로 식별 가능한지 REPORT에 정리만 한다.
 
-### [핵심] D. tier 3단 계단화
-`bool checkLeader`를 열거형으로 교체:
-```csharp
-private enum LeaderCheckScope { All, PlacedCalloutsOnly, None }
-```
-| tier | 좌우 | 콜아웃끼리 리더 | 외부(치수·서포트·파이프) 리더 |
-|---|---|---|---|
-| 0 | 고정 | ON | ON |
-| 1 | 고정 | **ON** | OFF |
-| 2 | 고정 | OFF | OFF |
-
-문자박스 대 문자박스/외부장애물 겹침 검사는 **전 tier 항상 ON**.
-
-### [핵심] E. FAIL 시 무검사 fallback 제거
-`5049` 이후 `fallbackLeft` 경로는 장애물 검사 없이 작도해 R4를 깬다.
-- tier 2까지 실패하면 **해당 콜아웃 작도를 생략**하고 진단 로그를 남긴다.
-
-### [보조] F. env 노브 정리
-`PFS_NOTAB_DIR_<TYPE>_<PIPE|M#>`: 숫자 각도 의미 제거(무시 + deprecated 로그).
-값 `L`/`R`만 좌우 강제 오버라이드로 유지.
-
-### [보조] G. 진단 로그
-`callout-draw`에 `requiredSide` / `sideSrc(rule|override)` / `referenceX` / `viewportCenterX` /
-`tier` / reject 사유별 카운트(`oob`/`box`/`extLeader`/`calloutLeader`)를 추가.
+## 다음 사이클(B) 예고 — 이번엔 하지 말 것
+- 세로 앵커 추가. 구현 시 `designations` 리스트에 **문자열 중복 삽입 금지**
+  (`multiDesignation=true`가 되어 다부재 배치 경로로 오진입).
+  `List<NotabProfileCallout>{Designation, AnchorKind}`로 분리하고 루프를 callout 루프로 전환.
+  env 방향 키는 `M0/M1` 대신 `HORIZONTAL`/`VERTICAL` 의미 기반.
+- 가로 치수 `A`/`100`/`30` 규격집 대조.
+- cycle 88의 좌우 규칙 R1~R4 변경 — 범위 밖.
 
 ## 완료 기준
-1. 빌드 성공(사용자 요청 시 `dev_test.bat`).
-2. GD1/GD2/GD3 추출 후 로그 검증:
-   - GD2 라인넘버 `requiredSide=right`, GD3 라인넘버 `requiredSide=left`
-   - 전 콜아웃 `tier<=1`, 작도 생략 0건
-   - `viewportCenterX`가 서포트 중앙이 아닌 실제 뷰포트 중앙값
-3. 육안: 콜아웃끼리 간섭 0, 리더의 텍스트 관통 0.
-
-## 회귀 주의
-- **GD1은 현재 사용자 OK 판정 상태**다. 좌우 규칙 변경으로 바뀔 수 있으니 반드시 재확인 대상에 포함.
-- A(단일화)로 죽어 있던 방향 제어가 처음 살아나므로 세 타입 모두 배치가 크게 달라질 수 있다.
+1. 빌드 성공(빌드까지만. `dev_test.bat`은 사용자가 수동 실행).
+2. RC1/RC2/RC3 추출 시 세로 치수 값이 `F2`와 일치하고 `H` 구간에 놓임.
+3. `sideMode`가 default가 아닌 RC 행 값으로 찍힘.
+4. SupportParams 덤프 로그에 F2가 보이고, member-spike에 식별 속성이 추가됨.
+5. GD1/GD2/GD3 회귀 없음(cycle 88 판정 유지).
 
 ## 자문 출처
-전 항목 **Codex MCP**(2026-07-20, read-only). A/B/E 및 계획서 §3-3-A·3-5는 Codex 지적을 Claude가 실측 확인 후 채택.
-Gemini 미호출(Codex 단독으로 구조적 결함 3건 확정, 추가 교차검증 불요 판단).
+**Codex MCP**(2026-07-20, read-only). G1/G2 및 치수 형상·자료구조·문화권 파싱 지적 전부 Codex.
+Gemini 미호출.
