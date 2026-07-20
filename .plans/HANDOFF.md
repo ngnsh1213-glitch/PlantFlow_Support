@@ -3,93 +3,76 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 90
+- **cycle**: 91
 - **status**: ready
 - **issued_at**: 2026-07-20
-- **title**: RC 가로 치수를 SupportParams로 + 세로 MEMBER 앵커 실측화
+- **title**: 포트 덤프(기둥 앵커 원천) + 세로 치수 기준 정합 + U-bolt 태그 조사
 - **작업 경로**: `d:\PlantFlow\PlantFlow_Support\PlantFlow_Support\Core\Commands.cs`
-- **계획서**: `d:\PlantFlow\PlantFlow_Support\.plans\plan_notab_member_identify_20260720.md` (**먼저 정독**)
+- **계획서**: `d:\PlantFlow\PlantFlow_Support\.plans\plan_notab_rc_post_and_ubolt_20260720.md` (**먼저 정독**)
 - **핸드오프 위치**: `d:\PlantFlow\PlantFlow_Support\.plans\HANDOFF.md`
 
-## 왜 이 사이클인가
-비율 상수 추정으로 RC1→RC2→RC3에서 **3연속 빗나갔다**. 추정 튜닝을 중단하고
-**실측 파라미터 + 실측 부재 박스**로 전환한다. 상수 추가 튜닝은 이번 사이클의 금지 사항이다.
+## 배경 (재조사 금지)
+- 세로 기둥은 **독립 솔리드가 아니다**. `7A`가 기둥+가로재+베이스 플레이트를 통째로 덮고,
+  `7C`(페이퍼 17.82×17.82 정사각형)는 볼트류다. **기하 분류로는 기둥을 찾을 수 없다.**
+- 상세도에는 **2D 선분이 없다**(복제 `Solid3d` + 뷰포트 와이어프레임). 선분 기반 계측 불가.
+- `7A` bbox ↔ `A/A1/A2` 역산은 **순환 논증**이라 독립 관측값이 아니다.
 
-## A. 가로 치수 = SupportParams (기하 아님)
+## ★A. 포트 덤프 — 기둥 앵커의 진짜 원천 (이번 사이클 핵심, **로그만**)
 
-**중요**: "가로 MEMBER 박스 폭 = 450"은 **틀린 전제**다. 가로재와 베이스 플레이트가
-한 `Solid3d`라 bbox는 490이다. 450은 기하에서 나오지 않는다.
-
-라이브 `support params dump` 실측:
-```
-RC1  A=350 A1=100          → A+A1 = 450   (좌 350 / 우 100)
-RC2  A=400 A1=50  A2=200   → A+A1 = 450   (좌 250 / 우 200)
-RC3  A=250 A1=250 A2=250   → A+A1 = 500   (좌 250 / 우 250)
-```
-- **총 폭 = `A + A1`**
-- **우측 분할 = `A2`**(없으면 `A1`), **좌측 = 총 폭 − 우측**
-- 세 타입 모두 사용자 기대치와 일치.
-
-구현 요구:
-- `s_isoSupportParams`에서 읽는다(cycle 89에 캡처됨). **InvariantCulture 파싱**.
-- **치수 값·분할**은 파라미터, **보조선 위치**는 부재 우측 끝 기준 총 폭만큼 좌측.
-  bbox를 그대로 쓰면 숫자만 450이고 보조선은 490 폭에 남는 불일치가 생긴다.
-- 키 누락/비유한/0 이하 → **기존 `s_isoRealWidth` 경로 폴백** + 사유 로그.
-- 로그에 `dimH source=params(A+A1) | fallback=legacy` 및 사용된 값 전량 기록.
-
-## B. 세로 MEMBER 앵커 실측화
-
-현행 `MemberAnchorSide="vertical"` 추정식은 `minX + barPaperH*0.5 ≈ 293`인데
-실제 세로 MEMBER는 `x = 335.6~353.4`다. **40 이상 빗나가며 재추출해도 허공.**
-
-- `NotabMemberGeometrySpike()`를 반환 헬퍼로 승격:
+`HANTEC.RC1()`이 앵커를 bbox가 아니라 **포트**에서 뽑고 있다:
 ```csharp
-private struct NotabMemberBox
-{ public ObjectId Id; public string Handle; public Extents3d PaperBox;
-  public Vector3d WcsDims; public double Aspect; public double PipeDist; }
-
-private List<NotabMemberBox> CollectNotabMemberBoxes(Transaction tr, Database db, Viewport vp)
+// HANTEC.cs:868~888
+ConvertPortToPoint(this.PPorts[2]);   // F1
+ConvertPortToPoint(this.PPorts[1]);   // F2 ← 세로 부재
+ConvertPortToPoint(this.PPorts[3]);   // P1
 ```
-- **열린 `Entity`/`Solid3d` 참조를 DTO에 보관하지 말 것**(값 타입·ObjectId만).
-- **한 트랜잭션 안에서 1회 수집** → `AppendNotabPaperDimensions` → `AppendNotabProfileCallout`로
-  전달. 하위 메서드가 ModelSpace를 재순회하면 분류 불일치가 생긴다.
-- 현행 `supportExt` 인자는 미사용이므로 제거 가능. **로그(`member-spike`)는 유지**.
-- 세로 MEMBER 앵커 = 해당 `PaperBox` 몸통 중앙. **비율 상수식은 폴백 전용으로 강등**.
+포트는 병합 솔리드와 무관하게 **부재별 부착점을 보유**한다.
 
-## C. 분류 규칙 — 임계값 하드코딩 금지
-절대 임계값(“종횡비 5 이상이면 세로재”) 대신 **같은 도면 안 후보 간 상대 순위**로 판정한다.
-1. `pipeDist` **상대 최솟값** 후보 = 파이프 클램프/부속 → 제외
-2. 남은 후보 중 **페이퍼 박스가 가장 세로인** 후보 = 세로 MEMBER
-3. 세로 우위가 명확하지 않거나 유일하지 않으면 **식별 실패로 판정**(억지 선택 금지)
-- 판정 결과와 근거를 로그에 남긴다.
-- **WCS `dx/dy/dz`가 아니라 `PaperBox` 기준**으로 가로/세로를 판정한다(뷰 방향 의존).
+요구:
+1. **원본 DB**에서 대상 서포트의 **포트 전량 덤프** — 인덱스·이름·WCS 좌표.
+   `Part.GetPorts` 경로 존재(메모리 `p5-topology-identification`). `HANTEC.ConvertPortToPoint`도 참고.
+2. 각 포트를 `NotabProjectWcsToPaper()`로 투영해 **페이퍼 좌표를 함께** 남긴다.
+3. RC1/RC2/RC3에서 `PPorts[1]`(F2)이 실제 기둥 위에 오는지 **REPORT에 수치로 대조**.
+4. **앵커 작도는 변경하지 않는다.** 이번엔 덤프·대조까지.
+   포트가 기둥을 정확히 지시함이 확인되면 다음 사이클에서 앵커를 포트로 전환한다.
 
-## D. GD 회귀 방지 (필수)
-- **새 `MemberGeometry` 소비는 RC1/RC2/RC3만 허용**한다.
-- GD1/GD2/GD3은 기존 `supportPaperExt` 분기를 **그대로 유지**. 수집 헬퍼는 GD에서 로그만.
-- GD2/GD3의 다중 designation·인덱스별 앵커 특수 분기에 **일반 분류 결과를 섞지 말 것**.
-- RC에서 아래 중 하나라도 실패하면 **기존 동작으로 완전 폴백**:
-  솔리드 수/투영 실패 · 세로 후보 유일성 없음 · 파라미터 누락/불일치 · 비유한·0 이하
-- 모든 경로에 `source=member-geometry | fallback=legacy`와 **사유**를 로그.
+주의: `PSUtil`은 Plant 프로젝트/DataLinksManager 의존이라 **원본 활성 문서에서만** 호출하고
+side DB·복제 이후에는 호출하지 말 것(자문 지적).
 
-## E. 치수 오프셋
-현행 `offset = txt*1.5`(=12)는 RC3에서 클램프 위를 지난다.
-- **상수 상향까지만** 한다(적정값은 라이브로 확정). 실제 렌더 내용 기준 산출은 이번 범위 밖.
+## B. 세로 치수 기준 정합
+`verticalX = minX - offset - dimClear`인데 `minX`가 플레이트 기준(490)이라
+부재 기준(450)으로 옮긴 가로 치수와 어긋난다(RC2에서 500 치수가 안 움직인 원인).
+
+- 수정 지점은 `AppendNotabPaperDimensions(...)` **한 곳**이다.
+- `dimHSource`에서 파생한 **`dimReferenceMinX` / `dimReferenceSource`를 명시 변수로** 만들고
+  `verticalX`, **세로 치수의 두 extension point**, 로그가 모두 같은 값을 쓰게 한다.
+- `verticalX`만 바꾸면 보조선이 여전히 다른 기준을 가리킨다(자문 지적) — **불완전 수정 금지**.
+- params 경로면 params 기준, legacy 폴백이면 legacy 기준. **기준 혼용 금지.**
+
+## C. U-bolt 태그 조사 (조사·덤프까지)
+- 상세도 솔리드는 `TryStripCleanSolidMetadata()`로 XData·확장사전이 제거되므로 **읽을 수 없다.**
+  반드시 **원본 DB**에서 캡처한다.
+- 덤프 위치 = `AutoIncludeRelatedParts()`의 `isSup` 분기, `result.Add(eid)` 전후.
+  원본 트랜잭션 안이고 실제 자동포함된 객체만 대상이다.
+- 방법: `PSUtil.GetSupportDimension(eid)` **전량 덤프** + DataLinks는 이름 열거 API가 없으므로
+  후보 키 명시 조회(`SupportName`, `ShortDescription`, `PartNumber`, `Tag`, `TagName`,
+  `SupportDetail`, `Description`).
+- **선행 확인**: auto-include는 클래스명에 `Support`가 있어야 포함한다.
+  U-bolt가 그 조건을 못 맞추면 `otherPart`로 빠진다 → **실제 class/type명을 먼저 로그로 확인.**
 
 ## 완료 기준
 1. 빌드 성공(`dev_test.bat`은 사용자가 수동 실행).
-2. RC1 450(350/100) · RC2 450(250/200) · RC3 500(250/250) — 490 소멸.
-3. 치수 보조선이 숫자와 같은 구간에 놓임(450 숫자 + 490 보조선 불일치 없음).
-4. L 부재 콜아웃 화살표가 **세로 MEMBER 몸통**에 닿음(허공 0).
-5. **GD1/GD2/GD3 회귀 없음** — cycle 88 판정 유지.
+2. RC1/RC2/RC3에서 포트 덤프(WCS+페이퍼)가 남고, `PPorts[1]`과 기둥 위치 대조가 REPORT에 수치로 정리.
+3. RC2 세로 치수가 가로와 **같은 기준**으로 이동(보조선 포함).
+4. U-bolt의 class/type명과 속성 덤프로 태그 가용성 판정.
+5. **GD1/GD2/GD3 회귀 없음.**
 
 ## 하지 말 것
-- 비율 상수 추가 튜닝(이번 사이클의 존재 이유가 그 폐기다).
-- `Solid3d` 면/서브엔티티 순회로 450을 기하에서 뽑아내려는 시도.
-  Boolean union 이후 생성 이력이 없어 RC2 한 사례용 휴리스틱이 된다(자문 지적).
-- cycle 88 좌우 규칙 R1~R4 변경.
-- 세로 치수 `param(F2)` 로직 변경(RC2 raw=500, RC3 raw=600 정상 동작 중).
+- 기둥 앵커에 새 비율 상수 도입(이번 사이클의 존재 이유가 계측이다).
+- `Solid3d` 면 순회로 기둥 기하 분리(union 후 이력 없음).
+- cycle 88 좌우 규칙 R1~R4, 세로 치수 `param(F2)` 변경.
 
 ## 자문 출처
-**Codex MCP**(2026-07-20, read-only). A의 전제 정정(bbox≠450), 헬퍼 시그니처·트랜잭션 수명,
-상대 순위 분류, GD 폴백 설계, `Solid3d` 순회 비권장 전부 Codex 지적. Gemini 미호출.
+**Codex MCP**(2026-07-20, read-only) — (b) 불가 확인, (a) 순환 논증 위험, B의 최소 변경 지점과
+`verticalX`만 고치면 불완전하다는 지적, C의 덤프 위치·API 경로·auto-include 클래스명 게이트,
+`PSUtil` 호출 범위 제한. 포트 원천 발견은 Claude(HANTEC.cs 리딩). Gemini 미호출.
