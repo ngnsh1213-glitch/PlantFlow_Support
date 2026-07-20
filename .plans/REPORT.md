@@ -28,4 +28,4 @@
 - GD1/GD2/GD3 회귀 및 빌드 결과를 사용자 수동 실행 후 갱신.
 
 ## 커밋
-- 이 REPORT와 코드 변경을 동일 커밋으로 기록 예정.
+- `95e9a5a` `notab: dump support ports and ubolt metadata`

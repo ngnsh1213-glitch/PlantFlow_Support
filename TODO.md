@@ -2,20 +2,33 @@
 
 _완료 항목은 여기서 지우고 `CHANGELOG.md`로 옮긴다._
 
-## 예약 — RC 트랙 종료 후 착수 (2026-07-20 사용자 확정)
-- [ ] **`HANTEC` → `StandardSupport` 이름 변경 (방식 (가): 이름만, 내용·구조 불변)**
-  - 목적: 벤더(회사)명이 코드 전면에 드러나는 것 제거. 대외 공개·제품화 대비.
-  - 범위: 클래스명 `HANTEC`, 파일명 `HANTEC.cs`, 내부 변수/메서드/주석. 총 181곳 중 리터럴 제외분.
-  - **★절대 바꾸지 말 것 — 문자열 리터럴 `"HANTEC"`**: Plant3D 카탈로그에 실제 저장된
-    DesignStd 값이라 외부 데이터다. 바꾸면 조회가 전부 깨진다.
+## 예약 — cycle 91 집도 직후 착수 (2026-07-20 사용자 확정)
+
+### 제품 맥락 (판단 근거, 2026-07-20)
+- Python 스크립트(`D:\AutoCAD Plant 3D 2026 Content\CPak Common\CustomScripts\Support`) + PFS를
+  **한 패키지로 판매**한다.
+- 기본 카탈로그·스탠다드 = HANTEC 규격집을 **이름만 바꿔 `PIPE SUPPORT STANDARD`로 제공**.
+- 향후 기업/그룹 요청 시 **회사명으로 표준을 추가**한다 → **다중 표준이 확정된 요구**다.
+- **★출하 카탈로그 `DesignStd` 값 = `PFS STANDARD`** (사용자 확정).
+
+- [ ] **`HANTEC` → `StandardSupport` 이름 변경 + DesignStd 외부화**
+  - 목적: 벤더(회사)명 노출 제거 + 다중 표준 대비. 늦을수록 분기점이 늘어 작업량 증가.
+  - **범위 1 — 이름**: 클래스명 `HANTEC`, 파일명 `HANTEC.cs`, 내부 변수/메서드/주석.
+  - **범위 2 — DesignStd 하드코딩 제거 (★핵심)**: 현재 한 값과 직접 비교한다.
     `BOMs.cs:45`(`design_std == "HANTEC"`), `Commands.cs:7902/7925`(`ContentsByDesignStd("HANTEC")`),
     `OrthoViewportManager.cs:787`(`CPYDesignStd == "HANTEC"`).
-  - 결과 의미: "표준 서포트 주석 엔진"이 "DesignStd=HANTEC인 데이터"를 다룬다 — 관계가 이름에 드러남.
+    → **알려진 표준 목록/설정 조회**로 바꾼다. 고객사 표준은 목록에 추가만 하면 되게.
+  - **★하위 호환 필수**: 현재 테스트 중인 GS칼텍스 프로젝트 모델이 `DesignStd = HANTEC`이다
+    (라이브 로그에서 `ContentsByDesignStd("HANTEC")`가 실제 BOM 행 반환 확인).
+    `PFS STANDARD`만 인식하게 바꾸면 **현 테스트 모델이 즉시 깨진다. 둘 다 인식할 것.**
+  - **실패 양상 주의**: DesignStd 불일치는 빌드 통과 + 런타임에 BOM이 조용히 비는 형태라
+    발견이 늦다. 인식된 DesignStd 값을 **로그로 남길 것**.
+  - **범위 밖 — 타입 메서드 구조 분리는 하지 않는다**: `RC1()`/`GD1()` 등은 그대로.
+    표준별 구현 분리(인터페이스+구현체)는 **두 번째 표준이 실제로 올 때**.
+    요구를 모르는 상태로 인터페이스를 먼저 깎지 않는다.
   - `PlantFlow_Support_Backup_Stable/`은 백업 폴더이므로 대상 제외.
-  - **추상화(인터페이스+구현체 분리)는 하지 않는다** — 현재 HANTEC 외 표준 요구가 없다.
-    다른 벤더 표준이 실제로 생기면 그때 (나)안으로 재검토.
-  - **착수 시점**: RC 트랙(cycle 91~) 한 단락 후. 지금은 `HANTEC.cs`/`Commands.cs`를
-    계속 수정 중이라 대규모 rename이 충돌한다.
+  - **착수 시점**: cycle 91은 계측(로그 추가) 중심이라 `HANTEC.cs` 본문을 거의 안 건드린다.
+    **cycle 91 집도 종료 즉시** 착수하면 충돌 없고 지연도 최소.
 
 ## ★무탭 엔진 (현재 트랙, 2026-07-14)
 - [x] 무탭 Main 라이브 PASS (은선 정투영, cycle 30)
