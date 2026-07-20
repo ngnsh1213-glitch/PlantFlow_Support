@@ -229,6 +229,8 @@ namespace PlantFlow_Support
     private static string s_isoSupportProfile;
     private static string s_isoSupportDesignation;
     private static System.Collections.Generic.List<string> s_isoSupportDesignations = new System.Collections.Generic.List<string>();
+    // CaptureIsoSupportProfile의 원본 3D 파라미터는 페이퍼 치수 작성 시점에도 필요하다.
+    private static System.Collections.Generic.Dictionary<string, string> s_isoSupportParams = new System.Collections.Generic.Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
     private static string s_isoSupportProfileHeight;
     private static Document s_isoOpenPendingTempDoc;
     private static Document s_isoOpenPendingOriginalDoc;
@@ -1385,6 +1387,7 @@ namespace PlantFlow_Support
       s_isoSupportProfile = string.Empty;
       s_isoSupportDesignation = string.Empty;
       s_isoSupportDesignations.Clear();
+      s_isoSupportParams.Clear();
       s_isoSupportProfileHeight = string.Empty;
 
       Editor ed = doc.Editor;
@@ -2275,6 +2278,7 @@ namespace PlantFlow_Support
       s_isoSupportProfile = string.Empty;
       s_isoSupportDesignation = string.Empty;
       s_isoSupportDesignations.Clear();
+      s_isoSupportParams.Clear();
       s_isoSupportProfileHeight = string.Empty;
       Editor ed = doc.Editor;
       PromptSelectionResult psr = ed.GetSelection();
@@ -4676,6 +4680,9 @@ namespace PlantFlow_Support
           if (ent == null)
             continue;
           string kind = ent.GetType().Name;
+          string layer = ent.Layer ?? string.Empty;
+          short colorIndex = ent.ColorIndex;
+          string handle = ent.Handle.ToString();
           Extents3d we;
           try { we = ent.GeometricExtents; }
           catch (System.Exception ex)
@@ -4703,7 +4710,7 @@ namespace PlantFlow_Support
             Point3d ec = new Point3d((we.MinPoint.X + we.MaxPoint.X) / 2.0, (we.MinPoint.Y + we.MaxPoint.Y) / 2.0, (we.MinPoint.Z + we.MaxPoint.Z) / 2.0);
             pipeDist = ec.DistanceTo(s_isoPipeCenterWcs);
           }
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike i=" + (i++) + " kind=" + kind
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike i=" + (i++) + " id=" + id + " handle=" + handle + " kind=" + kind + " layer=" + layer + " colorIndex=" + colorIndex
             + " wcsDims=(" + this.FormatNumber(dx) + "," + this.FormatNumber(dy) + "," + this.FormatNumber(dz) + ")"
             + " aspect=" + this.FormatNumber(aspectLongMid)
             + " paperBox=(" + this.FormatNumber(pminx) + "," + this.FormatNumber(pminy) + ")~(" + this.FormatNumber(pmaxx) + "," + this.FormatNumber(pmaxy) + ")"
@@ -4803,6 +4810,7 @@ namespace PlantFlow_Support
         double barRealH = double.NaN;
         double barPaperH = double.NaN;
         double vScale = paperH / realH;
+        double dimVParamRealH = double.NaN;
         bool dimVBarSpan = false;
         string verticalMode = this.GetNotabVerticalDimMode(standardName);
         string dimVText = this.FormatNumber(realH);
@@ -4841,9 +4849,35 @@ namespace PlantFlow_Support
             PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV pipecenter fallback: pipeCenterY=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " minY=" + this.FormatNumber(minY) + " maxY=" + this.FormatNumber(maxY));
           }
         }
+        else if (string.Equals(verticalMode, "param", System.StringComparison.OrdinalIgnoreCase))
+        {
+          string paramKey = this.GetNotabVerticalParamKey(standardName);
+          string paramValue = string.Empty;
+          double paramRealH = double.NaN;
+          bool hasParam = !string.IsNullOrWhiteSpace(paramKey)
+            && s_isoSupportParams.TryGetValue(paramKey, out paramValue)
+            && double.TryParse(paramValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out paramRealH);
+          if (!hasParam && !string.IsNullOrWhiteSpace(paramKey))
+            hasParam = s_isoSupportParams.TryGetValue(paramKey, out paramValue)
+              && double.TryParse(paramValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out paramRealH);
+
+          if (hasParam && paramRealH > 1e-6 && paramRealH <= realH + 1e-6 && vScale > 1e-9)
+          {
+            dimVTopY = minY + paramRealH * vScale;
+            dimVBarSpan = true;
+            dimVParamRealH = paramRealH;
+            dimVText = this.FormatNumber(paramRealH);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV param key=" + paramKey + " raw=" + paramValue + " real=" + this.FormatNumber(paramRealH) + " topY=" + this.FormatNumber(dimVTopY) + " minY=" + this.FormatNumber(minY) + " maxY=" + this.FormatNumber(maxY) + " realH=" + this.FormatNumber(realH));
+          }
+          else
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV param fallback full: key=" + (string.IsNullOrWhiteSpace(paramKey) ? "empty" : paramKey) + " raw=" + (string.IsNullOrWhiteSpace(paramValue) ? "empty" : paramValue) + " parsed=" + this.FormatNumber(paramRealH) + " realH=" + this.FormatNumber(realH) + " minY=" + this.FormatNumber(minY) + " maxY=" + this.FormatNumber(maxY) + " vScale=" + this.FormatNumber(vScale));
+          }
+        }
 
         RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(minX, minY, 0.0), new Point3d(minX, dimVTopY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
-        this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, realH, txt, "dimV", dimVText);
+        double dimVRealValue = string.Equals(verticalMode, "param", System.StringComparison.OrdinalIgnoreCase) && dimVBarSpan ? dimVParamRealH : realH;
+        this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, dimVRealValue, txt, "dimV", dimVText);
         // 치수가 먼저 자리를 확정하고, 모든 콜아웃이 같은 충돌 상태를 공유한다.
         // 콜아웃 허용영역은 실제 뷰포트 사각형이다. 서포트 extents ± 100은 폭 넓은
         // 라인넘버 텍스트가 좌우 고정 상태에서 전량 영역 밖으로 떨어지게 만든다.
@@ -5635,6 +5669,7 @@ namespace PlantFlow_Support
     private struct NotabTypeConfig
     {
       public string VerticalMode;
+      public string VerticalParamKey;
       public string PipeCalloutSide;
       public string HorizontalSide;
       public string[] MemberBIs;
@@ -5669,7 +5704,11 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "GD1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "bottom" };
       if (string.Equals(standardName, "RC1", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "bottom" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "bottom" };
+      if (string.Equals(standardName, "RC2", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto" };
+      if (string.Equals(standardName, "RC3", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "pipecenter", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "16", "215" } };
       if (string.Equals(standardName, "GD3", System.StringComparison.OrdinalIgnoreCase))
@@ -5686,6 +5725,11 @@ namespace PlantFlow_Support
     private string GetNotabVerticalDimMode(string supportType)
     {
       return this.GetNotabTypeConfig(supportType).VerticalMode;
+    }
+
+    private string GetNotabVerticalParamKey(string supportType)
+    {
+      return this.GetNotabTypeConfig(supportType).VerticalParamKey;
     }
 
     private string GetNotabPipeCalloutSide(string supportType)
@@ -7537,6 +7581,7 @@ namespace PlantFlow_Support
       s_isoSupportProfile = string.Empty;
       s_isoSupportDesignation = string.Empty;
       s_isoSupportDesignations.Clear();
+      s_isoSupportParams.Clear();
       s_isoSupportProfileHeight = string.Empty;
 
       if (supportId == ObjectId.Null)
@@ -7559,6 +7604,7 @@ namespace PlantFlow_Support
         System.Collections.Generic.Dictionary<string, string> dims = ps.GetSupportDimension(supportId);
         if (dims != null)
         {
+          s_isoSupportParams = new System.Collections.Generic.Dictionary<string, string>(dims, System.StringComparer.OrdinalIgnoreCase);
           System.Text.StringBuilder sb = new System.Text.StringBuilder();
           int n = 0;
           foreach (System.Collections.Generic.KeyValuePair<string, string> kv in dims)

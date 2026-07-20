@@ -1,16 +1,15 @@
 # REPORT - Codex → Claude
 
-- **cycle**: 88
+- **cycle**: 89
 - **status**: done
 - **completed_at**: 2026-07-20
-- **title**: 무탭 콜아웃 좌우 하드 제약 및 단일 배치 경로
+- **title**: RC 패밀리 세로 치수(F2→H) + 세로 부재 앵커 단계 A
 
 ## 변경 요약
-- `NotabCalloutPlacer.TryPlace`를 `RequiredSide` 하드 제약으로 전환했다. 후보의 좌우는 고정되고 상하·반경만 탐색한다.
-- 실제 `Viewport.CenterPoint/Width/Height`로 페이퍼 사각형과 중앙선을 산출했다. 파이프는 파이프 중심 X, 부재는 각 앵커 X를 기준으로 좌우를 결정한다. 중앙선은 우측으로 결정한다.
-- 호출부의 사전 `TryPlace`를 제거하고 직접 작도 직전의 한 곳에서만 배치한다. tier는 `All → PlacedCalloutsOnly → None`으로 완화한다.
-- 실패하면 MText를 삭제하고 작도를 생략한다. `callout-draw`/`callout-skip`에 좌우 출처, 기준 X, 뷰포트 중앙선, tier 및 거절 사유 카운트를 기록한다.
-- `PFS_NOTAB_DIR_*`는 `L`/`R`만 강제 오버라이드로 허용하며 다른 값은 deprecated 로그 후 무시한다. angle 비용 기본값은 `0.0`이다.
+- `CaptureIsoSupportProfile()`의 SupportParams를 대소문자 비구분 정적 사전으로 복사하고, 매 추출 시작 및 재캡처 전에 비운다. 기존 전량 덤프 로그는 유지된다.
+- `NotabTypeConfig`에 `VerticalParamKey`를 추가하고 RC1/RC2/RC3를 `param(F2)` 모드로 등록했다. 기존 관측값대로 RC1은 `top/bottom`, RC2/RC3은 `top/auto`를 유지했다.
+- `param` 모드는 F2를 InvariantCulture 우선으로 파싱한다. `0 < F2 <= realH`일 때 치수 상단을 `minY + F2 × vScale`로 설정하고, 실제 치수값도 F2로 전달한다. 실패하면 전체 높이 치수로 폴백하며 진단 로그를 남긴다.
+- `member-spike`에 ObjectId, Handle, 레이어, 색상 인덱스를 추가 기록했다. 세로 MEMBER 앵커 작도는 단계 B로 미구현이다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
@@ -18,12 +17,13 @@
 
 ## 검증
 - `git diff --check` 통과.
-- 정적 검색: 활성 `TryPlace` 호출은 직접 작도 경로 1곳뿐이며, 구 각도 계산 호출은 제거됨을 확인.
+- 정적 확인: F2 저장 사전의 초기화·캡처·읽기 경로, RC1/RC2/RC3 설정 행, `param`의 치수 형상과 F2 `realValue` 전달을 확인.
 - 빌드 미실행: 사용자 요청이 없어 프로젝트 규칙에 따라 실행하지 않음.
 
 ## 라이브 검증 필요
-- `dev_test.bat`로 GD1/GD2/GD3를 추출하고 `callout-draw`에서 GD2 PIPE=`requiredSide=right`, GD3 PIPE=`requiredSide=left`, `tier<=1`, `callout-skip` 0건을 확인한다.
-- 육안으로 문자/리더 간섭과 리더의 문자 관통이 없는지 확인한다.
+- RC1/RC2/RC3 추출 후 `support params dump`의 F2, `dimV param`의 raw/real/topY, `dim append`의 `vMode=param`과 `sideMode`를 확인한다.
+- `minY`가 베이스 플레이트 아래면인지 `dimV param` 로그의 minY/maxY 및 렌더로 검증한다. 어긋나면 보정 없이 실측값을 다음 REPORT에 기록한다.
+- `member-spike`의 id/handle/layer/colorIndex로 세로 MEMBER를 원본 대응 가능한지 판정한다.
 
 ## 커밋
 - 이 REPORT와 코드 변경을 동일 커밋으로 기록.
