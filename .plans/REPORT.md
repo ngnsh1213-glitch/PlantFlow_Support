@@ -26,4 +26,4 @@
 - 서포트·치수·파이프 관통 없음, GD1 M0 우측, GD2 PIPE 우측·M1 좌하, GD3 PIPE 좌하·M0 우하를 확인한다.
 
 ## 커밋
-- 다음 커밋에서 기록.
+- 코드: `9273143` (`fix: correct notab callout obstacle placement`)
