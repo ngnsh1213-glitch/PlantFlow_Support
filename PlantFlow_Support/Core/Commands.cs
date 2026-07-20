@@ -5194,7 +5194,8 @@ namespace PlantFlow_Support
         }
         this.AppendNotabUboltCallouts(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, vp);
         // 밸룬은 마지막. 기존 확정 배치(치수·파이프·부재·U-bolt)의 회귀를 최소화한다.
-        this.AppendNotabBalloons(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, vp);
+        this.AppendNotabBalloons(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, vp,
+          hasVerticalPortAnchor, verticalAnchorX, verticalAnchorBaseY, verticalAnchorTopY, dimReferenceMinX, maxX);
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " vMode=" + verticalMode + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
@@ -8031,6 +8032,21 @@ namespace PlantFlow_Support
       }
     }
 
+    // 세로재 판정. TaggingPoints의 F2는 타입별로 PPorts[1](=S2)를 쓰고, cycle92에서
+    // 그 포트가 기둥 자유단임이 검증됐다. 이름 규칙이 아니라 WCS 일치로 판정한다.
+    private bool IsNotabVerticalMemberPort(Point3d wcs)
+    {
+      for (int i = 0; i < s_isoSupportPorts.Count; i++)
+      {
+        if (s_isoSupportPorts[i].Index != 1) continue;
+        Point3d p = s_isoSupportPorts[i].Wcs;
+        return System.Math.Abs(p.X - wcs.X) < 1e-6
+          && System.Math.Abs(p.Y - wcs.Y) < 1e-6
+          && System.Math.Abs(p.Z - wcs.Z) < 1e-6;
+      }
+      return false;
+    }
+
     // 밸룬 아래 표기할 부재 코드. BOM DESCRIPTION "ANGLE A6" → "A6".
     // 코드 형태(영문1+숫자)가 없으면 표기를 생략한다(BASE PLATE 치수 등은 표에서 읽는다).
     private string GetNotabBalloonSubLabel(string description)
@@ -8057,7 +8073,9 @@ namespace PlantFlow_Support
     // 앵커는 원본에서 캡처한 TaggingPoints p0을 투영해 얻는다. 투영 실패·범위 이탈이면 그리지 않는다.
     private void AppendNotabBalloons(Transaction tr, BlockTableRecord layoutBtr, Database db,
       ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, Extents3d viewportPaperExt,
-      double txt, NotabCalloutPlacer placer, Viewport vp)
+      double txt, NotabCalloutPlacer placer, Viewport vp,
+      bool hasVerticalAnchor, double verticalX, double verticalBaseY, double verticalTopY,
+      double horizontalMinX, double horizontalMaxX)
     {
       if (tr == null || layoutBtr == null || db == null || placer == null)
         return;
@@ -8101,6 +8119,23 @@ namespace PlantFlow_Support
         {
           PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item + " reason=outside-viewport anchor=" + this.FormatPoint(anchor));
           continue;
+        }
+
+        // TaggingPoints는 포트(부착점)라 부재의 끝단·모서리를 가리킨다. 그대로 쓰면
+        // 세로재 밸룬과 베이스 플레이트 밸룬이 같은 지점을 지시해 무엇을 가리키는지 모호해진다.
+        // 부재의 긴 방향으로만 중앙으로 옮긴다(짧은 방향 좌표는 포트 값을 유지).
+        string anchorAdjust = "port";
+        bool isVerticalMember = hasVerticalAnchor && this.IsNotabVerticalMemberPort(anchorInfo.WcsP0);
+        if (isVerticalMember)
+        {
+          anchor = new Point3d(verticalX, (verticalBaseY + verticalTopY) / 2.0, 0.0);
+          anchorAdjust = "vertical-mid";
+        }
+        else if (item.StartsWith("F", System.StringComparison.OrdinalIgnoreCase)
+          && horizontalMaxX - horizontalMinX > 1e-6)
+        {
+          anchor = new Point3d((horizontalMinX + horizontalMaxX) / 2.0, anchor.Y, 0.0);
+          anchorAdjust = "horizontal-mid";
         }
 
         NotabCalloutPlacer.RequiredSide side = anchor.X >= viewportCenterX
@@ -8201,7 +8236,7 @@ namespace PlantFlow_Support
             new Extents3d(new Point3d(boxCenterX - boxW / 2.0, boxTopY - boxH, 0.0),
                           new Point3d(boxCenterX + boxW / 2.0, boxTopY, 0.0)));
           PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-draw key=" + item + " item=" + bomItem
-            + " sub='" + subLabel + "'"
+            + " sub='" + subLabel + "' adjust=" + anchorAdjust
             + " anchor=" + this.FormatPoint(anchor) + " center=" + this.FormatPoint(ballCenter)
             + " r=" + this.FormatNumber(radius) + " box=" + this.FormatNumber(boxW) + "x" + this.FormatNumber(boxH)
             + " side=" + (left ? "left" : "right") + " " + diag);
