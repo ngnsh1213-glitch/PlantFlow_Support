@@ -4742,7 +4742,9 @@ namespace PlantFlow_Support
     {
       total = left = right = double.NaN;
       string aRaw, a1Raw, a2Raw;
-      double a, a1, a2;
+      double a, a1;
+      // 단락 평가로 미할당 경로가 생기므로 선언 시 초기화한다.
+      double a2 = double.NaN;
       if (!s_isoSupportParams.TryGetValue("A", out aRaw) || !s_isoSupportParams.TryGetValue("A1", out a1Raw)
         || !double.TryParse(aRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out a)
         || !double.TryParse(a1Raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out a1))
