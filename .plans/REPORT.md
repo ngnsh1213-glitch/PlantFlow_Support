@@ -1,30 +1,31 @@
 # REPORT - Codex → Claude
 
-- **cycle**: 90
-- **status**: done
+- **cycle**: 91
+- **status**: pending_verification
 - **completed_at**: 2026-07-20
-- **title**: RC 가로 치수 SupportParams + 세로 MEMBER 앵커 실측화
+- **title**: 포트 덤프 + 세로 치수 기준 정합 + U-bolt 태그 조사
 
 ## 변경 요약
-- `CollectNotabMemberBoxes()`가 단일 트랜잭션에서 모델 솔리드를 수집·투영하고, 기존 `member-spike` 로그를 유지한다. DTO에는 값과 `ObjectId`만 보관한다.
-- RC1/RC2/RC3의 가로 치수는 InvariantCulture로 `A + A1`을 읽고, `A2`(없으면 `A1`)로 좌·우 분할을 정한다. 보조선도 가장 넓은 부재 박스의 우측 끝을 기준으로 같은 폭에 맞춘다.
-- 파라미터·투영·부재 박스가 유효하지 않으면 기존 `s_isoRealWidth` 경로로 폴백하며 원인을 로그에 기록한다. GD 계열은 새 결과를 소비하지 않는다.
-- RC 세로 부재 앵커는 파이프 최단거리 후보를 제외한 뒤 페이퍼 박스 세로 종횡비 상대 최댓값을 사용한다. 동률·비세로 후보면 기존 추정식으로 폴백한다.
-- 기본 가로 치수 오프셋을 `txt * 1.5`에서 `txt * 2.0`으로 상향했다.
+- 원본 활성 DB에서 선택 서포트의 `Part.GetPorts((PortType)7)` 전량을 인덱스·이름·WCS 좌표로 스냅샷한다. 상세 DB에서는 해당 스냅샷을 `NotabProjectWcsToPaper()`로 투영만 하므로 Plant API가 side DB에서 호출되지 않는다.
+- 포트 인덱스 1은 로그에 `role=F2-candidate`로 표시한다. 실제 RC1/RC2/RC3 기둥 위치의 수치 대조는 라이브 추출 로그에서 확정한다. 앵커 작도 로직은 변경하지 않았다.
+- RC 가로 치수에서 결정된 `dimHSource`와 `dimReferenceMinX`를 세로 치수선 위치와 두 extension point에 공통 적용했다. params 경로와 legacy 폴백의 기준 혼용을 막는다.
+- 자동 포함된 Support 객체만 원본 트랜잭션에서 class/type, `GetSupportDimension()` 전량, 후보 DataLinks 키를 덤프한다. 클래스명 게이트를 통과하지 못한 객체는 기존처럼 `otherPart` 로그로 남는다.
 
 ## 변경 파일
 - `PlantFlow_Support/Core/Commands.cs`
 - `.plans/REPORT.md`
 
-## 검증
+## 정적 검증
 - `git diff --check` 통과.
-- 정적 확인: 새 메서드 호출·시그니처 일치, RC 전용 소비 조건, GD 기존 분기 보존을 확인.
-- 빌드 미실행: 프로젝트 규칙에 따라 사용자가 수동으로 `dev_test.bat`을 실행해야 한다.
+- 포트 캡처는 원본 DB 구간(`CaptureIsoSelectionMetrics`)에서, 페이퍼 투영은 상세 DB의 viewport 확보 뒤에서 호출되는 것을 확인.
+- 세로 치수의 `verticalX`와 두 extension point가 모두 `dimReferenceMinX`를 사용함을 확인.
+- 빌드 미실행: 프로젝트 규약에 따라 사용자가 `dev_test.bat`을 수동 실행해야 한다.
 
 ## 라이브 검증 필요
-- RC1/RC2/RC3에서 `dimH source=params(A+A1)` 및 450/450/500, 분할 350/100·250/200·250/250을 확인.
-- `member-anchor source=member-geometry` 로그와 화살표의 세로 MEMBER 몸통 접촉을 확인.
-- GD1/GD2/GD3에서 기존 치수·다중 designation 앵커가 유지되는지 확인.
+- RC1/RC2/RC3: `support-port wcs`, `support-port paper` 전량 및 index=1 `role=F2-candidate`를 실제 기둥 페이퍼 위치와 수치 대조해 기록.
+- RC2: `dimH source=params(A+A1)`와 `dim reference source=params(A+A1)`의 minX가 일치하고, 세로 치수 보조선도 같은 x에서 시작하는지 확인.
+- U-bolt: `ubolt-probe candidate/support-dims/datalinks` 로그로 class/type 및 태그 후보의 가용성을 판정. `otherPart`만 나오면 클래스명 게이트 미통과로 판정.
+- GD1/GD2/GD3 회귀 및 빌드 결과를 사용자 수동 실행 후 갱신.
 
 ## 커밋
-- 이 REPORT와 코드 변경을 동일 커밋으로 기록.
+- 이 REPORT와 코드 변경을 동일 커밋으로 기록 예정.

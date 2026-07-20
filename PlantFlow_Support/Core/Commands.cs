@@ -232,6 +232,14 @@ namespace PlantFlow_Support
     // CaptureIsoSupportProfile의 원본 3D 파라미터는 페이퍼 치수 작성 시점에도 필요하다.
     private static System.Collections.Generic.Dictionary<string, string> s_isoSupportParams = new System.Collections.Generic.Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
     private static string s_isoSupportProfileHeight;
+    // 원본 Plant DB에서만 취득한다. side DB로 복제된 Solid3d에는 포트 메타데이터가 없다.
+    private sealed class NotabSupportPortSnapshot
+    {
+      public int Index;
+      public string Name;
+      public Point3d Wcs;
+    }
+    private static System.Collections.Generic.List<NotabSupportPortSnapshot> s_isoSupportPorts = new System.Collections.Generic.List<NotabSupportPortSnapshot>();
     private static Document s_isoOpenPendingTempDoc;
     private static Document s_isoOpenPendingOriginalDoc;
     private static int s_isoOpenSecondIdleAttempts;
@@ -1389,6 +1397,7 @@ namespace PlantFlow_Support
       s_isoSupportDesignations.Clear();
       s_isoSupportParams.Clear();
       s_isoSupportProfileHeight = string.Empty;
+      s_isoSupportPorts.Clear();
 
       Editor ed = doc.Editor;
       selectedIds = this.AutoIncludeRelatedParts(doc.Database, selectedIds);
@@ -4612,6 +4621,7 @@ namespace PlantFlow_Support
           }
 
           System.Collections.Generic.List<NotabMemberBox> memberBoxes = this.CollectNotabMemberBoxes(tr, db, vp);
+          this.LogNotabSupportPortProjection(vp);
 
           Extents3d supportPaperExt;
           double pipeCenterXPaper;
@@ -4879,7 +4889,14 @@ namespace PlantFlow_Support
         double dimClear = this.GetEnvDouble("PFS_NOTAB_DIM_CLEAR", 10.0, 0.0, 200.0);
         double splitY = horizontalBottom ? minY - offset - dimClear : maxY + offset + dimClear;
         double totalY = horizontalBottom ? splitY - stack : splitY + stack;
-        double verticalX = minX - offset - dimClear;
+        // 세로 치수의 기준은 가로 치수와 반드시 동일하다. params 경로에서는 부재 기준,
+        // legacy 폴백에서는 support extents 기준을 사용하며 두 경로를 혼용하지 않는다.
+        double dimReferenceMinX = minX;
+        string dimReferenceSource = dimHSource;
+        double verticalX = dimReferenceMinX - offset - dimClear;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL dim reference source=" + dimReferenceSource
+          + " minX=" + this.FormatNumber(dimReferenceMinX)
+          + " verticalX=" + this.FormatNumber(verticalX));
         double leftReal = double.NaN;
         double rightReal = double.NaN;
         double splitGuardLimit = System.Math.Min(txt * 2.0, txt * 1.6 * 2.0);
@@ -4998,7 +5015,7 @@ namespace PlantFlow_Support
           }
         }
 
-        RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(minX, minY, 0.0), new Point3d(minX, dimVTopY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
+        RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(dimReferenceMinX, minY, 0.0), new Point3d(dimReferenceMinX, dimVTopY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
         double dimVRealValue = string.Equals(verticalMode, "param", System.StringComparison.OrdinalIgnoreCase) && dimVBarSpan ? dimVParamRealH : realH;
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, dimVRealValue, txt, "dimV", dimVText);
         // 치수가 먼저 자리를 확정하고, 모든 콜아웃이 같은 충돌 상태를 공유한다.
@@ -7666,6 +7683,7 @@ namespace PlantFlow_Support
 
       this.CaptureIsoSupportProperties(supportId, s_isoPipeId);
       this.CaptureIsoSupportProfile(supportId);
+      this.CaptureIsoSupportPorts(supportId);
       this.AugmentDesignationsFromBom(supportId);
       bool bomSpike = this.GetEnvDouble("PFS_NOTAB_BOM_SPIKE", 0.0, 0.0, 1.0) >= 0.5;
       if (bomSpike)
@@ -7732,6 +7750,78 @@ namespace PlantFlow_Support
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSVBISOCLONE props 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    // 활성 원본 DB에서만 호출한다. 이후 상세 DB에서는 이 스냅샷을 투영만 한다.
+    private void CaptureIsoSupportPorts(ObjectId supportId)
+    {
+      s_isoSupportPorts.Clear();
+      if (supportId == ObjectId.Null)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL support-port skip: supportId null");
+        return;
+      }
+
+      try
+      {
+        Database db = supportId.Database;
+        if (db == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL support-port skip: database null id=" + supportId);
+          return;
+        }
+
+        using (Transaction tr = db.TransactionManager.StartTransaction())
+        {
+          Part part = tr.GetObject(supportId, OpenMode.ForRead, false) as Part;
+          if (part == null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL support-port skip: not Part id=" + supportId);
+            tr.Commit();
+            return;
+          }
+
+          PortCollection ports = part.GetPorts((PortType)7);
+          if (ports == null)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL support-port skip: ports null id=" + supportId);
+            tr.Commit();
+            return;
+          }
+
+          int index = 0;
+          foreach (Port port in (PnP3dCollection)ports)
+          {
+            NotabSupportPortSnapshot snapshot = new NotabSupportPortSnapshot();
+            snapshot.Index = index++;
+            snapshot.Name = string.IsNullOrWhiteSpace(port.Name) ? "(unnamed)" : port.Name;
+            snapshot.Wcs = port.Position;
+            s_isoSupportPorts.Add(snapshot);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL support-port wcs index=" + snapshot.Index + " name=" + snapshot.Name + " point=" + this.FormatPoint(snapshot.Wcs));
+          }
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL support-port count=" + s_isoSupportPorts.Count + " id=" + supportId);
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL support-port capture 예외 id=" + supportId + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+    }
+
+    private void LogNotabSupportPortProjection(Viewport vp)
+    {
+      if (vp == null || s_isoSupportPorts.Count == 0)
+        return;
+
+      for (int i = 0; i < s_isoSupportPorts.Count; i++)
+      {
+        NotabSupportPortSnapshot snapshot = s_isoSupportPorts[i];
+        Point3d paper = this.NotabProjectWcsToPaper(vp, snapshot.Wcs);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL support-port paper index=" + snapshot.Index + " name=" + snapshot.Name
+          + " wcs=" + this.FormatPoint(snapshot.Wcs) + " paper=" + this.FormatPoint(paper)
+          + (snapshot.Index == 1 ? " role=F2-candidate" : string.Empty));
       }
     }
 
@@ -8085,6 +8175,12 @@ namespace PlantFlow_Support
     private string FormatNumber(double value)
     {
       return System.Math.Abs(value).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private string FormatPoint(Point3d point)
+    {
+      System.Globalization.CultureInfo ic = System.Globalization.CultureInfo.InvariantCulture;
+      return "(" + point.X.ToString("0.##", ic) + "," + point.Y.ToString("0.##", ic) + "," + point.Z.ToString("0.##", ic) + ")";
     }
 
     private string FormatDimNumber(double value)
@@ -8794,6 +8890,7 @@ namespace PlantFlow_Support
                   PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include support skip(far) id=" + eid + " ext=" + this.FormatExtents(ex) + " supTol=" + this.FormatNumber(supTol));
                   continue;
                 }
+                this.DumpNotabAutoIncludedSupportMetadata(ps, eid, cls, typeName);
                 existing.Add(eid);
                 result.Add(eid);
                 addedSup++;
@@ -8866,6 +8963,53 @@ namespace PlantFlow_Support
       if (a.MaxPoint.Y < b.MinPoint.Y || a.MinPoint.Y > b.MaxPoint.Y) return false;
       if (a.MaxPoint.Z < b.MinPoint.Z || a.MinPoint.Z > b.MaxPoint.Z) return false;
       return true;
+    }
+
+    // 자동 포함된 원본 Support만 대상으로 한다. 상세도 복제본은 메타데이터가 제거되어 있다.
+    private void DumpNotabAutoIncludedSupportMetadata(PSUtil ps, ObjectId id, string className, string typeName)
+    {
+      PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-probe candidate id=" + id + " class=" + className + " type=" + typeName);
+      if (ps == null)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-probe skip: PSUtil null id=" + id);
+        return;
+      }
+
+      try
+      {
+        System.Collections.Generic.Dictionary<string, string> dims = ps.GetSupportDimension(id);
+        System.Text.StringBuilder dump = new System.Text.StringBuilder();
+        if (dims != null)
+        {
+          foreach (System.Collections.Generic.KeyValuePair<string, string> kv in dims)
+            dump.Append(kv.Key).Append('=').Append(kv.Value).Append(" | ");
+        }
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-probe support-dims id=" + id + " count=" + (dims == null ? 0 : dims.Count) + " { " + dump.ToString() + "}");
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-probe support-dims 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      try
+      {
+        System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection()
+        {
+          "SupportName", "ShortDescription", "PartNumber", "Tag", "TagName", "SupportDetail", "Description"
+        };
+        System.Collections.Specialized.StringCollection values = ps.GetProperties(id, names);
+        System.Text.StringBuilder dump = new System.Text.StringBuilder();
+        for (int i = 0; i < names.Count; i++)
+        {
+          string value = values != null && i < values.Count ? values[i] : string.Empty;
+          dump.Append(names[i]).Append('=').Append(string.IsNullOrWhiteSpace(value) ? "(empty)" : value).Append(" | ");
+        }
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-probe datalinks id=" + id + " { " + dump.ToString() + "}");
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-probe datalinks 예외 id=" + id + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
     }
 
     private bool TryGetPlantLineNumber(PSUtil ps, ObjectId id, out string lineNo)
