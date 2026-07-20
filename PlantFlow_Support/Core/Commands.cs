@@ -5044,15 +5044,28 @@ namespace PlantFlow_Support
           else
           {
             Point3d post = this.NotabProjectWcsToPaper(vp, s2.Wcs);
-            double postTop = post.Y + dimVParamRealH * vScale;
-            if (post.Y < supportPaperExt.MinPoint.Y - 1e-6 || post.Y > supportPaperExt.MaxPoint.Y + 1e-6 || postTop < post.Y || postTop > supportPaperExt.MaxPoint.Y + 1e-6)
+            double extMinY = supportPaperExt.MinPoint.Y;
+            double extMaxY = supportPaperExt.MaxPoint.Y;
+            // S2는 기둥의 자유단이고, 기둥이 뻗는 방향은 타입마다 반대다.
+            // (RC1=S2가 상단→아래로, RC2/RC3=S2가 하단→위로) 범위 안에 들어오는 쪽을 채택한다.
+            double spanUp = post.Y + dimVParamRealH * vScale;
+            double spanDown = post.Y - dimVParamRealH * vScale;
+            double other = double.NaN;
+            if (spanUp <= extMaxY + 1e-6 && spanUp >= extMinY - 1e-6)
+              other = spanUp;
+            else if (spanDown <= extMaxY + 1e-6 && spanDown >= extMinY - 1e-6)
+              other = spanDown;
+
+            if (post.Y < extMinY - 1e-6 || post.Y > extMaxY + 1e-6)
               verticalFallback = "post-outside-support-extents";
+            else if (double.IsNaN(other))
+              verticalFallback = "post-span-outside-extents";
             else
             {
               verticalAnchorX = post.X;
-              verticalAnchorBaseY = post.Y;
-              verticalAnchorTopY = postTop;
-              verticalAnchorSource = "port-S2";
+              verticalAnchorBaseY = System.Math.Min(post.Y, other);
+              verticalAnchorTopY = System.Math.Max(post.Y, other);
+              verticalAnchorSource = "port-S2" + (other > post.Y ? "(up)" : "(down)");
               verticalFallback = string.Empty;
               hasVerticalPortAnchor = true;
             }
