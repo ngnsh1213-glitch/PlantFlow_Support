@@ -4611,7 +4611,7 @@ namespace PlantFlow_Support
             return;
           }
 
-          this.NotabMemberGeometrySpike(tr, db, vp, supportExt);
+          System.Collections.Generic.List<NotabMemberBox> memberBoxes = this.CollectNotabMemberBoxes(tr, db, vp);
 
           Extents3d supportPaperExt;
           double pipeCenterXPaper;
@@ -4643,7 +4643,7 @@ namespace PlantFlow_Support
             pipePaperRadius = this.TryGetNotabPipePaperRadiusFromDetailSolids(tr, db, vp, pipeCenterXPaper, pipeCenterYPaper);
           PlantOrthoView.FileDiag("PFSNOTABDETAIL pipe paper radius=" + this.FormatNumber(pipePaperRadius) + " source=" + (s_isoPipeRadiusModel > 1e-6 ? "model" : "detail-solid"));
           Extents3d viewportPaperExt = new Extents3d(new Point3d(vp.CenterPoint.X - vp.Width / 2.0, vp.CenterPoint.Y - vp.Height / 2.0, 0.0), new Point3d(vp.CenterPoint.X + vp.Width / 2.0, vp.CenterPoint.Y + vp.Height / 2.0, 0.0));
-          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, viewportPaperExt, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId, textStyleId, db);
+          this.AppendNotabPaperDimensions(tr, layoutBtr, supportPaperExt, viewportPaperExt, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius, s_isoRealWidth, s_isoRealHeight, dimStyleId, layerId, textStyleId, db, memberBoxes);
           tr.Commit();
         }
       }
@@ -4653,10 +4653,21 @@ namespace PlantFlow_Support
       }
     }
 
-    private void NotabMemberGeometrySpike(Transaction tr, Database db, Viewport vp, Extents3d supportExt)
+    private struct NotabMemberBox
     {
+      public ObjectId Id;
+      public string Handle;
+      public Extents3d PaperBox;
+      public Vector3d WcsDims;
+      public double Aspect;
+      public double PipeDist;
+    }
+
+    private System.Collections.Generic.List<NotabMemberBox> CollectNotabMemberBoxes(Transaction tr, Database db, Viewport vp)
+    {
+      System.Collections.Generic.List<NotabMemberBox> result = new System.Collections.Generic.List<NotabMemberBox>();
       if (tr == null || db == null || vp == null)
-        return;
+        return result;
 
       try
       {
@@ -4664,13 +4675,13 @@ namespace PlantFlow_Support
         if (bt == null)
         {
           PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike skip: block table null");
-          return;
+          return result;
         }
         BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
         if (ms == null)
         {
           PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike skip: model space null");
-          return;
+          return result;
         }
 
         int i = 0;
@@ -4716,6 +4727,7 @@ namespace PlantFlow_Support
             + " paperBox=(" + this.FormatNumber(pminx) + "," + this.FormatNumber(pminy) + ")~(" + this.FormatNumber(pmaxx) + "," + this.FormatNumber(pmaxy) + ")"
             + " paperWH=(" + this.FormatNumber(pmaxx - pminx) + "," + this.FormatNumber(pmaxy - pminy) + ")"
             + " pipeDist=" + this.FormatNumber(pipeDist));
+          result.Add(new NotabMemberBox { Id = id, Handle = handle, PaperBox = new Extents3d(new Point3d(pminx, pminy, 0.0), new Point3d(pmaxx, pmaxy, 0.0)), WcsDims = new Vector3d(dx, dy, dz), Aspect = aspectLongMid, PipeDist = pipeDist });
         }
         PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike done count=" + i + " std=" + this.GetNotabStandardName());
       }
@@ -4723,9 +4735,70 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL member-spike 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
+      return result;
     }
 
-    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, Extents3d viewportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double pipePaperRadius, double realW, double realH, ObjectId dimStyleId, ObjectId layerId, ObjectId textStyleId, Database db)
+    private bool TryGetNotabRcHorizontalParams(out double total, out double left, out double right)
+    {
+      total = left = right = double.NaN;
+      string aRaw, a1Raw, a2Raw;
+      double a, a1, a2;
+      if (!s_isoSupportParams.TryGetValue("A", out aRaw) || !s_isoSupportParams.TryGetValue("A1", out a1Raw)
+        || !double.TryParse(aRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out a)
+        || !double.TryParse(a1Raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out a1))
+        return false;
+      bool hasA2 = s_isoSupportParams.TryGetValue("A2", out a2Raw)
+        && double.TryParse(a2Raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out a2);
+      total = a + a1;
+      right = hasA2 ? a2 : a1;
+      left = total - right;
+      return !double.IsNaN(total) && !double.IsInfinity(total) && !double.IsNaN(left) && !double.IsInfinity(left)
+        && !double.IsNaN(right) && !double.IsInfinity(right) && total > 1e-6 && left > 1e-6 && right > 1e-6;
+    }
+
+    private bool TryGetNotabVerticalMemberBox(System.Collections.Generic.List<NotabMemberBox> boxes, out NotabMemberBox vertical, out string reason)
+    {
+      vertical = new NotabMemberBox();
+      reason = "no-candidates";
+      if (boxes == null || boxes.Count < 2)
+        return false;
+      double minPipeDist = double.MaxValue;
+      for (int i = 0; i < boxes.Count; i++)
+        if (boxes[i].PipeDist >= 0.0 && boxes[i].PipeDist < minPipeDist)
+          minPipeDist = boxes[i].PipeDist;
+      int best = -1;
+      double bestAspect = double.NegativeInfinity;
+      bool tie = false;
+      for (int i = 0; i < boxes.Count; i++)
+      {
+        NotabMemberBox box = boxes[i];
+        if (minPipeDist < double.MaxValue && System.Math.Abs(box.PipeDist - minPipeDist) <= 1e-6)
+          continue;
+        double w = box.PaperBox.MaxPoint.X - box.PaperBox.MinPoint.X;
+        double h = box.PaperBox.MaxPoint.Y - box.PaperBox.MinPoint.Y;
+        if (w <= 1e-6 || h <= 1e-6)
+          continue;
+        double aspect = h / w;
+        if (aspect > bestAspect + 1e-6)
+        {
+          best = i;
+          bestAspect = aspect;
+          tie = false;
+        }
+        else if (System.Math.Abs(aspect - bestAspect) <= 1e-6)
+          tie = true;
+      }
+      if (best < 0 || tie || bestAspect <= 1.0)
+      {
+        reason = best < 0 ? "no-nonclamp-candidate" : (tie ? "vertical-aspect-tie" : "not-vertical");
+        return false;
+      }
+      vertical = boxes[best];
+      reason = "relative-aspect-max, clamp-pipeDist-min-excluded";
+      return true;
+    }
+
+    private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, Extents3d viewportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double pipePaperRadius, double realW, double realH, ObjectId dimStyleId, ObjectId layerId, ObjectId textStyleId, Database db, System.Collections.Generic.List<NotabMemberBox> memberBoxes)
     {
       if (tr == null || layoutBtr == null)
         return;
@@ -4749,12 +4822,54 @@ namespace PlantFlow_Support
           return;
         }
 
+        string standardName = this.GetNotabStandardName();
+        double paramTotal = double.NaN, paramLeft = double.NaN, paramRight = double.NaN;
+        bool rcMemberGeometry = string.Equals(standardName, "RC1", System.StringComparison.OrdinalIgnoreCase)
+          || string.Equals(standardName, "RC2", System.StringComparison.OrdinalIgnoreCase)
+          || string.Equals(standardName, "RC3", System.StringComparison.OrdinalIgnoreCase);
+        string dimHSource = "fallback=legacy";
+        string dimHFallback = "not-rc";
+        if (rcMemberGeometry && this.TryGetNotabRcHorizontalParams(out paramTotal, out paramLeft, out paramRight))
+        {
+          double paperPerModel = paperW / realW;
+          if (paperPerModel > 1e-9 && memberBoxes != null && memberBoxes.Count > 0)
+          {
+            int horizontalIndex = -1;
+            double widest = 0.0;
+            for (int i = 0; i < memberBoxes.Count; i++)
+            {
+              double candidateWidth = memberBoxes[i].PaperBox.MaxPoint.X - memberBoxes[i].PaperBox.MinPoint.X;
+              if (candidateWidth > widest)
+              {
+                widest = candidateWidth;
+                horizontalIndex = i;
+              }
+            }
+            if (horizontalIndex >= 0 && widest > 1e-6)
+            {
+              maxX = memberBoxes[horizontalIndex].PaperBox.MaxPoint.X;
+              minX = maxX - paramTotal * paperPerModel;
+              paperW = maxX - minX;
+              dimHSource = "params(A+A1)";
+              dimHFallback = string.Empty;
+            }
+            else
+              dimHFallback = "horizontal-member-box-invalid";
+          }
+          else
+            dimHFallback = "paper-scale-or-member-box-invalid";
+        }
+        else if (rcMemberGeometry)
+          dimHFallback = "params-missing-or-invalid";
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL dimH source=" + dimHSource + " reason=" + (string.IsNullOrEmpty(dimHFallback) ? "none" : dimHFallback)
+          + " total=" + this.FormatNumber(double.IsNaN(paramTotal) ? realW : paramTotal) + " left=" + this.FormatNumber(paramLeft) + " right=" + this.FormatNumber(paramRight)
+          + " extX=(" + this.FormatNumber(minX) + "," + this.FormatNumber(maxX) + ")");
+
         double txt = this.GetEnvDouble("PFS_NOTAB_DIM_TXT", 8.0, 0.5, 50.0);
         // 간격은 글자 높이 비례. 고정값이면 글자 크기를 바꿀 때 치수선이 허공에 뜬다.
-        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", txt * 1.5, 1.0, 100.0);
+        double offset = this.GetEnvDouble("PFS_NOTAB_DIM_OFFSET", txt * 2.0, 1.0, 100.0);
         double stack = this.GetEnvDouble("PFS_NOTAB_DIM_STACK", txt * 2.0, 1.0, 100.0);
         double centerY = (minY + maxY) / 2.0;
-        string standardName = this.GetNotabStandardName();
         string horizontalSide = this.GetNotabHorizontalDimSide(standardName);
         bool horizontalBottom = string.Equals(horizontalSide, "bottom", System.StringComparison.OrdinalIgnoreCase) || (string.Equals(horizontalSide, "auto", System.StringComparison.OrdinalIgnoreCase) && !double.IsNaN(pipeCenterYPaper) && pipeCenterYPaper < centerY - 1e-6);
         double horizontalBaseY = horizontalBottom ? minY : maxY;
@@ -4768,11 +4883,14 @@ namespace PlantFlow_Support
         double splitGuardLimit = System.Math.Min(txt * 2.0, txt * 1.6 * 2.0);
         bool splitGuard = false;
 
+        bool paramsHorizontal = string.Equals(dimHSource, "params(A+A1)", System.StringComparison.Ordinal);
+        if (paramsHorizontal)
+          pipeCenterXPaper = minX + paperW * (paramLeft / paramTotal);
         bool splitOk = !double.IsNaN(pipeCenterXPaper) && pipeCenterXPaper > minX + 1e-6 && pipeCenterXPaper < maxX - 1e-6;
         if (splitOk)
         {
-          leftReal = realW * (pipeCenterXPaper - minX) / paperW;
-          rightReal = realW - leftReal;
+          leftReal = paramsHorizontal ? paramLeft : realW * (pipeCenterXPaper - minX) / paperW;
+          rightReal = paramsHorizontal ? paramRight : realW - leftReal;
           double leftPaper = pipeCenterXPaper - minX;
           double rightPaper = maxX - pipeCenterXPaper;
           splitGuard = leftPaper < splitGuardLimit || rightPaper < splitGuardLimit;
@@ -4807,7 +4925,7 @@ namespace PlantFlow_Support
         }
 
         RotatedDimension dimTotal = PSUtil.CreateHorizontalDimension(new Point3d(minX, horizontalBaseY, 0.0), new Point3d(maxX, horizontalBaseY, 0.0), new Point3d(minX, totalY, 0.0), Matrix3d.Identity, dimStyleId);
-        this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimTotal, dimStyleId, layerId, realW, txt, "dimH");
+        this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimTotal, dimStyleId, layerId, paramsHorizontal ? paramTotal : realW, txt, "dimH");
 
         double dimVTopY = maxY;
         double barRealH = double.NaN;
@@ -4900,7 +5018,7 @@ namespace PlantFlow_Support
           : new Point3d((minX + maxX) / 2.0, (minY + maxY) / 2.0, 0.0);
         calloutPlacer.SetCostReference(supportPaperExt, calloutCostAnchor);
         this.AppendNotabPipeCallout(tr, layoutBtr, db, textStyleId, layerId, pipeCenterXPaper, pipeCenterYPaper, supportPaperExt, viewportPaperExt, txt, calloutPlacer);
-        this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer);
+        this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, memberBoxes);
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " vMode=" + verticalMode + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
@@ -5154,7 +5272,7 @@ namespace PlantFlow_Support
       return referenceX >= viewportCenterX ? NotabCalloutPlacer.RequiredSide.Right : NotabCalloutPlacer.RequiredSide.Left;
     }
 
-    private void AppendNotabProfileCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, Extents3d viewportPaperExt, double txt, NotabCalloutPlacer placer)
+    private void AppendNotabProfileCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, Extents3d viewportPaperExt, double txt, NotabCalloutPlacer placer, System.Collections.Generic.List<NotabMemberBox> memberBoxes)
     {
       if (tr == null || layoutBtr == null || db == null)
         return;
@@ -5199,8 +5317,20 @@ namespace PlantFlow_Support
         double maxYPaper = supportPaperExt.MaxPoint.Y;
         Point3d singleAnchor;
         if (string.Equals(memberAnchorSide, "vertical", System.StringComparison.OrdinalIgnoreCase))
-          // RC 계열: 세로 MEMBER 몸통을 지시한다. 세로재는 좌측 끝에 서 있고 두께가 barPaperH다.
-          singleAnchor = new Point3d(minX + barPaperH * 0.5, maxYPaper - barPaperH * 1.5, 0.0);
+        {
+          NotabMemberBox verticalBox;
+          string memberReason;
+          if (this.TryGetNotabVerticalMemberBox(memberBoxes, out verticalBox, out memberReason))
+          {
+            singleAnchor = new Point3d((verticalBox.PaperBox.MinPoint.X + verticalBox.PaperBox.MaxPoint.X) / 2.0, (verticalBox.PaperBox.MinPoint.Y + verticalBox.PaperBox.MaxPoint.Y) / 2.0, 0.0);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL member-anchor source=member-geometry reason=" + memberReason + " handle=" + verticalBox.Handle + " box=" + this.FormatExtents(verticalBox.PaperBox));
+          }
+          else
+          {
+            singleAnchor = new Point3d(minX + barPaperH * 0.5, maxYPaper - barPaperH * 1.5, 0.0);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL member-anchor fallback=legacy reason=" + memberReason);
+          }
+        }
         else if (string.Equals(memberAnchorSide, "top", System.StringComparison.OrdinalIgnoreCase))
           singleAnchor = new Point3d(maxX, maxYPaper - barPaperH * 0.5, 0.0);
         else
