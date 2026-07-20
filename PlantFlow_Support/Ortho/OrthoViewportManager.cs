@@ -781,8 +781,9 @@ namespace PlantFlow_Support
                 try
                 {
                     Extents3d tableExt = ((Entity)table).GeometricExtents;
-                    bool overlapVp = tableExt.MaxPoint.X >= 30.5 && tableExt.MinPoint.X <= 640.5
-                        && tableExt.MaxPoint.Y >= 84.5 && tableExt.MinPoint.Y <= 573.5;
+                    // 경계 접촉은 겹침이 아니다(표 시작 x가 뷰포트 우측 끝과 정확히 일치).
+                    bool overlapVp = tableExt.MaxPoint.X > 30.5 && tableExt.MinPoint.X < 640.5
+                        && tableExt.MaxPoint.Y > 84.5 && tableExt.MinPoint.Y < 573.5;
                     PlantOrthoView.FileDiag("MEASURE bomtable-space rows=" + (count + 2)
                         + " pos=(640.5,84.5) ext=(" + tableExt.MinPoint.X + "," + tableExt.MinPoint.Y + ")~("
                         + tableExt.MaxPoint.X + "," + tableExt.MaxPoint.Y + ")"

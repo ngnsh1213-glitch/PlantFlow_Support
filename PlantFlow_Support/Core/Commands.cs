@@ -7886,7 +7886,8 @@ namespace PlantFlow_Support
           for (int i = 0; i < rows.Count && i < 40; i++)
           {
             string[] r = rows[i] ?? new string[0];
-            if (i > 0 && r.Length > 0 && !string.IsNullOrWhiteSpace(r[0])) itemKeys.Add(r[0].Trim());
+            // 무탭 경로의 BOM 행에는 헤더가 없다(오쏘만 RemoveAt(0)로 제거). 행 0도 데이터다.
+            if (r.Length > 0 && !string.IsNullOrWhiteSpace(r[0])) itemKeys.Add(r[0].Trim());
             PlantOrthoView.FileDiag("MEASURE bom-row i=" + i + " cols=" + r.Length + " { " + string.Join(" | ", r) + " }");
           }
         }
