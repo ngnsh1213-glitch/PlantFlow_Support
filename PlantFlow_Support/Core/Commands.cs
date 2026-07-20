@@ -4758,9 +4758,11 @@ namespace PlantFlow_Support
         string horizontalSide = this.GetNotabHorizontalDimSide(standardName);
         bool horizontalBottom = string.Equals(horizontalSide, "bottom", System.StringComparison.OrdinalIgnoreCase) || (string.Equals(horizontalSide, "auto", System.StringComparison.OrdinalIgnoreCase) && !double.IsNaN(pipeCenterYPaper) && pipeCenterYPaper < centerY - 1e-6);
         double horizontalBaseY = horizontalBottom ? minY : maxY;
-        double splitY = horizontalBottom ? minY - offset : maxY + offset;
+        // 치수를 부재에서 더 떼어내는 여유. 세로·가로 모두 같은 값으로 밀어 대칭을 맞춘다.
+        double dimClear = this.GetEnvDouble("PFS_NOTAB_DIM_CLEAR", 10.0, 0.0, 200.0);
+        double splitY = horizontalBottom ? minY - offset - dimClear : maxY + offset + dimClear;
         double totalY = horizontalBottom ? splitY - stack : splitY + stack;
-        double verticalX = minX - offset;
+        double verticalX = minX - offset - dimClear;
         double leftReal = double.NaN;
         double rightReal = double.NaN;
         double splitGuardLimit = System.Math.Min(txt * 2.0, txt * 1.6 * 2.0);
@@ -4945,7 +4947,8 @@ namespace PlantFlow_Support
         dim.Dimtxt = txt;
         dim.Dimasz = arr;
         dim.Dimexe = 5.0;
-        dim.Dimexo = 1.5;
+        // 보조선이 부재에서 바로 시작하도록 원점 간격을 없앤다(치수-부재 연결).
+        dim.Dimexo = 0.0;
         dim.Dimgap = txt * 0.6;
         dim.Dimscale = 1.0;
         dim.Dimtih = false;
@@ -5192,14 +5195,20 @@ namespace PlantFlow_Support
           barPaperH = h * 0.4;
         bool multiDesignation = designations.Count > 1 && width > 1e-6;
         // GD 계열은 가로 부재가 하단, RC 계열은 상단에 있다. 기준면을 타입 설정으로 뒤집는다.
-        bool memberAnchorTop = this.IsNotabMemberAnchorTop(this.GetNotabStandardName());
-        double memberAnchorY = memberAnchorTop
-          ? supportPaperExt.MaxPoint.Y - barPaperH * 0.5
-          : minY + barPaperH * 0.5;
-        Point3d singleAnchor = new Point3d(maxX, memberAnchorY, 0.0);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL member-anchor side=" + (memberAnchorTop ? "top" : "bottom")
-          + " anchorY=" + this.FormatNumber(memberAnchorY) + " barPaperH=" + this.FormatNumber(barPaperH)
-          + " minY=" + this.FormatNumber(minY) + " maxY=" + this.FormatNumber(supportPaperExt.MaxPoint.Y));
+        string memberAnchorSide = this.GetNotabMemberAnchorSide(this.GetNotabStandardName());
+        double maxYPaper = supportPaperExt.MaxPoint.Y;
+        Point3d singleAnchor;
+        if (string.Equals(memberAnchorSide, "vertical", System.StringComparison.OrdinalIgnoreCase))
+          // RC 계열: 세로 MEMBER 몸통을 지시한다. 세로재는 좌측 끝에 서 있고 두께가 barPaperH다.
+          singleAnchor = new Point3d(minX + barPaperH * 0.5, maxYPaper - barPaperH * 1.5, 0.0);
+        else if (string.Equals(memberAnchorSide, "top", System.StringComparison.OrdinalIgnoreCase))
+          singleAnchor = new Point3d(maxX, maxYPaper - barPaperH * 0.5, 0.0);
+        else
+          singleAnchor = new Point3d(maxX, minY + barPaperH * 0.5, 0.0);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL member-anchor side=" + memberAnchorSide
+          + " anchor=(" + this.FormatNumber(singleAnchor.X) + "," + this.FormatNumber(singleAnchor.Y) + ")"
+          + " barPaperH=" + this.FormatNumber(barPaperH)
+          + " minX=" + this.FormatNumber(minX) + " minY=" + this.FormatNumber(minY) + " maxY=" + this.FormatNumber(maxYPaper));
 
         for (int i = 0; i < designations.Count; i++)
         {
@@ -5716,11 +5725,11 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "GD1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "bottom" };
       if (string.Equals(standardName, "RC1", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "bottom", MemberAnchorSide = "top" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "bottom", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "RC2", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "top" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "RC3", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "top" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "pipecenter", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "16", "215" } };
       if (string.Equals(standardName, "GD3", System.StringComparison.OrdinalIgnoreCase))
@@ -5739,10 +5748,11 @@ namespace PlantFlow_Support
       return this.GetNotabTypeConfig(supportType).VerticalMode;
     }
 
-    // 가로 부재가 도면 상단에 있는 타입(RC 계열)은 앵커 기준면을 위로 뒤집는다.
-    private bool IsNotabMemberAnchorTop(string supportType)
+    // 부재 콜아웃 앵커 기준. "bottom"(GD 계열, 기본) | "top" | "vertical"(RC 계열=세로 MEMBER 지시).
+    private string GetNotabMemberAnchorSide(string supportType)
     {
-      return string.Equals(this.GetNotabTypeConfig(supportType).MemberAnchorSide, "top", System.StringComparison.OrdinalIgnoreCase);
+      string side = this.GetNotabTypeConfig(supportType).MemberAnchorSide;
+      return string.IsNullOrWhiteSpace(side) ? "bottom" : side;
     }
 
     private string GetNotabVerticalParamKey(string supportType)
