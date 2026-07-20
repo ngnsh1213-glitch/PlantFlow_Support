@@ -143,9 +143,15 @@ namespace PlantFlow_Support
         if (BoxOverlap(box, obstacle.Box)) { reject = "box"; return false; }
         if (leaderScope == LeaderCheckScope.All && (SegIntersectsBox(anchor, p1, obstacle.Box) || SegIntersectsBox(p1, p2, obstacle.Box))) { reject = "extLeader"; return false; }
       }
+      // 콜아웃끼리는 겹치지만 않으면 되는 게 아니라 읽을 여백이 필요하다.
+      // 겹침 0인데 간격 3이면 육안으로는 붙어 보인다(RC1 L-65×65×6 ↔ UB-003 실측).
+      double calloutPad = System.Math.Max(0.0, ReadEnvDouble("PFS_NOTAB_CALLOUT_PAD", 8.0));
       foreach (Extents3d placed in _placedBoxes)
       {
-        if (BoxOverlap(box, placed)) { reject = "box"; return false; }
+        Extents3d padded = calloutPad <= 0.0 ? placed : new Extents3d(
+          new Point3d(placed.MinPoint.X - calloutPad, placed.MinPoint.Y - calloutPad, 0.0),
+          new Point3d(placed.MaxPoint.X + calloutPad, placed.MaxPoint.Y + calloutPad, 0.0));
+        if (BoxOverlap(box, padded)) { reject = "box"; return false; }
         if (leaderScope != LeaderCheckScope.None && (SegIntersectsBox(anchor, p1, placed) || SegIntersectsBox(p1, p2, placed))) { reject = "calloutLeader"; return false; }
       }
       if (leaderScope != LeaderCheckScope.None)
