@@ -4681,7 +4681,7 @@ namespace PlantFlow_Support
             continue;
           string kind = ent.GetType().Name;
           string layer = ent.Layer ?? string.Empty;
-          short colorIndex = ent.ColorIndex;
+          int colorIndex = ent.ColorIndex;
           string handle = ent.Handle.ToString();
           Extents3d we;
           try { we = ent.GeometricExtents; }
