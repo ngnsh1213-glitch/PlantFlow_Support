@@ -1,6 +1,143 @@
 # SESSION — 현재 작업 상태
 
-_최종 갱신: 2026-07-16 (세션 이관: N3 치수 정련 중. cycle51 발행됨-미집도. 사용자 全타입 테스트 진행)_
+_최종 갱신: 2026-07-20 (cycle88 집도·라이브검증 완료. **콜아웃 배치 규칙 확립 종결**)_
+
+## ★★★ cycle 88 종결 — 콜아웃 배치 규칙 확립 (2026-07-20, 사용자 "이상 없음" 판정)
+
+### 확정 규칙 (사용자 결정, 재논의 금지)
+- **R1** 라인넘버(B.O.P) 콜아웃 좌우 = 파이프 중심 X가 **뷰포트 사각형 중앙선**의 어느 쪽인가. **서포트 타입 무관**.
+- **R2** 부재(L-/C-) 콜아웃 좌우 = 같은 방식, 기준은 **부재 자신의 앵커 X**.
+- **R3** 상하는 고정값 없음 — 간섭 회피로 탐색. 단 **부재는 하단 선호 편향**(치수가 항상 상단·좌측).
+- **R4** 좌우 **절대 불변**. 막히면 상하·거리만 조정, 반전 금지. 끝까지 실패하면 작도 생략(`callout-skip`).
+- 경계(정확히 중앙)는 `referenceX >= centerX` → **우측** 결정론 고정.
+
+### 자문(Codex)이 잡아낸 구조적 결함 3건 — 전부 실측 확인 후 해소
+1. **이중 `TryPlace`** — 호출부(구 5198/5380)에서 부른 결과를 `AppendNotabDirectCallout`이 다시 호출해 덮어씀.
+   → `PFS_NOTAB_DIR_*` 방향 노브가 **죽은 코드**였다(cycle87이 넣은 제어가 애초에 작동한 적 없음). 배치 1회로 단일화.
+2. **중앙선 기준 오류** — placer의 `_minX/_maxX`는 뷰포트가 아니라 `supportPaperExt ± 100`. 실제 `Viewport.CenterPoint/Width/Height`로 교체.
+3. **무검사 fallback 작도** — `TryPlace` 실패 후에도 `fallbackLeft`로 장애물 검사 없이 그림. 제거하고 작도 생략으로 변경.
+
+### 추가 교정 (라이브 로그로 발견)
+- **허용영역이 좁아 라인넘버 3건 전량 skip**: `reject(oob)=3096/3672/3432`, **장애물 거절 0건**. 좌우 고정 후 폭 119.49 텍스트가 마진 100을 초과.
+  → 허용영역을 **실제 뷰포트 사각형**으로 교체(`callout-bounds` 로그로 출처 기록, 취득 실패 시 구 계산 폴백).
+- 부재 하단 선호 = `PFS_NOTAB_CALLOUT_DOWN_W`(기본 1.0), 앵커보다 **위로 간 거리만 가산**하는 편향.
+
+### 커밋
+- `2ee0392` 좌우 하드 제약 + 단일 배치 경로(Codex) · `3d2f993` CS0177 수정(Claude) · `d563f96` 허용영역 뷰포트화 + 하단 선호(Claude)
+- 계획서 `.plans/plan_notab_callout_side_rule_20260720.md` · 핸드오프 `.plans/HANDOFF.md`(cycle 88)
+
+### env 노브 현황
+- `PFS_NOTAB_DIR_<TYPE>_<PIPE|M#>` = **`L`/`R`만 유효**(좌우 강제 오버라이드). 숫자 각도는 deprecated 로그 후 무시.
+- `PFS_NOTAB_CALLOUT_ANGLE_W` 기본 **0.0**(좌우가 제약이 되어 역할 중복) · `PFS_NOTAB_CALLOUT_DOWN_W` 기본 1.0
+
+### 다음
+- 무탭 全타입(TYPE-001) 확대 검증. GD1/GD2/GD3 외 타입에서 R1~R4가 그대로 성립하는지.
+- 실패 시 진단은 `reject(oob/box/extLeader/calloutLeader)` 카운트로 **범위 부족 vs 장애물 과밀** 즉시 구분 가능.
+
+---
+
+## ★★★이관 스레드 상태 (2026-07-20, 다음 세션 시작점)
+
+### ① 진행 중 트랙 + 직전 실측
+- **트랙 = 무탭 콜아웃 배치 로직 확립**(cycle72~87). 타입별 좌표 하드코딩을 버리고 **단일 배치 엔진**으로 통일하는 작업. 앵커(어디를 가리키나)만 타입별, **방향·문자·간섭회피는 전역 로직**.
+- **배치 엔진 = `NotabCalloutPlacer`**(PFO `SmartPlacementService` 경량 이식). 부채꼴(±각도) 후보 × 반경 스캔 → 충돌검사 → **최소 sprawl 비용** 채택. 2-tier(strict/relaxed).
+- **★MLeader 폐기(cycle83)**: 6사이클 동안 "밑줄이 문자 어느 끝에 붙는가"를 제어 못 함. 2채널 자문(**Codex 우선**+Gemini) **만장일치**로 → **MText 독립 + 구형 `Leader` 직접 작도**로 전환. 좌표를 전부 우리가 계산하므로 로그=렌더 일치.
+- **작도 형태**: 화살표(앵커) → 대각선 → **밑줄**(문자 폭만큼 수평), 문자는 밑줄 위 `textGap`(3) 띄워 얹음. `Leader` 3정점 = `[anchor, (nearX,baseY), (farX,baseY)]`.
+- **직전 실측(로그 09:58, cycle86 빌드통과 후)**:
+  - `dim-obstacle count=4/2/4` 등록됨 · `pipe-obstacle skip: paper radius invalid`(미등록)
+  - 전 콜아웃 `smart=placed`, `sep=40.5~52.7`(이격 규칙 OK)
+  - **GD1 `L-75×75×9` 문자박스가 서포트 내부**(`[314.9,369.7]×[310.7,318.7]` vs 서포트 `[260.5,410.5]×[285,373]`), `cost=0.42`(=radius×0.01, 초과량 0) → 내부 확증
+  - GD2 파이프만 `tier=1`(relaxed)
+
+### ② 대기 중 액션
+- **cycle87 발행됨(HANDOFF ready), 미집도**. 사용자가 Codex에 `1` → 집도 → `dev_test.bat` → `2`.
+- cycle87 집도 5건:
+  1. **[치명] 소유자 예외 역작동** — `Free()`에서 `string.Equals(ownerTag ?? "", obstacle.Owner)`가 `""==""`로 **참** → 서포트·치수 장애물이 **부재 콜아웃에서 전량 skip**. cycle85에서 유입. `!string.IsNullOrEmpty(obstacle.Owner) &&` 조건 추가로 교정. **← 그동안 간섭이 안 잡힌 진짜 이유**
+  2. 파이프 반경 획득 — `s_isoPipeId`는 원본 DB ObjectId라 디테일 트랜잭션서 조회 실패 → 원본 식별 시점에 **모델 반경 static 저장** 후 배율만 곱함
+  3. 바깥 방향 우선 비용 — `cost += |fanOffset| × angleW`(env `PFS_NOTAB_CALLOUT_ANGLE_W`, 기본 0.3)
+  4. **방향 지정 env 노브** — `PFS_NOTAB_DIR_<TYPE>_<PIPE|M0|M1>`=각도. 자동(최근접 모서리) 오버라이드. 타입 분기 대신 설정으로 처리
+  5. GD3 앵커 기본값 `PFS_NOTAB_GD3_ANCHOR_FX0` `0.25→0.305`(L 앵커 10.7 좌측 이탈 보정, 미완료였던 건)
+
+### ③ 다음 결정 분기
+- cycle87 집도 → `dev_test` → **소유자 버그 해소 후 장애물이 처음 실효**되므로 배치가 크게 바뀜. 후보 감소로 `tier=1`/`FAIL` 증가 가능 → REPORT에 `tier/scanned/FAIL` 기록 요청함.
+- **사용자 확정 배치 요청**(권장 env 세트로 검증):
+  ```
+  PFS_NOTAB_DIR_GD1_M0=0        # GD1 L → 우측
+  PFS_NOTAB_DIR_GD2_PIPE=0      # GD2 라인넘버 → 우측
+  PFS_NOTAB_DIR_GD2_M1=-135     # GD2 C → 좌하단
+  PFS_NOTAB_DIR_GD3_PIPE=-135   # GD3 라인넘버 → 좌하단
+  PFS_NOTAB_DIR_GD3_M0=-45      # GD3 L → 우하단
+  ```
+  GD3는 자동 sprawl로는 **둘 다 우하단**이 되어 충돌하므로 env 지정 필수(좌하단은 minX 밖 125 초과, 우하단은 초과 0).
+- 어긋나면 **좌표 하드코딩 금지** — `PFS_NOTAB_DIR_*`·`ANGLE_W` 조정. 그래도 안 되면 `out/fan/cost/scanned/dirSrc` 실측 첨부해 재설계.
+- 이후 잔여: 나머지 타입(SHOE/RS/TR/FS…) 확장, config `MemberBIs` 완전 제거(BOM 검증 후).
+
+### ④ 사용자 확정 배치 규칙 (전 타입 공통, 불변)
+1. **방향** = 최근접 서포트 모서리 밖으로 **대각**(빈 공간 우선) / 필요 시 env 지정
+2. **문자-화살표** = 문자는 **항상 화살표 반대쪽으로만** 뻗음. 4사분면 전수:
+   - 문자가 앵커 **우측** → **시작점**(좌측 변) ≥ `anchorX + 40`
+   - 문자가 앵커 **좌측** → **끝점**(우측 변) ≤ `anchorX − 40`
+   - **상/하는 무관**, 좌우로만 결정
+3. **최소 수평이격 40**(`PFS_NOTAB_CALLOUT_MIN_DX`)
+4. **문자-밑줄 간격 3**(`PFS_NOTAB_CALLOUT_TEXT_GAP`)
+5. **간섭 금지**: 리더 X자 교차, 리더의 타 문자 관통, 부재·치수문자 겹침
+6. **장애물** = 활성 서포트 부재 + **치수(Dimension extents)** + **파이프**. 소유자 태그로 자기 파이프만 예외
+7. **앵커** = 타입별(부재 개별 solid 추출 불가 → 비율 + env 노브)
+8. 치수: `Dimtad=1`(Above), `Dimdec=1`, `Dimexe=5`, 숫자 `0.#`(정수는 소수점 숨김)
+
+### ⑤ 이번 세션 확정된 실측 사실 (재조사 금지)
+- **서포트는 통짜 Solid3d 1개로 병합**되어 있고 **파이프는 별도 solid**(cycle79 member-spike). → **부재 바 개별 장애물/앵커 자동산출 불가**. 이 때문에 "부재별 모델링" 대형 재작성을 **스파이크로 사전 폐기**함.
+- **MLeader 제어 불가**(cycle79~82 실측): `content.Location` 무시 / `SetTextAttachmentType` 양방향 호출해도 **렌더 바이트 동일** / `TextLocation` 이동해도 **연결 끝단 불변**(생성 시점 고정). → 직접 작도가 유일 해법.
+- BOM 정상: `BeamProfile` 딕셔너리 역인덱스로 BOM 부재코드↔BI 브리지(cycle73~74). GD3 앵글 A7 자동 복원됨.
+
+### ⑥ 규칙 변경 (글로벌 반영 완료)
+- **자문 우선순위 = Codex 우선, Gemini 보조**. `C:\Users\HT노승환\.claude\CLAUDE.md` §1·§5·§9 반영(2026-07-20). Gemini 단독 자문 금지, 결론 상충 시 Codex 채택+근거 기록, Codex 자문은 `sandbox: read-only`/`approval-policy: never`로 텍스트만.
+
+### ⑦ 관련 파일·경로 (2026-07-20)
+- 핸드오프 `.plans/HANDOFF.md`(**cycle87 ready**) / 결과 `.plans/REPORT.md`(cycle86 done)
+- **진단 원장 `.plans/plan_notab_callout_placement_diag_20260719.md`** — 배치 근본원인·아키텍처 결정(Q1~Q3)·실현성 판정 전문
+- 진행표 `.plans/notab_alltype_progress.md`(GD1~GD3 종결 표기)
+- 코드 `PlantFlow_Support/Core/Commands.cs`:
+  - `NotabCalloutPlacer`(파일 상단 ~14-135): `TryPlace`(부채꼴+비용) / `Free`(**소유자 버그 위치**) / `Commit`(2세그먼트 등록) / `AddObstacle(box, owner)` / `SetCostReference`
+  - 콜아웃 작도: `AppendNotabProfileCallout`(부재) · `AppendNotabPipeCallout`(파이프) — 둘 다 MText+`Leader` 직접 작도
+  - 치수: `AppendNotabPaperDimensions`(치수→장애물 등록→콜아웃 순서) · `AddNotabDimensionObstacles` · `AddNotabPipeObstacle`
+  - 앵커 분기: `gd2Two`/`gd3Two`(≈5030~5060, `PFS_NOTAB_GD*_ANCHOR_FX*`)
+  - BOM: `AugmentDesignationsFromBom` · `HANTEC.BeamProfileBI`(역인덱스)
+- **최근 커밋**: cycle83 `c87c907`(직접작도) · cycle84 `6418e79`(치수장애물) · cycle85 `e27d866`(2세그먼트, 빌드실패) · cycle86 `a30dc34`(빌드교정)
+- 로그 `C:\Temp\pfs_diag.log`. 핵심 키: `callout-draw`(anchor/nearX/farX/baseY/W/H/side/sep/cost/scanned) · `dim-obstacle` · `pipe-obstacle` · `member-spike` · `render-check`
+- **프로세스 교훈**: ①라이브 핑퐁 3회 초과 시 즉시 측정 스파이크로 전환(대형 오설계 방지 실증) ②로그 숫자만으로 "정상" 판정 금지 — **렌더와 대조** 필수(판정기준 오류로 GD2 L-65 이격 0.03을 통과로 오판) ③집도 중 HANDOFF 덮어쓰기=요구 누락
+
+---
+## (이전) 이관 스레드 상태 (2026-07-18)
+
+## ★★이관 스레드 상태 (2026-07-18, 다음 세션 시작점)
+### ① 진행 중 트랙 + 직전 실측
+- **트랙 = 무탭 서포트 detail 타입별 매핑**(N3 치수/콜아웃 확장). 규격집([[pfs-hantec-support-standard-catalog]]) 타입을 각 `TYPE-001`로 3D 배치→추출→4관찰로 패밀리별 로직 확정([[pfs-notab-alltype-test-model]]).
+- **아키텍처(cycle63)**: 타입판정=`GetNotabStandardName()`(**ShortDescription**=`s_isoShortDesc`, 사용자태그 아님) → `NotabTypeConfig`(VerticalMode/PipeCalloutSide/HorizontalSide/**MemberBIs**) 단일표 `GetNotabTypeConfig(std)`. 타입 추가=표 한 줄.
+- **현 config 행**: GD1{fheight,top,bottom}·RC1{fheight,top,bottom}·GD2{**pipecenter**,top,auto,MemberBIs["16","215"]}·GD3{full,bottom,auto}·default{fheight,top,auto}.
+- **직전 실측(로그 16:2x)**: GD1 rowCount 정상·std=GD1. GD2 std=GD2 세로 pipecenter(바닥~배관중심=300, vScale=0.2). GD3 std=GD3 full=274. **BOM 스파이크 성공**: GD1[ANGLE A7], GD2[CHANNEL C15×2+ANGLE A6×2] (BI 없어도 정상!), GD3[C10×2+**A7×2**]. 6컬럼=`마크|카테고리|사이즈|재질|길이|여유`, 마크 F1~F4=HANTEC TaggingPoints 키.
+
+### ② 대기 중 액션
+- **cycle71 발행됨(HANDOFF ready), 미집도**. = PFSNOTABTEST 콤마 split(GD1→GD2→GD3 순차 자동추출). cycle70에 C로 넣었으나 집도 타이밍상 누락→분리 재발행. 사용자 Codex `1`→집도→dev_test 실행→`2`.
+- **cycle70(945403b) 집도됨-라이브 미검증**: A(GD2 세로=배관중심300 좌측)✅ B(멀티부재 텍스트 좌우발산)✅ 정적PASS. 라이브서 GD2 세로300·L좌C우 발산 확인 필요.
+
+### ③ 다음 결정 분기
+- cycle71 집도+dev_test 3타입 연속추출 → cycle70 A/B 라이브 검증 → **GD2 미결**: 앵커 화살표 정밀조준(현 fx=0.25/0.75는 근사, env/config 노브화 제안)·가로 A/A2 치수.
+- **★큰 방향 전환 후보**: 부재 콜아웃 소스를 config MemberBIs(하드코딩 우회책) → **BOMs 행**으로. 근거=BOM 스파이크가 全타입 부재를 정확히 앎(GD3 A7 누락 등 config 불완전 노출). BOMs.HANTECContents→FrameBOM/AttaBOM 재사용=[[pfs-hantec-annotation-engine]].
+- **BOM 트랙 착수 시점**: GD2 완결(부재+세로) 직후. 스파이크 통과=데이터파이프 무탭서 정상. 다음=BOM 테이블 렌더 설계→밸룬(BOM행↔F1~4 TaggingPoints).
+
+### ④ 이번 세션 해결한 오염/소실 트랙 (완료)
+- cycle64~66: 추출 지오메트리 오염. **원인=선택영역 과대**(사용자 통찰). ①이웃서포트=`AutoIncludeRelatedParts` isSup를 probe(±150)→**supContactBox(anchor±50)** 접촉박스(cycle65, RC1 배제) ②GD1 파이프소실=축투영이 9.6m 먼 세그먼트 오선택→**pipeReachBox(anchor±300) 세그먼트 근접게이트**(cycle66). 태그필터는 폐기하고 영역박스 철학으로 통일.
+
+### 관련 파일·경로 (2026-07-18)
+- 핸드오프: `.plans/HANDOFF.md`(cycle71 ready), `.plans/REPORT.md`(cycle70 done). 진행표: `.plans/notab_alltype_progress.md`(타입별 4관찰 기입표, GD1✅·GD2진행·GD3진행).
+- 코드 `PlantFlow_Support/Core/Commands.cs`: 타입판정=`GetNotabStandardName`/`GetNotabTypeConfig`(~4936). 치수=`AppendNotabPaperDimensions`(dimV 모드분기 fheight/full/pipecenter). 부재콜아웃=`AppendNotabProfileCallout`(멀티=fx분산+좌우발산)/`ApplyNotabCalloutNearEdgeAttachment`(방향 파라미터). PLN콜아웃=`AppendNotabPipeCallout`. 선택=`AutoIncludeRelatedParts`(supContactBox/pipeReachBox). BOM스파이크=`NotabBomSpike`. 프로파일=`CaptureIsoSupportProfile`+`CaptureIsoSupportProfileFromConfig`+`TryBuildNotabSupportDesignation`.
+- BOMs=`Models/BOMs.cs`(생성자 id+attachments, `ContentsByDesignStd("HANTEC")`→FrameBOM/AttaBOM). HANTEC=`Ortho/HANTEC.cs`(DetailProfile·타입별 TaggingPoints 엔진).
+- dev_test.bat env: `PFS_NOTAB_TEST_TAG=GD1-001,GD2-001,GD3-001`(cycle71 콤마순회 필요), `PFS_NOTAB_BOM_SPIKE=1`, `PFS_NOTAB_DIM_TXT=8`, `PFS_NOTAB_PIPE_CALLOUT_DX=180`, `PFS_NOTAB_MEMBER_CALLOUT_DX=5`. 위치노브=`PFS_NOTAB_*_CALLOUT_DX/DY`, 영역=`PFS_NOTAB_SUPPORT_TOL`(50)/`PFS_NOTAB_PIPE_REACH`(300)/`MARGIN`(150). 로그=`C:\Temp\pfs_diag.log`.
+- **프로세스 교훈**: 집도 중 HANDOFF.md 덮어쓰기=요구 누락 유발(cycle70 C). 추가요구는 다음 사이클로 분리.
+
+---
+## (이전) 이관 스레드 상태 (2026-07-16)
 
 ## ★이관 스레드 상태 (2026-07-16, 다음 세션 시작점)
 ### ① 진행 중 트랙 + 직전 실측
