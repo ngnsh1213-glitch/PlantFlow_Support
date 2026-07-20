@@ -8890,7 +8890,9 @@ namespace PlantFlow_Support
                   PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include support skip(far) id=" + eid + " ext=" + this.FormatExtents(ex) + " supTol=" + this.FormatNumber(supTol));
                   continue;
                 }
-                this.DumpNotabAutoIncludedSupportMetadata(ps, eid, cls, typeName);
+                // class=RXClass 이름, type=DXF 이름. U-bolt 판별에 둘 다 필요하다.
+                this.DumpNotabAutoIncludedSupportMetadata(ps, eid, cls,
+                  eid.ObjectClass == null ? string.Empty : eid.ObjectClass.DxfName);
                 existing.Add(eid);
                 result.Add(eid);
                 addedSup++;
