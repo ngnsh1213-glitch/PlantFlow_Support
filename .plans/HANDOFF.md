@@ -3,67 +3,93 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 89
+- **cycle**: 90
 - **status**: ready
 - **issued_at**: 2026-07-20
-- **title**: RC 패밀리 세로 치수(F2→H) + 세로 부재 앵커 (단계 A: 계측 선행)
+- **title**: RC 가로 치수를 SupportParams로 + 세로 MEMBER 앵커 실측화
 - **작업 경로**: `d:\PlantFlow\PlantFlow_Support\PlantFlow_Support\Core\Commands.cs`
-- **계획서**: `d:\PlantFlow\PlantFlow_Support\.plans\plan_notab_rc_family_20260720.md` (**먼저 정독**)
+- **계획서**: `d:\PlantFlow\PlantFlow_Support\.plans\plan_notab_member_identify_20260720.md` (**먼저 정독**)
 - **핸드오프 위치**: `d:\PlantFlow\PlantFlow_Support\.plans\HANDOFF.md`
 
-## 확정 사실 (사용자 + 규격집 RC1 시트, 재조사 금지)
-- **RC1은 용접 구조** — 세로 `MEMBER "M"`과 가로가 별개 다리(절곡 아님).
-- **세로·가로는 같은 프로파일** — BOM 행 1개(`BI=16 → L-65×65×6`)가 **정상**.
-  세로 콜아웃은 **같은 designation 재사용**, 앵커만 추가.
-- **세로 치수 = 3D `F2` 값을 도면 `H` 자리**(베이스 플레이트 아래면 ~ 가로 부재).
-- BOM의 `180x180x6mm`=베이스 플레이트, `(M12)1/2"x125`=앵커 볼트.
-  `bom-augment 미매핑` 로그는 **결함 아님**. → **`BeamProfileMap` 확장 금지**(초기 오진단).
+## 왜 이 사이클인가
+비율 상수 추정으로 RC1→RC2→RC3에서 **3연속 빗나갔다**. 추정 튜닝을 중단하고
+**실측 파라미터 + 실측 부재 박스**로 전환한다. 상수 추가 튜닝은 이번 사이클의 금지 사항이다.
 
-## 이번 사이클 = 단계 A (계측·저수준 정비까지). 앵커 추가는 단계 B로 분리.
+## A. 가로 치수 = SupportParams (기하 아님)
 
-### A-1. F2 캡처 (선행 게이트 G1)
-`dims`는 `CaptureIsoSupportProfile()`(7559 부근) **지역 변수**라 치수 작성 시점
-(`AppendNotabPaperDimensions()` 4721)에는 접근 불가.
-- `CaptureIsoSupportProfile()`에서 **정적 필드로 보관**(`s_isoSupportParams` 사전 복사 권장).
-- 캡처 직후 **키·값 전량을 진단 로그로 덤프**한다(F2 존재·표기·소수점 형식 확인 목적).
-- `double.TryParse`는 **`InvariantCulture` 우선**으로 파싱한다(문화권 의존 위험).
+**중요**: "가로 MEMBER 박스 폭 = 450"은 **틀린 전제**다. 가로재와 베이스 플레이트가
+한 `Solid3d`라 bbox는 490이다. 450은 기하에서 나오지 않는다.
 
-### A-2. 세로 치수 모드 `param` 신설
-- `NotabTypeConfig`에 `VerticalParamKey` 추가, `VerticalMode = "param"` 분기 신설.
-- **텍스트만 바꾸면 안 된다** — 치수선 형상도 함께: 상단 = `minY + F2 * vScale`,
-  `AppendNotabPaperDimensionEntity`의 `realValue`도 F2로 전달.
-- `0 < F2 <= realH` 검사. 실패 시 **`full` 폴백 + 진단 로그**(무음 실패 금지).
-- **F2 기준점 검증**: support extents의 `minY`가 실제 base plate 아래면인지 로그로 확인.
-  어긋나면 임의 보정하지 말고 REPORT에 실측값을 적을 것.
+라이브 `support params dump` 실측:
+```
+RC1  A=350 A1=100          → A+A1 = 450   (좌 350 / 우 100)
+RC2  A=400 A1=50  A2=200   → A+A1 = 450   (좌 250 / 우 200)
+RC3  A=250 A1=250 A2=250   → A+A1 = 500   (좌 250 / 우 250)
+```
+- **총 폭 = `A + A1`**
+- **우측 분할 = `A2`**(없으면 `A1`), **좌측 = 총 폭 − 우측**
+- 세 타입 모두 사용자 기대치와 일치.
 
-### A-3. RC 행 등록
-`GetNotabTypeConfig`에 `RC1`/`RC2`/`RC3` 행 추가, `VerticalMode="param"`, `VerticalParamKey="F2"`.
-- `PipeCalloutSide`/`HorizontalSide`는 **현 관측값 유지**(RC1=top/bottom, RC2·RC3=top/auto).
-  추정으로 바꾸지 말 것 — 라이브 실측 후 다음 사이클에서 확정한다.
-- `s_isoShortDesc`가 `RC2`/`RC3`로 정확히 파싱되는지 로그로 확인(타입 판정 원천).
+구현 요구:
+- `s_isoSupportParams`에서 읽는다(cycle 89에 캡처됨). **InvariantCulture 파싱**.
+- **치수 값·분할**은 파라미터, **보조선 위치**는 부재 우측 끝 기준 총 폭만큼 좌측.
+  bbox를 그대로 쓰면 숫자만 450이고 보조선은 490 폭에 남는 불일치가 생긴다.
+- 키 누락/비유한/0 이하 → **기존 `s_isoRealWidth` 경로 폴백** + 사유 로그.
+- 로그에 `dimH source=params(A+A1) | fallback=legacy` 및 사용된 값 전량 기록.
 
-### A-4. 세로 MEMBER 식별 계측 (선행 게이트 G2) — **집도 아님, 로그만**
-현행 `member-spike`는 엔티티를 나열만 하고 세로 MEMBER를 식별하지 못한다.
-종횡비·높이·파이프 거리만으로 고르면 **파이프·볼트 오인** 위험.
-- `NotabMemberGeometrySpike()`에 각 엔티티의 **타입/레이어/색상/원본 대응 등
-  식별 가능한 속성을 추가 로깅**한다(paper box는 이미 있음).
-- **이번 사이클에서 앵커를 만들지 않는다.** 무엇으로 식별 가능한지 REPORT에 정리만 한다.
+## B. 세로 MEMBER 앵커 실측화
 
-## 다음 사이클(B) 예고 — 이번엔 하지 말 것
-- 세로 앵커 추가. 구현 시 `designations` 리스트에 **문자열 중복 삽입 금지**
-  (`multiDesignation=true`가 되어 다부재 배치 경로로 오진입).
-  `List<NotabProfileCallout>{Designation, AnchorKind}`로 분리하고 루프를 callout 루프로 전환.
-  env 방향 키는 `M0/M1` 대신 `HORIZONTAL`/`VERTICAL` 의미 기반.
-- 가로 치수 `A`/`100`/`30` 규격집 대조.
-- cycle 88의 좌우 규칙 R1~R4 변경 — 범위 밖.
+현행 `MemberAnchorSide="vertical"` 추정식은 `minX + barPaperH*0.5 ≈ 293`인데
+실제 세로 MEMBER는 `x = 335.6~353.4`다. **40 이상 빗나가며 재추출해도 허공.**
+
+- `NotabMemberGeometrySpike()`를 반환 헬퍼로 승격:
+```csharp
+private struct NotabMemberBox
+{ public ObjectId Id; public string Handle; public Extents3d PaperBox;
+  public Vector3d WcsDims; public double Aspect; public double PipeDist; }
+
+private List<NotabMemberBox> CollectNotabMemberBoxes(Transaction tr, Database db, Viewport vp)
+```
+- **열린 `Entity`/`Solid3d` 참조를 DTO에 보관하지 말 것**(값 타입·ObjectId만).
+- **한 트랜잭션 안에서 1회 수집** → `AppendNotabPaperDimensions` → `AppendNotabProfileCallout`로
+  전달. 하위 메서드가 ModelSpace를 재순회하면 분류 불일치가 생긴다.
+- 현행 `supportExt` 인자는 미사용이므로 제거 가능. **로그(`member-spike`)는 유지**.
+- 세로 MEMBER 앵커 = 해당 `PaperBox` 몸통 중앙. **비율 상수식은 폴백 전용으로 강등**.
+
+## C. 분류 규칙 — 임계값 하드코딩 금지
+절대 임계값(“종횡비 5 이상이면 세로재”) 대신 **같은 도면 안 후보 간 상대 순위**로 판정한다.
+1. `pipeDist` **상대 최솟값** 후보 = 파이프 클램프/부속 → 제외
+2. 남은 후보 중 **페이퍼 박스가 가장 세로인** 후보 = 세로 MEMBER
+3. 세로 우위가 명확하지 않거나 유일하지 않으면 **식별 실패로 판정**(억지 선택 금지)
+- 판정 결과와 근거를 로그에 남긴다.
+- **WCS `dx/dy/dz`가 아니라 `PaperBox` 기준**으로 가로/세로를 판정한다(뷰 방향 의존).
+
+## D. GD 회귀 방지 (필수)
+- **새 `MemberGeometry` 소비는 RC1/RC2/RC3만 허용**한다.
+- GD1/GD2/GD3은 기존 `supportPaperExt` 분기를 **그대로 유지**. 수집 헬퍼는 GD에서 로그만.
+- GD2/GD3의 다중 designation·인덱스별 앵커 특수 분기에 **일반 분류 결과를 섞지 말 것**.
+- RC에서 아래 중 하나라도 실패하면 **기존 동작으로 완전 폴백**:
+  솔리드 수/투영 실패 · 세로 후보 유일성 없음 · 파라미터 누락/불일치 · 비유한·0 이하
+- 모든 경로에 `source=member-geometry | fallback=legacy`와 **사유**를 로그.
+
+## E. 치수 오프셋
+현행 `offset = txt*1.5`(=12)는 RC3에서 클램프 위를 지난다.
+- **상수 상향까지만** 한다(적정값은 라이브로 확정). 실제 렌더 내용 기준 산출은 이번 범위 밖.
 
 ## 완료 기준
-1. 빌드 성공(빌드까지만. `dev_test.bat`은 사용자가 수동 실행).
-2. RC1/RC2/RC3 추출 시 세로 치수 값이 `F2`와 일치하고 `H` 구간에 놓임.
-3. `sideMode`가 default가 아닌 RC 행 값으로 찍힘.
-4. SupportParams 덤프 로그에 F2가 보이고, member-spike에 식별 속성이 추가됨.
-5. GD1/GD2/GD3 회귀 없음(cycle 88 판정 유지).
+1. 빌드 성공(`dev_test.bat`은 사용자가 수동 실행).
+2. RC1 450(350/100) · RC2 450(250/200) · RC3 500(250/250) — 490 소멸.
+3. 치수 보조선이 숫자와 같은 구간에 놓임(450 숫자 + 490 보조선 불일치 없음).
+4. L 부재 콜아웃 화살표가 **세로 MEMBER 몸통**에 닿음(허공 0).
+5. **GD1/GD2/GD3 회귀 없음** — cycle 88 판정 유지.
+
+## 하지 말 것
+- 비율 상수 추가 튜닝(이번 사이클의 존재 이유가 그 폐기다).
+- `Solid3d` 면/서브엔티티 순회로 450을 기하에서 뽑아내려는 시도.
+  Boolean union 이후 생성 이력이 없어 RC2 한 사례용 휴리스틱이 된다(자문 지적).
+- cycle 88 좌우 규칙 R1~R4 변경.
+- 세로 치수 `param(F2)` 로직 변경(RC2 raw=500, RC3 raw=600 정상 동작 중).
 
 ## 자문 출처
-**Codex MCP**(2026-07-20, read-only). G1/G2 및 치수 형상·자료구조·문화권 파싱 지적 전부 Codex.
-Gemini 미호출.
+**Codex MCP**(2026-07-20, read-only). A의 전제 정정(bbox≠450), 헬퍼 시그니처·트랜잭션 수명,
+상대 순위 분류, GD 폴백 설계, `Solid3d` 순회 비권장 전부 Codex 지적. Gemini 미호출.
