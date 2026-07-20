@@ -28,4 +28,4 @@
 - GD1/GD2/GD3 회귀 확인.
 
 ## 커밋
-- 커밋 후 갱신 예정.
+- `8caaa82` `notab: anchor RC dimensions and label ubolts`
