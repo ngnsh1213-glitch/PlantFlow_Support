@@ -4,6 +4,7 @@
 
 ## [Unreleased]
 ### Added
+- 무탭 RC 기둥 포트 앵커 + U-bolt 태그 콜아웃(cycle92): RC1/RC2/RC3 세로 치수·세로 부재 콜아웃을 S2(index=1, 이름 검증)와 F2 높이 기준으로 전환하고, 포트/F2/투영/범위 가드 실패 시 기존 기준으로 폴백. 자동 포함 U-bolt는 Tag+bbox 중심을 별도 스냅샷해 개별 콜아웃으로 배치 — 2026-07-20
 - 무탭 N3 치수 핵심(cycle47~49, cfa1fb7~9576258): 페이퍼공간 비연관 치수 직접 제도. ①스케일 표준배율 라운딩+주석여백(`PFS_NOTAB_TARGET_FILL` 0.4, `vp.CustomScale` 명시) ②WCS→paper 투영(`NotabProjectWcsToPaper`, ViewportProjection 이식) ③가로총폭·pipeCenter분할·세로 치수(텍스트=실측mm, 페이퍼 고정크기 `PFS_NOTAB_DIM_TXT` 2.5mm) ④배관 참조: 분할=실배관중심X, 가로치수 상/하단=배관 근접쪽. 라이브 split=(350,100) side=bottom PASS — 2026-07-16
 - 무탭 held-pipe 선택 = 서포트 BOP 표고 매칭(cycle44~46, 1cb3192~b0e5c71): 서포트가 실제 잡는 배관만 포함. 같은 라인 평행 배관은 라인/rect/중심거리로 불가 → 서포트 `BOP`(배관 밑면표고)로 `|(pipeCenterZ−외경반경)−BOP|` 최소 선택. env `PFS_NOTAB_BOP_TOL`/`PFS_NOTAB_CONTACT_TOL`. BOP 없으면 기하 폴백+경고 — 2026-07-16
 - 무탭 서포트 영역 클립+동적 피팅(cycle43, f5473d8): oriented 클립박스 Solid3d Boolean INTERSECT로 관통 파이프 길이 트림(10m→서포트깊이)·이웃 배제, 고정 1:4→콘텐츠 동적 피팅. env `PFS_NOTAB_CLIP_MARGIN`/`PFS_NOTAB_FIT_PAD` — 2026-07-16

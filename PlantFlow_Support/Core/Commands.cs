@@ -240,6 +240,13 @@ namespace PlantFlow_Support
       public Point3d Wcs;
     }
     private static System.Collections.Generic.List<NotabSupportPortSnapshot> s_isoSupportPorts = new System.Collections.Generic.List<NotabSupportPortSnapshot>();
+    private sealed class NotabUboltSnapshot
+    {
+      public string Tag;
+      public Point3d WcsCenter;
+    }
+    // 자동 포함 원본에서만 확보한다. 상세 DB 복제본은 Plant 속성을 보존하지 않는다.
+    private static System.Collections.Generic.List<NotabUboltSnapshot> s_isoUbolts = new System.Collections.Generic.List<NotabUboltSnapshot>();
     private static Document s_isoOpenPendingTempDoc;
     private static Document s_isoOpenPendingOriginalDoc;
     private static int s_isoOpenSecondIdleAttempts;
@@ -1398,6 +1405,7 @@ namespace PlantFlow_Support
       s_isoSupportParams.Clear();
       s_isoSupportProfileHeight = string.Empty;
       s_isoSupportPorts.Clear();
+      s_isoUbolts.Clear();
 
       Editor ed = doc.Editor;
       selectedIds = this.AutoIncludeRelatedParts(doc.Database, selectedIds);
@@ -4889,14 +4897,9 @@ namespace PlantFlow_Support
         double dimClear = this.GetEnvDouble("PFS_NOTAB_DIM_CLEAR", 10.0, 0.0, 200.0);
         double splitY = horizontalBottom ? minY - offset - dimClear : maxY + offset + dimClear;
         double totalY = horizontalBottom ? splitY - stack : splitY + stack;
-        // 세로 치수의 기준은 가로 치수와 반드시 동일하다. params 경로에서는 부재 기준,
-        // legacy 폴백에서는 support extents 기준을 사용하며 두 경로를 혼용하지 않는다.
+        // 가로는 부재 폭, 세로는 기둥(F2)을 재므로 기준을 별도로 유지한다.
         double dimReferenceMinX = minX;
         string dimReferenceSource = dimHSource;
-        double verticalX = dimReferenceMinX - offset - dimClear;
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL dim reference source=" + dimReferenceSource
-          + " minX=" + this.FormatNumber(dimReferenceMinX)
-          + " verticalX=" + this.FormatNumber(verticalX));
         double leftReal = double.NaN;
         double rightReal = double.NaN;
         double splitGuardLimit = System.Math.Min(txt * 2.0, txt * 1.6 * 2.0);
@@ -5015,7 +5018,51 @@ namespace PlantFlow_Support
           }
         }
 
-        RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(dimReferenceMinX, minY, 0.0), new Point3d(dimReferenceMinX, dimVTopY, 0.0), new Point3d(verticalX, minY, 0.0), Matrix3d.Identity, dimStyleId);
+        double verticalAnchorX = dimReferenceMinX;
+        double verticalAnchorBaseY = minY;
+        double verticalAnchorTopY = dimVTopY;
+        string verticalAnchorSource = "fallback=" + dimReferenceSource;
+        string verticalFallback = "not-rc";
+        bool hasVerticalPortAnchor = false;
+        if (rcMemberGeometry)
+        {
+          NotabSupportPortSnapshot s2 = null;
+          for (int i = 0; i < s_isoSupportPorts.Count; i++)
+          {
+            if (s_isoSupportPorts[i].Index == 1)
+            {
+              s2 = s_isoSupportPorts[i];
+              break;
+            }
+          }
+          if (s2 == null)
+            verticalFallback = "S2-index-missing";
+          else if (!string.Equals(s2.Name, "S2", System.StringComparison.OrdinalIgnoreCase))
+            verticalFallback = "S2-name-mismatch:" + s2.Name;
+          else if (!dimVBarSpan || double.IsNaN(dimVParamRealH) || dimVParamRealH <= 1e-6 || vScale <= 1e-9)
+            verticalFallback = "F2-or-vScale-invalid";
+          else
+          {
+            Point3d post = this.NotabProjectWcsToPaper(vp, s2.Wcs);
+            double postTop = post.Y + dimVParamRealH * vScale;
+            if (post.Y < supportPaperExt.MinPoint.Y - 1e-6 || post.Y > supportPaperExt.MaxPoint.Y + 1e-6 || postTop < post.Y || postTop > supportPaperExt.MaxPoint.Y + 1e-6)
+              verticalFallback = "post-outside-support-extents";
+            else
+            {
+              verticalAnchorX = post.X;
+              verticalAnchorBaseY = post.Y;
+              verticalAnchorTopY = postTop;
+              verticalAnchorSource = "port-S2";
+              verticalFallback = string.Empty;
+              hasVerticalPortAnchor = true;
+            }
+          }
+        }
+        double verticalX = verticalAnchorX - offset - dimClear;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL dimH src=" + dimReferenceSource + " x=(" + this.FormatNumber(minX) + "," + this.FormatNumber(maxX) + ")"
+          + " | dimV src=" + verticalAnchorSource + " x=" + this.FormatNumber(verticalAnchorX) + " baseY=" + this.FormatNumber(verticalAnchorBaseY) + " topY=" + this.FormatNumber(verticalAnchorTopY) + " lineX=" + this.FormatNumber(verticalX)
+          + " | fallback=" + (string.IsNullOrEmpty(verticalFallback) ? "none" : verticalFallback));
+        RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(verticalAnchorX, verticalAnchorBaseY, 0.0), new Point3d(verticalAnchorX, verticalAnchorTopY, 0.0), new Point3d(verticalX, verticalAnchorBaseY, 0.0), Matrix3d.Identity, dimStyleId);
         double dimVRealValue = string.Equals(verticalMode, "param", System.StringComparison.OrdinalIgnoreCase) && dimVBarSpan ? dimVParamRealH : realH;
         this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, dimVRealValue, txt, "dimV", dimVText);
         // 치수가 먼저 자리를 확정하고, 모든 콜아웃이 같은 충돌 상태를 공유한다.
@@ -5037,7 +5084,9 @@ namespace PlantFlow_Support
           : new Point3d((minX + maxX) / 2.0, (minY + maxY) / 2.0, 0.0);
         calloutPlacer.SetCostReference(supportPaperExt, calloutCostAnchor);
         this.AppendNotabPipeCallout(tr, layoutBtr, db, textStyleId, layerId, pipeCenterXPaper, pipeCenterYPaper, supportPaperExt, viewportPaperExt, txt, calloutPlacer);
-        this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, memberBoxes);
+        Point3d verticalMemberAnchor = new Point3d(verticalAnchorX, verticalAnchorBaseY + (verticalAnchorTopY - verticalAnchorBaseY) * 0.5, 0.0);
+        this.AppendNotabProfileCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, memberBoxes, hasVerticalPortAnchor, verticalMemberAnchor);
+        this.AppendNotabUboltCallouts(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, vp);
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " vMode=" + verticalMode + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
@@ -5291,7 +5340,7 @@ namespace PlantFlow_Support
       return referenceX >= viewportCenterX ? NotabCalloutPlacer.RequiredSide.Right : NotabCalloutPlacer.RequiredSide.Left;
     }
 
-    private void AppendNotabProfileCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, Extents3d viewportPaperExt, double txt, NotabCalloutPlacer placer, System.Collections.Generic.List<NotabMemberBox> memberBoxes)
+    private void AppendNotabProfileCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, Extents3d viewportPaperExt, double txt, NotabCalloutPlacer placer, System.Collections.Generic.List<NotabMemberBox> memberBoxes, bool hasVerticalPortAnchor, Point3d verticalPortAnchor)
     {
       if (tr == null || layoutBtr == null || db == null)
         return;
@@ -5339,7 +5388,12 @@ namespace PlantFlow_Support
         {
           NotabMemberBox verticalBox;
           string memberReason;
-          if (this.TryGetNotabVerticalMemberBox(memberBoxes, out verticalBox, out memberReason))
+          if (hasVerticalPortAnchor)
+          {
+            singleAnchor = verticalPortAnchor;
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL member-anchor source=port-S2 anchor=(" + this.FormatNumber(singleAnchor.X) + "," + this.FormatNumber(singleAnchor.Y) + ")");
+          }
+          else if (this.TryGetNotabVerticalMemberBox(memberBoxes, out verticalBox, out memberReason))
           {
             singleAnchor = new Point3d((verticalBox.PaperBox.MinPoint.X + verticalBox.PaperBox.MaxPoint.X) / 2.0, (verticalBox.PaperBox.MinPoint.Y + verticalBox.PaperBox.MaxPoint.Y) / 2.0, 0.0);
             PlantOrthoView.FileDiag("PFSNOTABDETAIL member-anchor source=member-geometry reason=" + memberReason + " handle=" + verticalBox.Handle + " box=" + this.FormatExtents(verticalBox.PaperBox));
@@ -5533,6 +5587,33 @@ namespace PlantFlow_Support
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL callout append 예외: " + ex.GetType().Name + ": " + ex.Message + " designation=" + (designations.Count > 0 ? designations[0] : s_isoSupportDesignation));
+      }
+    }
+
+    private void AppendNotabUboltCallouts(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, Extents3d viewportPaperExt, double txt, NotabCalloutPlacer placer, Viewport vp)
+    {
+      if (tr == null || layoutBtr == null || db == null || vp == null || s_isoUbolts.Count == 0)
+        return;
+      try
+      {
+        double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
+        double gap = arr + txt * 0.6;
+        double minDx = this.GetEnvDouble("PFS_NOTAB_CALLOUT_MIN_DX", 40.0, 0.0, 500.0);
+        double viewportCenterX = (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0;
+        for (int i = 0; i < s_isoUbolts.Count; i++)
+        {
+          NotabUboltSnapshot snapshot = s_isoUbolts[i];
+          if (snapshot == null || string.IsNullOrWhiteSpace(snapshot.Tag))
+            continue;
+          Point3d anchor = this.NotabProjectWcsToPaper(vp, snapshot.WcsCenter);
+          string sideSource;
+          NotabCalloutPlacer.RequiredSide requiredSide = this.ResolveNotabRequiredSide("PFS_NOTAB_DIR_UBOLT_" + i, anchor.X, viewportCenterX, out sideSource);
+          this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, snapshot.Tag, anchor, viewportCenterX, requiredSide, sideSource, gap, minDx, "ubolt callout");
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt callout append 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
     }
 
@@ -8892,7 +8973,7 @@ namespace PlantFlow_Support
                 }
                 // class=RXClass 이름, type=DXF 이름. U-bolt 판별에 둘 다 필요하다.
                 this.DumpNotabAutoIncludedSupportMetadata(ps, eid, cls,
-                  eid.ObjectClass == null ? string.Empty : eid.ObjectClass.DxfName);
+                  eid.ObjectClass == null ? string.Empty : eid.ObjectClass.DxfName, ex);
                 existing.Add(eid);
                 result.Add(eid);
                 addedSup++;
@@ -8968,7 +9049,7 @@ namespace PlantFlow_Support
     }
 
     // 자동 포함된 원본 Support만 대상으로 한다. 상세도 복제본은 메타데이터가 제거되어 있다.
-    private void DumpNotabAutoIncludedSupportMetadata(PSUtil ps, ObjectId id, string className, string typeName)
+    private void DumpNotabAutoIncludedSupportMetadata(PSUtil ps, ObjectId id, string className, string typeName, Extents3d extents)
     {
       PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-probe candidate id=" + id + " class=" + className + " type=" + typeName);
       if (ps == null)
@@ -9007,6 +9088,33 @@ namespace PlantFlow_Support
           dump.Append(names[i]).Append('=').Append(string.IsNullOrWhiteSpace(value) ? "(empty)" : value).Append(" | ");
         }
         PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-probe datalinks id=" + id + " { " + dump.ToString() + "}");
+        string shortDescription = values != null && values.Count > 1 ? values[1] : string.Empty;
+        string tag = values != null && values.Count > 3 ? values[3] : string.Empty;
+        if (string.Equals(shortDescription, "UB", System.StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(tag))
+        {
+          tag = tag.Trim();
+          bool duplicate = false;
+          for (int i = 0; i < s_isoUbolts.Count; i++)
+          {
+            if (string.Equals(s_isoUbolts[i].Tag, tag, System.StringComparison.OrdinalIgnoreCase))
+            {
+              duplicate = true;
+              break;
+            }
+          }
+          if (!duplicate)
+          {
+            NotabUboltSnapshot snapshot = new NotabUboltSnapshot();
+            snapshot.Tag = tag;
+            snapshot.WcsCenter = new Point3d((extents.MinPoint.X + extents.MaxPoint.X) / 2.0, (extents.MinPoint.Y + extents.MaxPoint.Y) / 2.0, (extents.MinPoint.Z + extents.MaxPoint.Z) / 2.0);
+            s_isoUbolts.Add(snapshot);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt capture tag=" + tag + " wcs=" + this.FormatPoint(snapshot.WcsCenter));
+          }
+          else
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt skip=duplicate-tag tag=" + tag);
+        }
+        else
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt skip=" + (string.IsNullOrWhiteSpace(tag) ? "empty-tag" : "short-description-not-UB") + " id=" + id);
       }
       catch (System.Exception ex)
       {
