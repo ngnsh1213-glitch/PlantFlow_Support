@@ -59,6 +59,7 @@ namespace PlantFlow_Support
         bool bestLeft = false;
         string bestDiag = "FAIL";
         int scanned = 0, rejectOob = 0, rejectBox = 0, rejectExtLeader = 0, rejectCalloutLeader = 0;
+        System.Collections.Generic.Dictionary<string, int> extLeaderByOwner = new System.Collections.Generic.Dictionary<string, int>();
         double sign = requiredSide == RequiredSide.Left ? -1.0 : 1.0;
         for (double radius = startRadius; radius <= maxRadius; radius += 2.5)
         {
@@ -78,7 +79,16 @@ namespace PlantFlow_Support
             string reject;
             if (!Free(box, anchor, candP1, candP2, leaderScope, ownerTag, out reject))
             {
-              if (reject == "box") rejectBox++; else if (reject == "extLeader") rejectExtLeader++; else if (reject == "calloutLeader") rejectCalloutLeader++;
+              if (reject == "box") rejectBox++;
+              else if (reject.StartsWith("extLeader", System.StringComparison.Ordinal))
+              {
+                rejectExtLeader++;
+                string owner = reject.Length > 10 ? reject.Substring(10) : "unnamed";
+                int prev;
+                extLeaderByOwner.TryGetValue(owner, out prev);
+                extLeaderByOwner[owner] = prev + 1;
+              }
+              else if (reject == "calloutLeader") rejectCalloutLeader++;
               continue;
             }
             scanned++;
@@ -110,7 +120,11 @@ namespace PlantFlow_Support
           p1 = bestP1;
           p2 = bestP2;
           textLeftOfAnchor = bestLeft;
-          diagnostic = bestDiag + " scanned=" + scanned + " obst=" + _obstacles.Count + " reject(oob/box/extLeader/calloutLeader)=" + rejectOob + "/" + rejectBox + "/" + rejectExtLeader + "/" + rejectCalloutLeader;
+          System.Text.StringBuilder byOwner = new System.Text.StringBuilder();
+          foreach (System.Collections.Generic.KeyValuePair<string, int> kv in extLeaderByOwner)
+          { if (byOwner.Length > 0) byOwner.Append(","); byOwner.Append(kv.Key).Append("=").Append(kv.Value); }
+          diagnostic = bestDiag + " scanned=" + scanned + " obst=" + _obstacles.Count + " reject(oob/box/extLeader/calloutLeader)=" + rejectOob + "/" + rejectBox + "/" + rejectExtLeader + "/" + rejectCalloutLeader
+            + " extLeaderBy{" + byOwner.ToString() + "}";
           return true;
         }
         if (tier == 2)
@@ -158,7 +172,9 @@ namespace PlantFlow_Support
         // 이 장애물의 리더 검사만 면제한다(문자 상자 겹침 검사는 유지).
         if (!string.IsNullOrEmpty(_leaderExemptOwner)
           && string.Equals(obstacle.Owner ?? string.Empty, _leaderExemptOwner, System.StringComparison.Ordinal)) continue;
-        if (leaderScope == LeaderCheckScope.All && (SegIntersectsBox(anchor, p1, obstacle.Box) || SegIntersectsBox(p1, p2, obstacle.Box))) { reject = "extLeader"; return false; }
+        // 어느 장애물이 리더를 막는지 소유자를 함께 돌려준다(무명 장애물은 dim/기타).
+        if (leaderScope == LeaderCheckScope.All && (SegIntersectsBox(anchor, p1, obstacle.Box) || SegIntersectsBox(p1, p2, obstacle.Box)))
+        { reject = "extLeader|" + (string.IsNullOrEmpty(obstacle.Owner) ? "unnamed" : obstacle.Owner); return false; }
       }
       // 콜아웃끼리는 겹치지만 않으면 되는 게 아니라 읽을 여백이 필요하다.
       // 겹침 0인데 간격 3이면 육안으로는 붙어 보인다(RC1 L-65×65×6 ↔ UB-003 실측).
