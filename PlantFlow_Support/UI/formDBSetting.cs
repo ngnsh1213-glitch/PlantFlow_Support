@@ -128,7 +128,7 @@ namespace PlantFlow_Support
       this.label4.Name = "label4";
       this.label4.Size = new Size(152, 13);
       this.label4.TabIndex = 14;
-      this.label4.Text = "Copyright (c) by NghiaBT 2025";
+      this.label4.Text = "Copyright (c) 2026 PlantFlow";
       this.tbProjectName.Enabled = false;
       this.tbProjectName.Location = new Point(98, 85);
       this.tbProjectName.Margin = new Padding(2);

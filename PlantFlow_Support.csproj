@@ -26,7 +26,6 @@
 
   <ItemGroup>
     <Compile Remove="TestProject\**" />
-    <Compile Remove="Microsoft\**" />
     <Compile Remove="PlantFlow_Support\obj\**" />
     <Compile Remove="PlantFlow_Support\bin\**" />
     <Compile Remove="PlantFlow_Support_Backup_Stable\**" />

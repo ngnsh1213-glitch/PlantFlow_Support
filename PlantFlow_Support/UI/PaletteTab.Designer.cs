@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Windows.Forms;
@@ -81,7 +81,7 @@ namespace PlantFlow_Support
     private Label lblColTol;
     private Label lblRadius;
 
-    private TabPage tabAuto2D;
+    private TabPage tabPfsDrawing;
     private TabPage tabPSData;
     private Panel panel1;
     private Panel panel3;
@@ -147,7 +147,7 @@ namespace PlantFlow_Support
       this.tbXlabel = new TextBox();
       this.label4 = new Label();
       this.tabMainUI = new TabControl();
-      this.tabAuto2D = new TabPage();
+      this.tabPfsDrawing = new TabPage();
       this.tabSupportCatalog = new TabPage();
       this.cbCatType = new ComboBox();
       this.dgvCatVariants = new DataGridView();
@@ -228,7 +228,7 @@ namespace PlantFlow_Support
       this.tbXlabel = new TextBox();
       this.label4 = new Label();
       this.tabMainUI = new TabControl();
-      this.tabAuto2D = new TabPage();
+      this.tabPfsDrawing = new TabPage();
       this.tabSupportCatalog = new TabPage();
       this.cbCatType = new ComboBox();
       this.dgvCatVariants = new DataGridView();
@@ -272,7 +272,7 @@ namespace PlantFlow_Support
 
       this.lvcMenuStrip.SuspendLayout();
       this.tabMainUI.SuspendLayout();
-      this.tabAuto2D.SuspendLayout();
+      this.tabPfsDrawing.SuspendLayout();
       this.panel3.SuspendLayout();
       this.panel2.SuspendLayout();
       this.panel1.SuspendLayout();
@@ -593,7 +593,7 @@ namespace PlantFlow_Support
       this.label4.TabIndex = 0;
       this.label4.Text = "X Label:";
       this.tabMainUI.Alignment = TabAlignment.Left;
-      this.tabMainUI.Controls.Add((Control) this.tabAuto2D);
+      this.tabMainUI.Controls.Add((Control) this.tabPfsDrawing);
       this.tabMainUI.Controls.Add((Control) this.tabPSData);
       this.tabMainUI.Controls.Add((Control) this.tabSupportCatalog);
 
@@ -780,24 +780,24 @@ namespace PlantFlow_Support
       this.tabMainUI.SelectedIndexChanged += new EventHandler(this.tabMainUI_SelectedIndexChanged);
       this.tabMainUI.Size = new Size(605, 651);
       this.tabMainUI.TabIndex = 17;
-      this.tabAuto2D.BackColor = Color.LightSteelBlue;
-      this.tabAuto2D.Controls.Add((Control) this.label13);
-      this.tabAuto2D.Controls.Add((Control) this.panel3);
-      this.tabAuto2D.Controls.Add((Control) this.panel2);
-      this.tabAuto2D.Controls.Add((Control) this.btExportMTO);
-      this.tabAuto2D.Controls.Add((Control) this.panel1);
-      this.tabAuto2D.Controls.Add((Control) this.cbbViewDirection);
-      this.tabAuto2D.Controls.Add((Control) this.clbViewDirections);
-      this.tabAuto2D.Controls.Add((Control) this.label1);
-      this.tabAuto2D.Controls.Add((Control) this.btAdd);
-      this.tabAuto2D.Controls.Add((Control) this.lvSupportName);
-      this.tabAuto2D.Controls.Add((Control) this.btExport);
-      this.tabAuto2D.Location = new Point(23, 4);
-      this.tabAuto2D.Name = "tabAuto2D";
-      this.tabAuto2D.Padding = new Padding(3);
-      this.tabAuto2D.Size = new Size(578, 643);
-      this.tabAuto2D.TabIndex = 0;
-      this.tabAuto2D.Text = "PS AUTO2D";
+      this.tabPfsDrawing.BackColor = Color.LightSteelBlue;
+      this.tabPfsDrawing.Controls.Add((Control) this.label13);
+      this.tabPfsDrawing.Controls.Add((Control) this.panel3);
+      this.tabPfsDrawing.Controls.Add((Control) this.panel2);
+      this.tabPfsDrawing.Controls.Add((Control) this.btExportMTO);
+      this.tabPfsDrawing.Controls.Add((Control) this.panel1);
+      this.tabPfsDrawing.Controls.Add((Control) this.cbbViewDirection);
+      this.tabPfsDrawing.Controls.Add((Control) this.clbViewDirections);
+      this.tabPfsDrawing.Controls.Add((Control) this.label1);
+      this.tabPfsDrawing.Controls.Add((Control) this.btAdd);
+      this.tabPfsDrawing.Controls.Add((Control) this.lvSupportName);
+      this.tabPfsDrawing.Controls.Add((Control) this.btExport);
+      this.tabPfsDrawing.Location = new Point(23, 4);
+      this.tabPfsDrawing.Name = "tabPfsDrawing";
+      this.tabPfsDrawing.Padding = new Padding(3);
+      this.tabPfsDrawing.Size = new Size(578, 643);
+      this.tabPfsDrawing.TabIndex = 0;
+      this.tabPfsDrawing.Text = "PFS Drawing";
       this.label13.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
       this.label13.Location = new Point(209, 627);
       this.label13.Name = "label13";
@@ -942,8 +942,8 @@ namespace PlantFlow_Support
       this.Size = new Size(605, 651);
       this.lvcMenuStrip.ResumeLayout(false);
       this.tabMainUI.ResumeLayout(false);
-      this.tabAuto2D.ResumeLayout(false);
-      this.tabAuto2D.PerformLayout();
+      this.tabPfsDrawing.ResumeLayout(false);
+      this.tabPfsDrawing.PerformLayout();
       this.panel3.ResumeLayout(false);
       this.panel3.PerformLayout();
       this.panel2.ResumeLayout(false);

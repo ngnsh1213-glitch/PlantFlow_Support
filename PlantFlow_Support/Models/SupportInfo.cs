@@ -1,10 +1,4 @@
-﻿// Decompiled with JetBrains decompiler
-// Type: PlantFlow_Support.SupportInfo
-// Assembly: PlantFlow_Support, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null
-// MVID: 503E85E1-3D1B-40F1-A567-5E4C05655DB9
-// Assembly location: C:\Temp\CADLIB\PlantFlow_Support.dll
-
-using Autodesk.AutoCAD.DatabaseServices;
+﻿using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.ProcessPower.PnP3dObjects;
 using Autodesk.ProcessPower.PnP3dOrthoDrawingsUI;
