@@ -1,6 +1,72 @@
 ﻿# SESSION — 현재 작업 상태
 
-## ★★★현재 상태 (2026-07-21 15:45 갱신, 다음 세션 시작점)
+## ★★★다음 세션 첫 할 일 — 라이브 검증 4건 (2026-07-21 후반 작업분)
+
+**오늘 후반 작업은 전부 "빌드 통과"까지다. 라이브 검증이 하나도 안 됐고 파급이 크다.**
+PFS/PFO 양쪽 push 완료(PFS `9aa7237`, PFO `012b0e1`).
+
+| # | 항목 | 무엇을 볼 것인가 | 리스크 |
+|---|---|---|---|
+| 1 | **경로 규약** | 프로젝트 폴더에 `PlantFlow_PFS\GridSystem.json`, `PlantFlow_PFO\bom.json`·`settings.json` 생성. 기존 사용자는 **이관 로그**(`레거시 이관 ... -> ...`)가 찍히고 설정이 유지돼야 한다 | **최상.** PFO는 실사용 중이라 이관 실패 시 사용자가 설정을 잃는다 |
+| 2 | **리본** | 리본에 `PlantFlow` 탭 → `PlantFlow Support` 패널 → `Open Panel` 버튼. **PFO와 함께 로드하면 한 탭에 두 패널** | 중 |
+| 3 | **MTO** | 레거시 WinForms 탭의 `Export MTO` → `.xlsx` 생성·열림. 열 8개 구성 동일. **Excel 미설치 PC에서도 동작** | 중 |
+| 4 | **일괄추출** | `PFSNOTABBATCH` → `excluded=6 candidates=11`. 현재 `dev_test.bat`에 `PFS_NOTAB_BATCH_DRYRUN=1`이라 도면은 안 나온다. 실제 추출하려면 `0`으로 | 하 |
+
+### 후반 작업 요약 (2026-07-21 오후)
+
+**① 디컴파일 잔재 정리 — 이 프로젝트는 기존 DLL을 JetBrains로 푼 코드에서 출발했다**
+- `Models/SupportInfo.cs`의 디컴파일 헤더 제거(원본 DLL 경로·MVID·PublicKeyToken 노출이었다)
+- `formDBSetting.cs` 화면 표기 `Copyright (c) by NghiaBT 2025` → `PlantFlow`
+- `tabAuto2D` → `tabPfsDrawing`, 탭 텍스트 `PS AUTO2D` → `PFS Drawing`
+- `Microsoft/Office/Interop/Excel/` 17개(제3자 디컴파일 소스) 삭제, `Backup_Stable`은 리포 밖 이관
+- `// ISSUE:` 디컴파일러 주석 10건 제거
+- 최종 스캔: `Decompiled with`/`JetBrains`/`MVID`/`AUTO2DPIPESUPPORT` **전부 0건**
+
+**② Excel 의존성 제거 (`8cb5426`)**
+- MTO가 COM CLSID로 **데스크톱 Excel을 띄우던** 구조 → ClosedXML 0.104.2(OpenXML) 직접 생성
+- PFO `BomExcelExporter.cs`와 같은 규약. `.xls` → `.xlsx`(사용자 승인)
+- 셀 서식을 `@`(텍스트)로 지정해 `"1-2"` 같은 규격값이 날짜로 변환되는 것을 차단
+- PIA DLL 1.6MB 리포에서 제거. 예외 시 COM 미해제로 Excel 유령 프로세스가 남던 문제도 소멸
+
+**③ 리본 패널 (`60836de` / PFO `1f1a496`)**
+- PFO `Services/RibbonService.cs` 이식. **PFS에 `IExtensionApplication` 진입점이 아예 없어서** `Core/PluginLoader.cs`도 신설
+- csproj `UseWPF=true`(리본이 `BitmapImage`·`ICommand` 등 WPF 타입을 쓴다)
+- **탭 공유 규약**: 탭 Id를 `PLANTFLOW_TAB`으로 통일하고, 각 제품은 "탭은 찾거나 없을 때만 생성 +
+  자기 패널만 제거·추가". 기존 PFO는 탭을 통째로 지우고 재생성해 **함께 로드하면 상대 패널이 사라졌다**
+- 버튼 구성은 **사용자 지시로 보류**. 지금은 `Open Panel`(PFS 명령) 하나만. 아이콘은 파일 없으면 텍스트 폴백
+
+**④ 제품 데이터 저장 규약 (`9aa7237` / PFO `c32a4fa`·`012b0e1`)**
+```
+<활성 Plant 프로젝트>\
+  PlantFlow_PFO\ bom.json, settings.json
+  PlantFlow_PFS\ GridSystem.json
+  PlantFlow_PFI\ (향후)
+```
+- 출발점: `C:\TEMP\CADLIB\GridSystem.json` 하드코딩 5곳. **고객 PC에 그 경로가 없으면 동작하지 않았다**
+- 중간에 LocalAppData 해시 방식(PFO 선례)을 적용했다가, 사용자 결정으로 **프로젝트 폴더 방식**으로 재전환.
+  그리드·BOM은 도면 기준 데이터라 프로젝트와 함께 이동·백업되고 팀 공유돼야 한다
+- `AnnotationConfig`는 **같은 설정을 해시 파일과 프로젝트 루트 파일 2곳에 중복 저장**하고 있었다 → 한 곳으로 통합
+- 이관 자동: 새 위치 → 레거시 해시 → 레거시(CADLIB / 프로젝트 루트) 순으로 찾아 1회 복사. 실패 시 레거시로 계속 동작
+- **LocalAppData에 그대로 두는 것**(의도적): 전역 `config.json`(시작 스냅샷),
+  `bom_presets.json`(프로젝트 간 이식 목적), WebView2 `userDataFolder`(런타임 캐시)
+
+**⑤ 자산·구조 정리**
+- `Commands.cs` 1차 분할 10,571 → 8,420줄(`cf68fda`). 메서드 239개 유실 0, 명령 41개 보존.
+  2차(무탭 파이프라인/주석/기하 3분할)는 라이브 안정 후
+- 산출물 66건 추적 해제(`__pycache__` 47, `plot.log` 15, `.pdb`), 죽은 파일 3건 삭제
+- `plot.log`에는 사용자명·CollaborationCache 경로가 들어 있었다
+
+### 미결 (별도 트랙)
+- `#nullable disable` 23/59 파일 — 파일 단위로 점진 제거. 한꺼번에 하면 실제 null 결함과 경고가 섞인다
+- 제3자 의존성 라이선스 인벤토리(SBOM) 부재 — Autodesk/Plant 3D API, Newtonsoft.Json, WebView2, ClosedXML
+- 디컴파일 잔재 삭제는 **현재 트리에만 적용**된다. 과거 커밋·원격에는 남아 있다(이력 재작성은 별도 판단)
+- PFO 자산 추가 활용 후보: `LabelLayoutService`(1,359줄)+`SmartPlacementService`(517줄) — 밸룬 배치가
+  다른 타입에서 한계를 보이면 참고. 지금은 `NotabCalloutPlacer`가 안정화돼 손대지 말 것.
+  PFO "대기 중" 오버레이 UI 이식은 `TODO.md` 항목
+
+---
+
+## 현재 상태 (2026-07-21 15:45, 밸룬 트랙)
 
 ### ① 밸룬/콜아웃 배치 트랙 — **종결** (cycle 97~102)
 사용자 판정 "이상없음". 라이브 3회(RC1/RC2/RC3) 전량 `balloon-skip`·`callout-skip` **0건**.
