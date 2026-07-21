@@ -289,6 +289,26 @@ namespace PlantFlow_Support
       double scale = System.Math.Min(sx, sy);
       return new Point3d(x + dx * scale, y + dy * scale, 0.0);
     }
+
+    // 화살표는 모서리가 아니라 "가리키는 변의 중점"에 닿아야 무엇을 지시하는지 명확하다.
+    // 광선-외곽 교점(BoxEdgeToward)은 대각 방향에서 구석을 찍는다.
+    public static Point3d BoxEdgeMidpointToward(Extents3d box, Point3d target)
+    {
+      double minX = box.MinPoint.X, maxX = box.MaxPoint.X;
+      double minY = box.MinPoint.Y, maxY = box.MaxPoint.Y;
+      double cx = (minX + maxX) / 2.0, cy = (minY + maxY) / 2.0;
+      double halfW = (maxX - minX) / 2.0, halfH = (maxY - minY) / 2.0;
+      double dx = target.X - cx, dy = target.Y - cy;
+      // 퇴화 박스는 방향을 정할 수 없다. 중심을 그대로 쓴다.
+      if (halfW < 1e-9 && halfH < 1e-9) return new Point3d(cx, cy, 0.0);
+      if (System.Math.Abs(dx) < 1e-9 && System.Math.Abs(dy) < 1e-9) return new Point3d(cx, cy, 0.0);
+      // 어느 변을 먼저 통과하는지를 정규화 거리로 판정한다(BoxEdgeToward와 같은 기준).
+      double nx = halfW > 1e-9 ? System.Math.Abs(dx) / halfW : double.PositiveInfinity;
+      double ny = halfH > 1e-9 ? System.Math.Abs(dy) / halfH : double.PositiveInfinity;
+      if (nx >= ny)
+        return new Point3d(dx >= 0.0 ? maxX : minX, cy, 0.0);
+      return new Point3d(cx, dy >= 0.0 ? maxY : minY, 0.0);
+    }
   }
 
   public partial class Commands
@@ -5503,7 +5523,7 @@ namespace PlantFlow_Support
 
         // 화살표 지점: anchorBox가 있으면 대상 외곽 접점(유볼트=quadrant)에서 출발한다.
         Point3d arrowFrom = hasAnchorBox
-          ? NotabCalloutPlacer.BoxEdgeToward(anchorBox, new Point3d(nearX, baseY, 0.0))
+          ? NotabCalloutPlacer.BoxEdgeMidpointToward(anchorBox, new Point3d(nearX, baseY, 0.0))
           : anchor;
 
         Leader leader = new Leader();
@@ -5808,18 +5828,39 @@ namespace PlantFlow_Support
           // 그 외곽(quadrant)에 닿게 한다.
           bool hasBox = false;
           Extents3d uboltBox = new Extents3d(Point3d.Origin, Point3d.Origin);
+          // 유볼트는 세로기둥·가로재 박스 안에 완전히 들어앉는다. "첫 번째 포함 박스"를 쓰면
+          // 큰 부재 박스가 잡혀 화살표가 엉뚱한 곳을 찍는다(cycle97 로그 확정: ubolt-box 없음 0건).
+          // 포함하는 박스 중 최소 면적을 고르고, 서포트 대비 과대한 박스는 유볼트가 아니라고 본다.
+          double supportW = System.Math.Max(1e-9, supportPaperExt.MaxPoint.X - supportPaperExt.MinPoint.X);
+          double supportH = System.Math.Max(1e-9, supportPaperExt.MaxPoint.Y - supportPaperExt.MinPoint.Y);
+          double maxRatio = this.GetEnvDouble("PFS_NOTAB_UBOLT_BOX_MAX_RATIO", 0.6, 0.05, 1.0);
+          double bestArea = double.MaxValue;
+          int rejectedOversize = 0;
           if (memberBoxes != null)
           {
             for (int m = 0; m < memberBoxes.Count; m++)
             {
               Extents3d pb = memberBoxes[m].PaperBox;
-              if (anchor.X >= pb.MinPoint.X && anchor.X <= pb.MaxPoint.X
-                && anchor.Y >= pb.MinPoint.Y && anchor.Y <= pb.MaxPoint.Y)
-              { uboltBox = pb; hasBox = true; break; }
+              if (anchor.X < pb.MinPoint.X || anchor.X > pb.MaxPoint.X
+                || anchor.Y < pb.MinPoint.Y || anchor.Y > pb.MaxPoint.Y)
+                continue;
+              double bw = pb.MaxPoint.X - pb.MinPoint.X;
+              double bh = pb.MaxPoint.Y - pb.MinPoint.Y;
+              if (bw / supportW > maxRatio || bh / supportH > maxRatio)
+              { rejectedOversize++; continue; }
+              double area = System.Math.Max(0.0, bw) * System.Math.Max(0.0, bh);
+              if (area < bestArea)
+              { bestArea = area; uboltBox = pb; hasBox = true; }
             }
           }
-          if (!hasBox)
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-box 없음 tag=" + snapshot.Tag + " anchor=" + this.FormatPoint(anchor));
+          if (hasBox)
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-box 채택 tag=" + snapshot.Tag
+              + " W=" + this.FormatNumber(uboltBox.MaxPoint.X - uboltBox.MinPoint.X)
+              + " H=" + this.FormatNumber(uboltBox.MaxPoint.Y - uboltBox.MinPoint.Y)
+              + " oversizeRejected=" + rejectedOversize + " anchor=" + this.FormatPoint(anchor));
+          else
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-box 없음 tag=" + snapshot.Tag
+              + " oversizeRejected=" + rejectedOversize + " anchor=" + this.FormatPoint(anchor));
           this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, snapshot.Tag, anchor, viewportCenterX, requiredSide, sideSource, gap, minDx, "ubolt callout", hasBox, uboltBox);
         }
       }
@@ -8309,7 +8350,7 @@ namespace PlantFlow_Support
             if (!placer.WithinBounds(box)) continue;
 
             Point3d c = new Point3d(cx, cy, 0.0);
-            Point3d arrowPt = NotabCalloutPlacer.BoxEdgeToward(memberRect, c);   // 화살표는 부재 외곽에 닿는다
+            Point3d arrowPt = NotabCalloutPlacer.BoxEdgeMidpointToward(memberRect, c);   // 화살표는 부재 변 중점에 닿는다
             Vector3d dir = c - arrowPt;
             if (dir.Length < 1e-9) continue;
             Point3d touchPt = c - dir.GetNormal() * radius;
@@ -8336,7 +8377,7 @@ namespace PlantFlow_Support
         bool left = outwardLeft;
         string diag = placeDiag;
         // 화살표는 부재 외곽점, 리더는 꺾지 않고 원주까지 직선 1개.
-        anchor = NotabCalloutPlacer.BoxEdgeToward(memberRect, ballCenter);
+        anchor = NotabCalloutPlacer.BoxEdgeMidpointToward(memberRect, ballCenter);
         Vector3d toCenter = ballCenter - anchor;
         if (toCenter.Length < 1e-9) toCenter = Vector3d.XAxis;
         Point3d touch = ballCenter - toCenter.GetNormal() * radius;
