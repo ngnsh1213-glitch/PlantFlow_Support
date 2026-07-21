@@ -9,6 +9,20 @@ set "SRC=%~dp0bin\Release\PlantFlow_Support.dll"
 set "DEPLOY=C:\Lisp\PlantFlow_Support"
 set "LAUNCH=C:\Lisp\pfs_launch.ps1"
 
+rem --- notab dimension/callout text height (arrow kept separate via PFS_NOTAB_DIM_ARR) ---
+set "PFS_NOTAB_DIM_TXT=8"
+
+rem --- BOM spike (measurement only; logs BOMs rows, no output change). Set 0 to disable. ---
+set "PFS_NOTAB_BOM_SPIKE=1"
+
+rem --- auto-extract tags (comma-separated). PFSNOTABTEST loops each. Edit to change types. ---
+set "PFS_NOTAB_TEST_TAG=RC1-001,RC2-001,RC3-001"
+
+rem --- notab callout text position offsets (paper mm, +X=right +Y=up, range +-2000) ---
+rem     Edit these numbers and re-run (no code change). Inherited by AutoCAD via child process env.
+set "PFS_NOTAB_PIPE_CALLOUT_DX=180"
+set "PFS_NOTAB_MEMBER_CALLOUT_DX=5"
+
 echo ============================================================
 echo  [1/4] Building (Release, incremental)...
 echo ============================================================

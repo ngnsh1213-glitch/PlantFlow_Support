@@ -26,3 +26,6 @@ PlantFlow_Support_Backup_Stable/
 primitiv_probe.txt
 *.tmp
 *~
+
+# === 수동 스파이크 백업 (파일명 중간 _bak_ 형태) ===
+*_bak_*
