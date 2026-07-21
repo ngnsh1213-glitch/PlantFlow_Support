@@ -29,4 +29,4 @@
 
 ## 커밋
 
-- `a070101` `fix: anchor F balloons to member centerline`
+- 코드: `54d84fa` `fix: anchor F balloons to member centerline`
