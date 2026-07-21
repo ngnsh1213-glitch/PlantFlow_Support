@@ -5272,7 +5272,7 @@ namespace PlantFlow_Support
         // 표·치수·파이프 장애물은 이미 등록돼 있어 밸룬이 그것들을 침범하지 않는다.
         this.AppendNotabBalloons(tr, layoutBtr, db, textStyleId, layerId, viewportPaperExt, txt, calloutPlacer, vp,
           hasVerticalPortAnchor, verticalAnchorX, verticalAnchorBaseY, verticalAnchorTopY, dimReferenceMinX, maxX,
-          memberBoxes, true);
+          true);
         this.AppendNotabPipeCallout(tr, layoutBtr, db, textStyleId, layerId, pipeCenterXPaper, pipeCenterYPaper, supportPaperExt, viewportPaperExt, txt, calloutPlacer);
         Point3d verticalMemberAnchor = new Point3d(verticalAnchorX, verticalAnchorBaseY + (verticalAnchorTopY - verticalAnchorBaseY) * 0.5, 0.0);
         // 기본은 밸룬이 부재 표기를 대신한다(규격은 BOM 표에서 읽는다).
@@ -5292,7 +5292,7 @@ namespace PlantFlow_Support
         // 부재가 아닌 밸룬(P1 등)은 마지막. 기존 확정 배치의 회귀를 최소화한다.
         this.AppendNotabBalloons(tr, layoutBtr, db, textStyleId, layerId, viewportPaperExt, txt, calloutPlacer, vp,
           hasVerticalPortAnchor, verticalAnchorX, verticalAnchorBaseY, verticalAnchorTopY, dimReferenceMinX, maxX,
-          memberBoxes, false);
+          false);
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " vMode=" + verticalMode + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
@@ -8229,7 +8229,6 @@ namespace PlantFlow_Support
       // 세로재 판정에만 쓰고, 밸룬 작도 좌표는 memberBoxes의 PaperBox에서 얻는다.
       bool hasVerticalAnchor, double verticalX, double verticalBaseY, double verticalTopY,
       double horizontalMemberMinX, double horizontalMemberMaxX,
-      System.Collections.Generic.List<NotabMemberBox> memberBoxes,
       // true=부재 밸룬(F 계열)만, false=나머지(P1 등)만. 부재 밸룬을 콜아웃보다 먼저 배치하기 위한 분리.
       bool memberPass)
     {
@@ -8328,19 +8327,24 @@ namespace PlantFlow_Support
           string geomSource;
           if (isVerticalMember)
           {
-            // verticalX는 치수선 X라 쓸 수 없다. 실제 솔리드 투영 상자에서 측면을 얻는다.
-            NotabMemberBox verticalBox;
-            string memberReason;
-            if (!this.TryGetNotabVerticalMemberBox(memberBoxes, out verticalBox, out memberReason))
+            // 세로 기둥은 독립 솔리드가 아니다(cycle102 실측: 7A가 기둥+가로재+플레이트 병합).
+            // 따라서 솔리드 상자를 쓰면 서포트 전체 외곽을 찍어 허공이 된다. 포트 기반으로 잡는다.
+            // rawAnchor = S2 포트(기둥 자유단) 투영값이라 기둥 축 X를 대표한다.
+            // verticalBaseY/TopY = S2 + F2 파라미터×vScale로 재구성한 기둥 상하단이다.
+            if (!hasVerticalAnchor)
             {
               PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item
-                + " reason=member-geometry-unavailable detail=" + memberReason);
+                + " reason=member-geometry-unavailable detail=no-vertical-port");
               continue;
             }
-            endMinX = verticalBox.PaperBox.MinPoint.X;
-            endMaxX = verticalBox.PaperBox.MaxPoint.X;
-            endY = (verticalBox.PaperBox.MinPoint.Y + verticalBox.PaperBox.MaxPoint.Y) / 2.0;
-            geomSource = "vertical-box handle=" + verticalBox.Handle + " box=" + this.FormatExtents(verticalBox.PaperBox);
+            // 실제 단면폭이 아니라 "얇은 기둥 위에 화살표가 닿게" 하는 가독성 하한이다.
+            double halfThick = System.Math.Max(txt, radius) / 2.0;
+            endMinX = rawAnchor.X - halfThick;
+            endMaxX = rawAnchor.X + halfThick;
+            endY = (verticalBaseY + verticalTopY) / 2.0;
+            geomSource = "vertical-port axisX=" + this.FormatNumber(rawAnchor.X)
+              + " halfThick=" + this.FormatNumber(halfThick)
+              + " spanY=" + this.FormatNumber(verticalBaseY) + "~" + this.FormatNumber(verticalTopY);
           }
           else
           {
