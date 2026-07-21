@@ -25,6 +25,12 @@ rem     Logs: "PFSNOTABBATCH probe" per item (ShortDescription etc.) and "probe-
 rem     Set back to 0 to actually extract drawings.
 set "PFS_NOTAB_BATCH_DRYRUN=1"
 
+rem --- PFSNOTABBATCH attachment exclusion (Plant ShortDescription, comma-separated) ---
+rem     Default in code = UB,UBD (ubolt / guide ubolt). Excluded parts get no drawing of their own;
+rem     they are still pulled into the parent support drawing by AutoIncludeRelatedParts.
+rem     Uncomment and edit only if the catalog adds a new attachment code.
+rem set "PFS_NOTAB_BATCH_EXCLUDE=UB,UBD"
+
 rem --- notab callout text position offsets (paper mm, +X=right +Y=up, range +-2000) ---
 rem     Edit these numbers and re-run (no code change). Inherited by AutoCAD via child process env.
 set "PFS_NOTAB_PIPE_CALLOUT_DX=180"

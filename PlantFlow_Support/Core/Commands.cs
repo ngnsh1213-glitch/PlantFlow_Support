@@ -1461,9 +1461,23 @@ namespace PlantFlow_Support
       if (db == null || selectedIds == null || selectedIds.Length == 0)
         return supportIds;
 
-      int supportClassCount = 0, nonSupport = 0, probeFailed = 0;
+      int supportClassCount = 0, nonSupport = 0, probeFailed = 0, excludedCount = 0;
       System.Collections.Generic.Dictionary<string, int> nameCounts =
         new System.Collections.Generic.Dictionary<string, int>(System.StringComparer.OrdinalIgnoreCase);
+
+      // 부속(유볼트류)은 개별 도면 대상이 아니다. 본체 도면에는 AutoIncludeRelatedParts가 자동 포함한다.
+      // 판별자 = Plant ShortDescription. 실측(cycle103): 유볼트 6건 전부 "UB",
+      // 본체는 타입 코드 그대로(RC1/GD1/RS1/FS…)라 접두와 일치한다. guide 전용은 "UBD" 군.
+      // 하드코딩 금지 — 카탈로그가 늘면 env로 추가한다.
+      System.Collections.Generic.HashSet<string> excludeCodes =
+        new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+      string excludeRaw = System.Environment.GetEnvironmentVariable("PFS_NOTAB_BATCH_EXCLUDE");
+      if (string.IsNullOrWhiteSpace(excludeRaw)) excludeRaw = "UB,UBD";
+      foreach (string part in excludeRaw.Split(','))
+      {
+        string code = (part ?? string.Empty).Trim();
+        if (code.Length > 0) excludeCodes.Add(code);
+      }
 
       try
       {
@@ -1488,12 +1502,9 @@ namespace PlantFlow_Support
               DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
               if (obj == null)
                 continue;
-              supportIds.Add(id);
 
-              // ── 계측(cycle103 1단계) ────────────────────────────────
               // 유볼트도 AcPpDb3dSupport라 클래스만으로는 본체와 갈리지 않는다.
-              // 2단계 제외 목록의 근거값을 실측으로 확정하기 위해 속성을 덤프한다.
-              // 이 단계에서는 아무것도 걸러내지 않는다(자문: 미분류는 경고로만 기록).
+              // ShortDescription으로 부속을 걸러낸다(cycle103).
               string failReason;
               System.Collections.Generic.Dictionary<string, string> probe = this.GetNotabBatchProbeProperties(id, out failReason);
               if (probe.Count == 0) probeFailed++;
@@ -1514,9 +1525,17 @@ namespace PlantFlow_Support
               nameCounts.TryGetValue(nameForDup, out dupPrev);
               nameCounts[nameForDup] = dupPrev + 1;
 
+              // 조회 실패·빈 값은 제외하지 않고 포함한다. 기본 제외로 두면 정상 본체가
+              // 조용히 누락된다(자문 지적). 대신 경고로 남겨 운영자가 즉시 알 수 있게 한다.
+              bool excluded = !string.IsNullOrWhiteSpace(shortDesc) && excludeCodes.Contains(shortDesc.Trim());
+              if (excluded) excludedCount++;
+              else supportIds.Add(id);
+
               PlantOrthoView.FileDiag("PFSNOTABBATCH probe handle=" + id.Handle + " class=" + cls
                 + " shortDesc=" + (string.IsNullOrWhiteSpace(shortDesc) ? "(empty)" : shortDesc)
-                + (string.IsNullOrEmpty(failReason) ? string.Empty : " probeFail=" + failReason)
+                + " verdict=" + (excluded ? "excluded(attachment)" : "extract")
+                + (string.IsNullOrEmpty(failReason) ? string.Empty : " probeFail=" + failReason + " (포함 처리)")
+                + (string.IsNullOrWhiteSpace(shortDesc) && string.IsNullOrEmpty(failReason) ? " WARN=shortDesc-empty (포함 처리)" : string.Empty)
                 + " { " + line.ToString() + "}");
             }
             catch (System.Exception ex)
@@ -1538,7 +1557,9 @@ namespace PlantFlow_Support
       { if (kv.Value > 1) { if (dupSummary.Length > 0) dupSummary.Append(","); dupSummary.Append(kv.Key).Append("=").Append(kv.Value); } }
       PlantOrthoView.FileDiag("PFSNOTABBATCH probe-summary selected=" + selectedIds.Length
         + " supportClass=" + supportClassCount + " nonSupport=" + nonSupport
-        + " candidates=" + supportIds.Count + " probeFailed=" + probeFailed
+        + " excluded=" + excludedCount + " candidates=" + supportIds.Count
+        + " probeFailed=" + probeFailed
+        + " excludeCodes=" + excludeRaw
         + " duplicateName{" + dupSummary.ToString() + "}");
 
       return supportIds;
