@@ -29,4 +29,4 @@
 
 ## 커밋
 
-- `00fd9f3` `fix: use measured balloon member bounds`
+- `5383da6` `fix: use measured balloon member bounds`
