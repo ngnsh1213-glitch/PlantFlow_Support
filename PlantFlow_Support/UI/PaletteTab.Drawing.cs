@@ -71,7 +71,7 @@ namespace PlantFlow_Support
                 supports.Add(new { name, view });
             }
 
-            bool gridReady = System.IO.File.Exists(@"C:\TEMP\CADLIB\GridSystem.json");
+            bool gridReady = ProjectDataUtils.GridSystemExists();
             return new { supports, gridReady, captureDoc = _captureDocName ?? "" };
         }
 
@@ -214,7 +214,7 @@ namespace PlantFlow_Support
             try
             {
                 if (lvSupportName.Items.Count == 0) return DrawingBridge.Fail(env.Id, "ER1004", "선택된 서포트가 없습니다.");
-                if (!System.IO.File.Exists(@"C:\TEMP\CADLIB\GridSystem.json"))
+                if (!ProjectDataUtils.GridSystemExists())
                     return DrawingBridge.Fail(env.Id, "ER1005", "Grid System을 먼저 설정하세요(그리드는 Phase 1b).");
 
                 var docs = AcadApp.DocumentManager;

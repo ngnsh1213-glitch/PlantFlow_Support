@@ -1179,7 +1179,7 @@ namespace PlantFlow_Support
         code = "ER1004";
         return;
       }
-      if (!File.Exists("C:\\TEMP\\CADLIB\\GridSystem.json"))
+      if (!ProjectDataUtils.GridSystemExists())
       {
         code = "ER1005";
         return;

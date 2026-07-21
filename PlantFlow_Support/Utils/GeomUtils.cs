@@ -142,7 +142,8 @@ namespace PlantFlow_Support
 
         public static Dictionary<string, string> CheckDatumInfo(Point3d datum_point)
         {
-            JObject jobject1 = ProjectDataUtils.ReadJsonFile("C:\\TEMP\\CADLIB\\GridSystem.json");
+            // 그리드 저장 위치는 활성 Plant 프로젝트 경로로 결정된다(레거시 경로는 1회 이관).
+            JObject jobject1 = ProjectDataUtils.ReadJsonFile(ProjectDataUtils.ResolveGridSystemPathForRead());
             Point2d dPoint = new Point2d(datum_point.X, datum_point.Y);
             Point2d closestPoint = Point2d.Origin;
             double minDist = dPoint.GetDistanceTo(closestPoint);
