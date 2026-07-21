@@ -26,4 +26,4 @@
 
 ## 커밋
 
-- 코드: 커밋 후 해시 기록 예정.
+- 코드: `83d0a3e` `fix: scope perspective guard by origin`
