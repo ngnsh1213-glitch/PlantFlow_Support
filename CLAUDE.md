@@ -57,4 +57,11 @@
 ## 4. 커밋·동기화 규칙
 - 파일 수정 후 커밋한다(attribution 금지, push는 요청 시 또는 세션 종료 시).
 - 커밋 전 `git status`로 민감 파일(비밀키·백업·대용량 DLL) 제외 확인.
+- **빌드는 완료 조건**이다. `dotnet build` 오류 0을 확인하지 않은 코드는 커밋하지 않는다.
+  Codex의 REPORT를 수령하면 Claude가 **직접 빌드를 재확인**한다(2026-07-21 cycle98 사고 근거).
+- **push된 커밋은 amend·rebase 금지.** 수정이 필요하면 새 커밋을 쌓는다.
+  집도자(Codex 등)는 **push하지 않는다** — push는 사용자가 수행한다.
+  (2026-07-21: push 후 amend로 원격과 이력이 갈라져 merge 충돌 발생.)
+- 이력이 갈라진 경우: 로컬이 검증된 최신이면 `git merge -s ours origin/master`로
+  원격 이력만 수용한 뒤 push한다. force push는 쓰지 않는다.
 - 모든 대화·산출물은 **한글**. 과장/비유 배제.
