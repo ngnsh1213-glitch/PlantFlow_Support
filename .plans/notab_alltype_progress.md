@@ -1,4 +1,4 @@
-# 무탭(NoTab) 서포트 디테일 — 全타입 테스트 진행표
+﻿# 무탭(NoTab) 서포트 디테일 — 全타입 테스트 진행표
 
 > 규격집: `[WELCRON HANTEC] PIPE SUPPORT STANDARD`. 목표=각 타입 3D `TYPE-001` 배치 → `PFSNOTABBATCH` 전량추출 / `PFSNOTABTEST`(env `PFS_NOTAB_TEST_TAG`) 단건 → 4관찰로 패밀리별 로직 확정.
 > 4관찰: ①세로치수 스팬(부재 정확?) ②가로 상/하단(→`GetNotabHorizontalDimSide`) ③콜아웃(부재/PLN/BOP) 위치·지향 ④뷰 충분성(단일 vs 멀티뷰).
@@ -16,9 +16,9 @@ PFS_NOTAB_MEMBER_CALLOUT_DX=5
 ## 진행표
 | 패밀리 | 타입 | 상태 | 세로스팬 | 가로side | 콜아웃 | 뷰 | 비고 |
 |---|---|---|---|---|---|---|---|
-| A/E 가이드 | **GD1** | ⚠ **재검증 필요** | 바 F=75 OK | 하단(기지값) | 3종 근단착지 OK | 단일뷰 OK | cycle47~59 종결이나 **밸룬 도입 이전**. 랜딩=수평부착모드(cycle59) |
-| A/E 가이드 | **GD2** | ⚠ **재검증 필요** | 세로=B/D 파이프중심(300) | 하단 | 부재 2개 L=중앙수직재·C=하단수평재우측(cycle72) | 단일뷰 OK | config MemberBIs `["16","215"]`. 부재앵커 재배치 cycle72 |
-| A/E 가이드 | **GD3** | ⚠ **재검증 필요** | | 하단 | 단일 콜아웃 근단착지 OK | 단일뷰 OK | ★BOM엔 C10+A7 2부재이나 채널만 주석(A7 누락) |
+| A/E 가이드 | **GD1** | ✅ 재검증 완료(2026-07-21, 밸룬 도입 후) | 바 F=75 OK | 하단(기지값) | 3종 근단착지 OK | 단일뷰 OK | cycle47~59 종결이나 **밸룬 도입 이전**. 랜딩=수평부착모드(cycle59) |
+| A/E 가이드 | **GD2** | ✅ 재검증 완료(2026-07-21) | 세로=B/D 파이프중심(300) | 하단 | 부재 2개 L=중앙수직재·C=하단수평재우측(cycle72) | 단일뷰 OK | config MemberBIs `["16","215"]`. 부재앵커 재배치 cycle72 |
+| A/E 가이드 | **GD3** | ✅ 재검증 완료(2026-07-21) | | 하단 | 단일 콜아웃 근단착지 OK | 단일뷰 OK | ★BOM엔 C10+A7 2부재이나 채널만 주석(A7 누락) |
 | A 수평바 | SHOE(S) | ⬜ 대기 | | | | | 3/4~8" vs 10~24"(H빔) |
 | A 수평바 | RS11 | ⬜ 대기 | | | | | 수직앵글+U볼트, ELEV F/E |
 | A 수평바 | RS15 | ⬜ 대기 | | | | | 수직스탠션+브레이스 |
@@ -32,20 +32,31 @@ PFS_NOTAB_MEMBER_CALLOUT_DX=5
 
 부속(BP·SET ANCHOR BOLT·REINFORCED PAD)=서포트 디테일 대상 아님, 제외.
 
-## 다음 — GD 재검증이 최우선 (2026-07-21)
-GD1~GD3의 "종결"은 **cycle 47~72 시점**이고, 그 뒤 cycle 95~102에서 **밸룬이 부재 텍스트 콜아웃을
-대체**하도록 바뀌었다(`PFS_NOTAB_MEMBER_TEXT=1`이어야 옛 텍스트가 나온다). 즉 GD는 검증 당시와
-**다른 코드 경로**를 탄다. 새 타입보다 GD 재검증이 먼저다.
+## GD 재검증 결과 (2026-07-21) — 이상없음
+GD1~GD3의 기존 "종결"은 cycle 47~72 시점이라 **밸룬 도입(cycle 95~102) 이전**이었다.
+밸룬이 부재 텍스트 콜아웃을 대체하도록 바뀌어 코드 경로가 달라졌으므로 재검증했고,
+**RC에서 세운 전제 3건이 GD에서도 깨지지 않았다**(사용자 판정 "이상없음").
+1. F1=가로재 / F2=세로재 매핑
+2. 세로재 좌표의 S2 포트 전제(`IsNotabVerticalMemberPort`)
+3. 기둥 상하단 = `F2` 파라미터 × vScale
 
-**RC에서 세운 전제 3건이 GD에서 성립하는지가 핵심 질문이다.**
-1. F1=가로재 / F2=세로재 매핑 — GD는 BOM ITEM 구성이 다를 수 있다(GD3는 C10+A7).
-2. 세로재 좌표의 **S2 포트 전제** — `IsNotabVerticalMemberPort`가 GD에서도 참인가.
-3. 기둥 상하단 = **`F2` 파라미터 × vScale** — `GetNotabTypeConfig`의 `VerticalParamKey`가
-   GD에서도 `F2`인지(RC1/2/3은 모두 `F2`로 확인됨).
+## 다음 — 일괄추출 부속 제외 (cycle103)
+`PFSNOTABBATCH`는 UI 아이콘으로 노출할 예정이며, **전체 드래그 선택으로 실행해도
+(pipe, ubolt, ubolt for guide)를 제외한 서포트 본체만** 개별 도면으로 뽑아야 한다.
 
-판정 키(로그): `member-geometry-unavailable`(전제 붕괴) / `member-end-no-space`(공간 부족) /
-`callout-skip` / `balloon-skip reason=no-bom-row`(ITEM 매핑 불일치) /
-`member-spike`의 솔리드 구성(RC는 `7A` 병합이었다. GD는 부재가 분리돼 있을 수 있다).
+현재 결함: `CollectSelectedSupportIds`가 클래스명에 "Support"만 있으면 통과시킨다.
+파이프는 자동 제외되지만 **유볼트도 `AcPpDb3dSupport`라 통과**해, 전체 선택 시 유볼트마다
+개별 도면이 나온다.
 
-절차: `dev_test.bat`의 `PFS_NOTAB_TEST_TAG`를 GD로 바꿔 실행 → 로그 판정 → 이 표에 4관찰 기입 →
-어긋나는 지점만 per-family 분기/env로 채운다.
+- **1단계(집도 완료)**: 계측. 선택 항목별 `SupportName/ShortDescription/Tag/TagName/PartNumber/
+  SupportDetail/Description` + 클래스·Handle을 이름 기반으로 덤프(`PFSNOTABBATCH probe`),
+  요약(`probe-summary`)에 선택수·Support수·후보수·조회실패수·중복 SupportName 기록.
+  `PFS_NOTAB_BATCH_DRYRUN=1`이면 도면을 뽑지 않고 목록만 보고한다.
+- **2단계(대기)**: 1단계 실측으로 "ubolt for guide"의 ShortDescription을 확정한 뒤
+  `PFS_NOTAB_BATCH_EXCLUDE`(콤마 구분, 하드코딩 금지)로 제외. 제외된 부속은 종전대로
+  `AutoIncludeRelatedParts`가 해당 서포트 도면에 자동 포함한다.
+  ⚠ 조회 실패 시 기본 포함하면 현 결함이 재발하고, 기본 제외하면 정상 본체를 누락한다 —
+  1단계에서는 미분류를 경고로만 기록한다(자문).
+
+절차: 전체 선택 → `PFSNOTABBATCH`(DRYRUN=1) → 로그의 `probe` 줄에서 유볼트류 ShortDescription 확정.
+

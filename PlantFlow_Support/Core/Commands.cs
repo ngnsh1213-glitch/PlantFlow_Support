@@ -1319,6 +1319,22 @@ namespace PlantFlow_Support
         return;
       }
 
+      // 계측 전용 실행(cycle103 1단계). 도면을 뽑지 않고 선택 분류 결과만 보고한다.
+      // 제외 규칙(2단계)의 근거값을 실측으로 확정하기 위한 것이다.
+      if (this.GetEnvDouble("PFS_NOTAB_BATCH_DRYRUN", 0.0, 0.0, 1.0) >= 0.5)
+      {
+        System.Text.StringBuilder tagList = new System.Text.StringBuilder();
+        for (int i = 0; i < supportIds.Count; i++)
+        {
+          if (tagList.Length > 0) tagList.Append(", ");
+          tagList.Append(this.GetSupportNameForLog(doc.Database, supportIds[i]));
+        }
+        PlantOrthoView.FileDiag("PFSNOTABBATCH DRYRUN 도면 미추출 candidates=" + supportIds.Count + " [" + tagList.ToString() + "]");
+        ed.WriteMessage("\nPFSNOTABBATCH: DRYRUN(계측 전용) — 도면을 추출하지 않았습니다. 후보 " + supportIds.Count + "건");
+        ed.WriteMessage("\n  " + tagList.ToString());
+        return;
+      }
+
       int okCount = 0;
       int failCount = 0;
       System.Collections.Generic.List<string> failTags = new System.Collections.Generic.List<string>();
@@ -1445,6 +1461,10 @@ namespace PlantFlow_Support
       if (db == null || selectedIds == null || selectedIds.Length == 0)
         return supportIds;
 
+      int supportClassCount = 0, nonSupport = 0, probeFailed = 0;
+      System.Collections.Generic.Dictionary<string, int> nameCounts =
+        new System.Collections.Generic.Dictionary<string, int>(System.StringComparer.OrdinalIgnoreCase);
+
       try
       {
         using (Transaction tr = db.TransactionManager.StartTransaction())
@@ -1459,11 +1479,45 @@ namespace PlantFlow_Support
             {
               string cls = id.ObjectClass == null ? string.Empty : id.ObjectClass.Name;
               if (cls.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) < 0)
+              {
+                nonSupport++;
                 continue;
+              }
+              supportClassCount++;
 
               DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
-              if (obj != null)
-                supportIds.Add(id);
+              if (obj == null)
+                continue;
+              supportIds.Add(id);
+
+              // ── 계측(cycle103 1단계) ────────────────────────────────
+              // 유볼트도 AcPpDb3dSupport라 클래스만으로는 본체와 갈리지 않는다.
+              // 2단계 제외 목록의 근거값을 실측으로 확정하기 위해 속성을 덤프한다.
+              // 이 단계에서는 아무것도 걸러내지 않는다(자문: 미분류는 경고로만 기록).
+              string failReason;
+              System.Collections.Generic.Dictionary<string, string> probe = this.GetNotabBatchProbeProperties(id, out failReason);
+              if (probe.Count == 0) probeFailed++;
+              System.Text.StringBuilder line = new System.Text.StringBuilder();
+              for (int p = 0; p < NotabBatchProbeNames.Length; p++)
+              {
+                string key = NotabBatchProbeNames[p];
+                string val;
+                if (!probe.TryGetValue(key, out val) || string.IsNullOrWhiteSpace(val)) val = "(empty)";
+                line.Append(key).Append('=').Append(val).Append(" | ");
+              }
+              string shortDesc;
+              if (!probe.TryGetValue("ShortDescription", out shortDesc)) shortDesc = string.Empty;
+              string nameForDup;
+              if (!probe.TryGetValue("SupportName", out nameForDup) || string.IsNullOrWhiteSpace(nameForDup))
+                nameForDup = "(noname)";
+              int dupPrev;
+              nameCounts.TryGetValue(nameForDup, out dupPrev);
+              nameCounts[nameForDup] = dupPrev + 1;
+
+              PlantOrthoView.FileDiag("PFSNOTABBATCH probe handle=" + id.Handle + " class=" + cls
+                + " shortDesc=" + (string.IsNullOrWhiteSpace(shortDesc) ? "(empty)" : shortDesc)
+                + (string.IsNullOrEmpty(failReason) ? string.Empty : " probeFail=" + failReason)
+                + " { " + line.ToString() + "}");
             }
             catch (System.Exception ex)
             {
@@ -1477,6 +1531,15 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSNOTABBATCH support collect 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
+
+      // 중복 SupportName은 같은 서포트가 여러 솔리드로 잡혔다는 신호다(도면 중복 생성 위험).
+      System.Text.StringBuilder dupSummary = new System.Text.StringBuilder();
+      foreach (System.Collections.Generic.KeyValuePair<string, int> kv in nameCounts)
+      { if (kv.Value > 1) { if (dupSummary.Length > 0) dupSummary.Append(","); dupSummary.Append(kv.Key).Append("=").Append(kv.Value); } }
+      PlantOrthoView.FileDiag("PFSNOTABBATCH probe-summary selected=" + selectedIds.Length
+        + " supportClass=" + supportClassCount + " nonSupport=" + nonSupport
+        + " candidates=" + supportIds.Count + " probeFailed=" + probeFailed
+        + " duplicateName{" + dupSummary.ToString() + "}");
 
       return supportIds;
     }
@@ -1509,6 +1572,44 @@ namespace PlantFlow_Support
       }
 
       return fallback;
+    }
+
+    // 일괄추출 계측용 속성 묶음. 인덱스 고정(values[1] 등)은 조회 목록이 바뀌면 의미가 바뀌므로
+    // 반드시 이름→값으로 매핑해 쓴다(cycle103 자문).
+    private static readonly string[] NotabBatchProbeNames = new string[]
+    { "SupportName", "ShortDescription", "Tag", "TagName", "PartNumber", "SupportDetail", "Description" };
+
+    // 선택 항목의 Plant 속성을 이름 기준으로 읽는다. 실패는 예외를 삼키지 않고 사유를 돌려준다.
+    private System.Collections.Generic.Dictionary<string, string> GetNotabBatchProbeProperties(ObjectId id, out string failReason)
+    {
+      failReason = string.Empty;
+      System.Collections.Generic.Dictionary<string, string> map =
+        new System.Collections.Generic.Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+      try
+      {
+        PSUtil ps = Commands.PSUtil;
+        if (ps == null) ps = new PSUtil();
+        if (ps == null || ps.dl_manager == null)
+        {
+          failReason = "dl_manager-null";
+          return map;
+        }
+        System.Collections.Specialized.StringCollection names = new System.Collections.Specialized.StringCollection();
+        for (int i = 0; i < NotabBatchProbeNames.Length; i++) names.Add(NotabBatchProbeNames[i]);
+        System.Collections.Specialized.StringCollection values = ps.dl_manager.GetProperties(id, names, true);
+        if (values == null)
+        {
+          failReason = "values-null";
+          return map;
+        }
+        for (int i = 0; i < NotabBatchProbeNames.Length; i++)
+          map[NotabBatchProbeNames[i]] = i < values.Count ? (values[i] ?? string.Empty) : string.Empty;
+      }
+      catch (System.Exception ex)
+      {
+        failReason = ex.GetType().Name + ":" + ex.Message;
+      }
+      return map;
     }
 
     private bool RunNotabDetailPipeline(Document doc, ObjectId[] selectedIds)
