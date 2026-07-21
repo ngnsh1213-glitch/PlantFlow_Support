@@ -1,5 +1,34 @@
 ﻿# SESSION — 현재 작업 상태
 
+## ★ PERSPECTIVE 가드 재설계 — **종결** (cycle 103, 2026-07-22, 라이브 PASS)
+
+무탭 추출 직후 원본 뷰가 Parallel→Perspective로 뒤집히던 간헐 재현(리본 WPF 바인딩發)을 **발원 기반 가드**로 해소. 사용자 판정 "화면 이상없음" + 로그 확정.
+
+### 확정 원인 (재측정 불요)
+- 리본 flush는 추출 자체가 아니라 **추출 종료 +3~5초**에 `RibbonListButton.set_Current → BindingExpression.UpdateSource → SETVAR`로 `PERSPECTIVE=1` 역기입. 우리 코드는 스택에 없음(내장 리본).
+- 지난 재현의 정체 = **구 가드의 8초 창 마진 부족(+2초) 레이스**. 느린 실행에서만 창 밖으로 빠져 화면에 남았다.
+
+### 집도 내용 (`83d0a3e`, Codex 집도 → Claude 빌드 재확인)
+- **1회 자폭 제거** — 첫 교정 후 무장 해제하던 것을 없애 늦게/반복 오는 flush를 계속 잡는다.
+- **어셈블리 기반 3분류** `ClassifyPerspOrigin`: 스택 프레임의 `Assembly=="AdWindows"` 또는 네임스페이스 `Autodesk.Windows` → `strong-ribbon`. 그 외 `CMDNAMES`에 VIEWCUBE 있으면 `native-command`, 나머지 `unknown`. (부분 문자열 매칭 폐기 — JIT 인라이닝·버전 취약)
+- **strong-ribbon일 때만 복원.** native-command·unknown은 **관망 로그만**.
+- **백스톱 60초 + generation + 대상 문서 스코프** — 추출마다 gen +1, 이전 명령구독 해제(누수 0), 활성 문서 일치할 때만 복원.
+- **VIEWCUBEACTION 미개입 + 계측** — `CommandWillStart/Ended`로 시작·종료 로그만. (자문 분기에서 Codex 채택: 강제 복원은 뷰큐브 내비게이션과 경쟁 위험)
+
+### 라이브 로그 (2026-07-22 08:35)
+```
+30.815  PERSPECTIVE → 1  CMDNAMES=SETVAR  origin=strongribbon  generation=3
+30.830  persp guard 교정 1 -> 0  origin=strong-ribbon
+31.348  persp guard Regen 완료
+```
+flip→교정 **15ms** = 체감 flicker 없음. 이번 실행엔 VIEWCUBEACTION 이벤트 자체가 없었다(사용자 미조작) → 지난 29.88형은 **사용자 뷰큐브 조작 유발 과도상태**일 개연성 강화(자동으론 안 나타남).
+
+### 미결/보류
+- **Phase 3(근본치료 스파이크) 보류**: 추출 종료 시 `ComponentManager.Ribbon` 강제 동기화로 flush 사전차단(Gemini 보조 제안). 사후 가드가 15ms 내 교정해 flicker 없고, 내장 리본 조작 위험이 커서 **불요 판정**. 재개 조건 = flicker가 체감되거나 VIEWCUBE 경로가 리본 우회로 확인될 때.
+- 계획서 `.plans/plan_persp_guard_20260722.md`, 핸드오프 cycle 103, REPORT completed.
+
+---
+
 ## ★★★다음 세션 첫 할 일 — 라이브 검증 4건 (2026-07-21 후반 작업분)
 
 **오늘 후반 작업은 전부 "빌드 통과"까지다. 라이브 검증이 하나도 안 됐고 파급이 크다.**

@@ -7,6 +7,14 @@
 - cycle93: HANTEC 클래스·파일·호출을 StandardSupport로 개명하고, PFS STANDARD/기존 HANTEC을 인식하는 단일 DesignStd 판정과 로그를 추가했다. 오쏘 주석 생성 전에 BOM을 초기화해 StandardName 누락을 해소했으며, 무탭 BOM은 실제 모델 DesignStd와 빈 값 폴백을 사용한다. — 2026-07-20
 
 ### Fixed
+- PERSPECTIVE 가드 발원 기반 재설계(cycle103, `83d0a3e`): 무탭 추출 직후 원본 뷰가 Parallel→Perspective로 뒤집히던
+  간헐 재현을 해소. 원인은 추출 종료 +3~5초에 AutoCAD 내장 리본 WPF 바인딩(`RibbonListButton.set_Current → SETVAR`)이
+  `PERSPECTIVE=1`을 역기입하는 것이며, 구 가드의 8초 창 마진 부족(+2초)이 간헐 재현의 정체였다.
+  ①**어셈블리 기반 3분류**(`ClassifyPerspOrigin`): 스택 프레임의 `AdWindows` 어셈블리/`Autodesk.Windows` 네임스페이스면
+  strong-ribbon → 복원, 그 외 VIEWCUBE 포함 시 native-command, 나머지 unknown → 관망(부분 문자열 매칭은 JIT 인라이닝·버전 취약이라 폐기).
+  ②**1회 자폭 제거** — 늦게/반복 오는 flush를 백스톱 60초 내 계속 잡는다. ③**generation+대상 문서 스코프** — 추출마다 재무장,
+  명령구독 만료·문서전환 시 해제(누수 0). ④**VIEWCUBEACTION 미개입**(`CommandWillStart/Ended` 계측만) — 강제 복원은
+  뷰큐브 내비게이션과 경쟁 위험(§9 자문 Codex 채택). 라이브 PASS: flip→교정 15ms로 체감 flicker 없음. env `PFS_PERSP_GUARD_SEC`(기본 8→60) — 2026-07-22
 - 무탭 라인넘버 콜아웃만 꺾임 1회 리더로 복원(`152dc46`): cycle100에서 직접 콜아웃 공통 경로를 1자로 통일하며
   파이프까지 직선이 됐던 것을 되돌렸다. `TryPlace`에 `tailLength`를 추가해 >0이면 문자 접속점에서 앵커 쪽으로
   물러난 점을 꺾임점(`p1`)으로 잡아 마지막 구간이 수평 꼬리가 된다(0이면 `p1==p2` 직선, 유볼트·부재는 0).

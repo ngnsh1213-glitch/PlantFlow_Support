@@ -20,7 +20,9 @@ _완료 항목은 여기서 지우고 `CHANGELOG.md`로 옮긴다._
 - [x] 초기화면 zoom extents: reopen 오버올 뷰포트(활성화前 Number=-1이라 dims 판별) 뷰를 페이퍼 extents로. PASS
 - [x] dev 완전 자동화: dev_test.bat=SECURELOAD0+NETLOAD+PFSNOTABTEST(태그 자동선택), Claude가 C:\Temp\pfs_diag.log 직접 read
 - [x] 무탭 자동포함 접촉판정(마진 크기비례→고정150, 73b9974). 이웃 서포트 배제
-- [x] 무탭 perspective flip 방어 가드(리본 바인딩發, cycle42 6e01a9b). 계측=PFSPERSPWATCH+스택
+- [x] 무탭 perspective flip 방어 가드(리본 바인딩發). cycle42 스코프가드(6e01a9b) → **cycle103 발원 기반 재설계(`83d0a3e`)로 종결**:
+      어셈블리(AdWindows/Autodesk.Windows) 3분류로 strong-ribbon만 복원, 자폭 제거, 백스톱 60초+generation/문서 스코프,
+      VIEWCUBEACTION 미개입. 라이브 PASS(2026-07-22, flip→교정 15ms). 계측=PFSPERSPWATCH+스택 → CHANGELOG
 - [x] 무탭 뷰포트 와이어프레임 기본화(Phase1, 999e1f9). Hidden=PFS_NOTAB_USE_HIDDEN opt-in
 - [x] 무탭 서포트 영역 클립+동적피팅(cycle43, f5473d8): Solid3d Boolean로 관통 파이프 길이 트림+콘텐츠 피팅
 - [x] 무탭 held-pipe 선택=서포트 BOP 표고 매칭(cycle44~46, b0e5c71): 같은 라인 평행 배관 중 잡는 배관만. 라이브 PASS
