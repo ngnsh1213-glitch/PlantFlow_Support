@@ -16,7 +16,7 @@ rem --- BOM spike (measurement only; logs BOMs rows, no output change). Set 0 to
 set "PFS_NOTAB_BOM_SPIKE=1"
 
 rem --- auto-extract tags (comma-separated). PFSNOTABTEST loops each. Edit to change types. ---
-set "PFS_NOTAB_TEST_TAG=RC1-001,RC2-001,RC3-001"
+set "PFS_NOTAB_TEST_TAG=GD1-001,GD2-001,GD3-001"
 
 rem --- notab callout text position offsets (paper mm, +X=right +Y=up, range +-2000) ---
 rem     Edit these numbers and re-run (no code change). Inherited by AutoCAD via child process env.

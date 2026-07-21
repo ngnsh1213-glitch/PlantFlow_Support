@@ -5,8 +5,12 @@ _완료 항목은 여기서 지우고 `CHANGELOG.md`로 옮긴다._
 ## ★무탭 엔진 (현재 트랙, 2026-07-14)
 - [x] 밸룬·콜아웃 배치 종결(cycle97~102, `947663e`). 라이브 3회 skip 0건, 사용자 판정 이상없음 → CHANGELOG
 - [x] 라인넘버 콜아웃만 꺾임 1회 리더로 복원(`152dc46`). 유볼트 직선 유지, skip 0건 → CHANGELOG
-- [ ] 무탭 타 타입 회귀 확인: `PFSNOTABBATCH` 전량 추출로 GD/FS 계열에서 밸룬·콜아웃 규칙이
-      깨지지 않는지 확인. 특히 부재 밸룬의 F1/F2 판정과 세로재 포트(S2) 전제가 RC 전용인지 점검.
+- [ ] **★다음 작업 — 무탭 타 타입 회귀 확인 (치수 포함)**: `PFSNOTABBATCH` 전량 추출로
+      GD/FS 계열에서 치수·스케일·배관참조(구 N3 全타입 테스트)와 밸룬·콜아웃 규칙이 깨지지 않는지 확인.
+      **RC 전제 3건이 타 타입에서 성립하는지가 핵심**: ①F1=가로재/F2=세로재 매핑 ②세로재 좌표의 S2 포트 전제
+      ③`F2` 파라미터×`vScale`로 기둥 상하단 재구성. 엣지(배관 없는 서포트·특이 형상)도 함께.
+      판정 키: `member-geometry-unavailable`(전제 붕괴) / `member-end-no-space`(공간 부족) /
+      `callout-skip` / `member-spike`의 솔리드 구성(RC는 `7A` 병합이었다).
 - [x] 무탭 Main 라이브 PASS (은선 정투영, cycle 30)
 - [x] RECOVER 해결 (H5=sourceDb 조기 Dispose, cycle 37, 커밋 d7897e5)
 - [x] 진단 코드 cleanup (cycle 39): pnp-purge/plotter-normalize/keyscan/wblock-fallback 제거, 직접 SaveAs 원복
@@ -22,9 +26,10 @@ _완료 항목은 여기서 지우고 `CHANGELOG.md`로 옮긴다._
 - [x] 무탭 held-pipe 선택=서포트 BOP 표고 매칭(cycle44~46, b0e5c71): 같은 라인 평행 배관 중 잡는 배관만. 라이브 PASS
 - [x] 무탭 스케일 표준화(cycle47, cfa1fb7): 동적→표준배율 라운딩+주석여백. PFS_NOTAB_TARGET_FILL 0.4
 - [x] **N3 치수 핵심(cycle47~49)**: 투영(WCS→paper)+가로총폭/pipeCenter분할/세로 제도+배관참조(분할=실배관중심X, 상/하단=배관근접). 라이브 PASS. 계획=plan_pfs_notab_n3_20260714.md
-- [ ] **N3 全타입 테스트(사용자 진행 중)**: 모든 서포트 타입서 치수/스케일/배관참조 검증. 엣지(배관없는 서포트·특이형상) 대응
 - [ ] **[별도 트랙] 무탭 2D 평면화 결정**: 뷰포트 유지 vs 진짜 2D 선요소(클립된 solid에 FLATSHOT). 재검토
-- [ ] **N4(밸룬/라인번호·BOP 콜아웃/BOM)**: 기존 AnnotateViewport·SPInfo.AttachmentList 재사용 -> N5(3부채 코드 소멸)
+- [x] **N4(밸룬/라인번호·BOP 콜아웃/BOM)** 완료(cycle95~102). 단 "기존 AnnotateViewport 재사용"은 **기각**됐다 —
+      오쏘에는 부재 밸룬(`F*`) 분기가 애초에 없어 이식이 불가했고 신규 설계로 진행했다. → CHANGELOG
+      _(N3 全타입 테스트 항목은 위 8행 "타 타입 회귀 확인"과 동일 작업이라 통합)_
 
 ## 💡 아이디어 풀 (미확정, 착수 전 취사선택 — 2026-07-20 수집)
 _확정 트랙이 아니다. 사양이 아니라 후보다. 구현 착수 시점에 걸러내고, 채택된 것만 위 트랙으로 승격한다. 기각 시 지우지 말고 기각 사유를 한 줄 남긴다._
