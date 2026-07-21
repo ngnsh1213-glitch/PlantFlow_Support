@@ -1,0 +1,543 @@
+﻿using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.ApplicationServices.Core;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
+using Autodesk.AutoCAD.Runtime;
+using Autodesk.AutoCAD.Windows;
+using Autodesk.ProcessPower.PnP3dObjects;
+
+#nullable disable
+namespace PlantFlow_Support
+{
+  // Commands 부분 클래스: EXPORTLAYOUT 평면화 경로와 뷰 지오메트리 카운트 진단.
+  // 무탭 엔진이 평면화를 대체하는 중이므로 여기는 유지보수 최소 상태로 둔다.
+  public partial class Commands
+  {
+    [CommandMethod("PFSCOUNTVIEW")]
+    public void CountViewCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      var baseline = s_viewbaseBaseline ?? new System.Collections.Generic.HashSet<ObjectId>();
+      int line = 0;
+      int circle = 0;
+      int arc = 0;
+      int viewrepLine = 0;
+      int viewrepCircle = 0;
+      int viewrepArc = 0;
+      var viewTypes = new System.Collections.Generic.List<string>();
+      using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+      {
+        ObjectId layoutBtrId = this.GetLayoutBlockTableRecordId(doc.Database, tr, "Layout1");
+        if (layoutBtrId.IsNull)
+        {
+          PlantOrthoView.FileDiag("PFSCOUNTVIEW: Layout1 없음");
+          ed.WriteMessage("\nPFSCOUNTVIEW: Layout1 없음");
+          tr.Commit();
+          return;
+        }
+
+        BlockTableRecord layoutBtr = tr.GetObject(layoutBtrId, OpenMode.ForRead) as BlockTableRecord;
+        if (layoutBtr != null)
+        {
+          foreach (ObjectId id in layoutBtr)
+          {
+            if (baseline.Contains(id))
+              continue;
+
+            DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
+            if (obj == null)
+              continue;
+
+            viewTypes.Add(obj.GetType().Name);
+            Entity entity = obj as Entity;
+            if (entity == null)
+              continue;
+
+            if (entity.GetType().Name == "ViewBorder")
+            {
+              if (this.TryCountViewRepGeometry(tr, entity, ref viewrepLine, ref viewrepCircle, ref viewrepArc))
+                continue;
+            }
+
+            this.CountExplodedGeometry(tr, entity, ref line, ref circle, ref arc);
+          }
+        }
+        tr.Commit();
+      }
+
+      string types = viewTypes.Count == 0 ? "none" : string.Join(" ", viewTypes.ToArray()).Trim();
+      PlantOrthoView.FileDiag("PFSCOUNTVIEW newTypes=[" + types + "] explode Line=" + line + " Circle=" + circle + " Arc=" + arc + " viewrep Line=" + viewrepLine + " Circle=" + viewrepCircle + " Arc=" + viewrepArc);
+      ed.WriteMessage("\nPFSCOUNTVIEW types=[" + types + "] Line=" + line + " Circle=" + circle + " Arc=" + arc + " viewrep Line=" + viewrepLine + " Circle=" + viewrepCircle + " Arc=" + viewrepArc);
+    }
+
+    private bool TryCountViewRepGeometry(Transaction tr, Entity viewBorder, ref int line, ref int circle, ref int arc)
+    {
+      if (tr == null || viewBorder == null)
+        return false;
+
+      try
+      {
+        System.Reflection.PropertyInfo property = viewBorder.GetType().GetProperty("BlockId");
+        if (property == null)
+        {
+          PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep BlockId property 없음 type=" + viewBorder.GetType().FullName);
+          return false;
+        }
+
+        object value = property.GetValue(viewBorder, null);
+        if (!(value is ObjectId))
+        {
+          PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep BlockId type mismatch=" + (value == null ? "null" : value.GetType().FullName));
+          return false;
+        }
+
+        ObjectId blockId = (ObjectId)value;
+        if (blockId.IsNull)
+        {
+          PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep BlockId null");
+          return true;
+        }
+
+        DBObject blockObj = tr.GetObject(blockId, OpenMode.ForRead, false);
+        PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep BlockId resolves to " + (blockObj == null ? "null" : blockObj.GetType().FullName));
+
+        BlockReference br = blockObj as BlockReference;
+        if (br != null)
+        {
+          this.CountExplodedGeometry(tr, br, ref line, ref circle, ref arc);
+          try
+          {
+            Extents3d extents = br.GeometricExtents;
+            PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep(BRef) tf=" + br.BlockTransform + " extents=" + extents.MinPoint + "~" + extents.MaxPoint);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep extents 예외: " + ex.GetType().Name + ": " + ex.Message);
+          }
+          return true;
+        }
+
+        BlockTableRecord btr = blockObj as BlockTableRecord;
+        if (btr != null)
+        {
+          int members = 0;
+          foreach (ObjectId gid in btr)
+          {
+            Entity geometry = tr.GetObject(gid, OpenMode.ForRead, false) as Entity;
+            if (geometry == null)
+              continue;
+
+            this.CountExplodedGeometry(tr, geometry, ref line, ref circle, ref arc);
+            members++;
+          }
+          PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep(BTR) name=" + btr.Name + " members=" + members);
+          return true;
+        }
+
+        PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep BlockId 미지원 타입");
+        return true;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSCOUNTVIEW viewrep 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private ObjectId GetLayoutBlockTableRecordId(Database db, Transaction tr, string layoutName)
+    {
+      if (db == null || tr == null || string.IsNullOrEmpty(layoutName))
+        return ObjectId.Null;
+
+      DBDictionary layouts = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead) as DBDictionary;
+      if (layouts == null || !layouts.Contains(layoutName))
+        return ObjectId.Null;
+
+      Layout layout = tr.GetObject(layouts.GetAt(layoutName), OpenMode.ForRead) as Layout;
+      return layout == null ? ObjectId.Null : layout.BlockTableRecordId;
+    }
+
+    private void SnapshotBlockTableRecordIds(Transaction tr, ObjectId btrId, System.Collections.Generic.HashSet<ObjectId> ids)
+    {
+      if (tr == null || btrId.IsNull || ids == null)
+        return;
+
+      BlockTableRecord btr = tr.GetObject(btrId, OpenMode.ForRead) as BlockTableRecord;
+      if (btr == null)
+        return;
+
+      foreach (ObjectId id in btr)
+        ids.Add(id);
+    }
+
+    private void CountExplodedGeometry(Transaction tr, Entity entity, ref int line, ref int circle, ref int arc)
+    {
+      if (tr == null || entity == null)
+        return;
+
+      if (entity is Line)
+      {
+        line++;
+        return;
+      }
+      if (entity is Circle)
+      {
+        circle++;
+        return;
+      }
+      if (entity is Arc)
+      {
+        arc++;
+        return;
+      }
+
+      DBObjectCollection exploded = new DBObjectCollection();
+      try
+      {
+        entity.Explode(exploded);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSCOUNTVIEW explode 예외 type=" + entity.GetType().Name + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      if (exploded.Count > 0)
+      {
+        foreach (DBObject child in exploded)
+        {
+          Entity childEntity = child as Entity;
+          if (childEntity != null)
+            this.CountExplodedGeometry(tr, childEntity, ref line, ref circle, ref arc);
+          child.Dispose();
+        }
+        return;
+      }
+
+      BlockReference br = entity as BlockReference;
+      if (br == null || br.BlockTableRecord.IsNull)
+        return;
+
+      BlockTableRecord def = tr.GetObject(br.BlockTableRecord, OpenMode.ForRead) as BlockTableRecord;
+      if (def == null)
+        return;
+
+      foreach (ObjectId childId in def)
+      {
+        Entity childEntity = tr.GetObject(childId, OpenMode.ForRead, false) as Entity;
+        if (childEntity != null)
+          this.CountExplodedGeometry(tr, childEntity, ref line, ref circle, ref arc);
+      }
+    }
+
+    [CommandMethod("PFSEXPORTLAYOUT")]
+    public void ExportLayoutCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      try
+      {
+        string directory = System.IO.Path.GetDirectoryName(ExportLayoutPath);
+        if (!string.IsNullOrEmpty(directory) && !System.IO.Directory.Exists(directory))
+          System.IO.Directory.CreateDirectory(directory);
+        if (System.IO.File.Exists(ExportLayoutPath))
+          System.IO.File.Delete(ExportLayoutPath);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSEXPORTLAYOUT prepare 예외: " + ex.GetType().Name + ": " + ex.Message);
+        ed.WriteMessage("\nPFSEXPORTLAYOUT prepare error: " + ex.GetType().Name + ": " + ex.Message);
+        return;
+      }
+
+      doc.SendStringToExecute("_.FILEDIA\n0\n_.EXPORTLAYOUT\n" + ExportLayoutPath + "\n_.FILEDIA\n1\n", true, false, false);
+      PlantOrthoView.FileDiag("PFSEXPORTLAYOUT queued -> " + ExportLayoutPath);
+      ed.WriteMessage("\nPFSEXPORTLAYOUT queued -> " + ExportLayoutPath);
+    }
+
+    [CommandMethod("PFSREADEXPORT")]
+    public void ReadExportCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      Editor ed = doc == null ? null : doc.Editor;
+      int line = 0;
+      int circle = 0;
+      int arc = 0;
+      int members = 0;
+      string source = "none";
+      Database targetDb = null;
+
+      try
+      {
+        string want = System.IO.Path.GetFullPath(ExportLayoutPath);
+        foreach (Document exportDoc in Application.DocumentManager)
+        {
+          string docName = exportDoc.Name;
+          if (!string.IsNullOrEmpty(docName) && string.Equals(System.IO.Path.GetFullPath(docName), want, System.StringComparison.OrdinalIgnoreCase))
+          {
+            targetDb = exportDoc.Database;
+            source = "open-doc";
+            break;
+          }
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSREADEXPORT doc-scan 예외: " + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      Database sideDb = null;
+      try
+      {
+        if (targetDb == null)
+        {
+          if (!System.IO.File.Exists(ExportLayoutPath))
+          {
+            PlantOrthoView.FileDiag("PFSREADEXPORT: export 파일 없음 " + ExportLayoutPath);
+            ed?.WriteMessage("\nPFSREADEXPORT: export 파일 없음 " + ExportLayoutPath);
+            return;
+          }
+
+          string directory = System.IO.Path.GetDirectoryName(ExportLayoutPath);
+          string copyPath = System.IO.Path.Combine(directory, "pfs_vb_export_copy.dwg");
+          try
+          {
+            if (System.IO.File.Exists(copyPath))
+              System.IO.File.Delete(copyPath);
+          }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSREADEXPORT copy cleanup 예외: " + ex.GetType().Name + ": " + ex.Message);
+          }
+
+          System.IO.File.Copy(ExportLayoutPath, copyPath, true);
+          sideDb = new Database(false, true);
+          sideDb.ReadDwgFile(copyPath, System.IO.FileShare.Read, true, null);
+          targetDb = sideDb;
+          source = "file-copy";
+        }
+
+        using (Transaction tr = targetDb.TransactionManager.StartTransaction())
+        {
+          BlockTable bt = tr.GetObject(targetDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          if (bt == null || !bt.Has(BlockTableRecord.ModelSpace))
+          {
+            PlantOrthoView.FileDiag("PFSREADEXPORT: ModelSpace 없음 source=" + source);
+            tr.Commit();
+            return;
+          }
+
+          BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+          if (ms != null)
+          {
+            foreach (ObjectId id in ms)
+            {
+              Entity entity = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+              if (entity == null)
+                continue;
+
+              members++;
+              this.CountExplodedGeometry(tr, entity, ref line, ref circle, ref arc);
+            }
+          }
+          tr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSREADEXPORT 예외: " + ex.GetType().Name + ": " + ex.Message + " source=" + source);
+        ed?.WriteMessage("\nPFSREADEXPORT error: " + ex.GetType().Name + ": " + ex.Message);
+        return;
+      }
+      finally
+      {
+        if (sideDb != null)
+          sideDb.Dispose();
+      }
+
+      PlantOrthoView.FileDiag("PFSREADEXPORT exp Line=" + line + " Circle=" + circle + " Arc=" + arc + " members=" + members + " source=" + source);
+      ed?.WriteMessage("\nPFSREADEXPORT exp Line=" + line + " Circle=" + circle + " Arc=" + arc + " members=" + members + " source=" + source);
+    }
+
+    [CommandMethod("PFSPLACEEXPORT")]
+    public void PlaceExportCommand()
+    {
+      Document doc = Application.DocumentManager.MdiActiveDocument;
+      if (doc == null)
+        return;
+
+      Editor ed = doc.Editor;
+      Database targetDb = doc.Database;
+      int cloned = 0;
+      string source = "none";
+      Database sourceDb = null;
+      Database sideDb = null;
+
+      try
+      {
+        if (!System.IO.File.Exists(ExportLayoutPath))
+        {
+          PlantOrthoView.FileDiag("PFSPLACEEXPORT: export 파일 없음 " + ExportLayoutPath);
+          ed.WriteMessage("\nPFSPLACEEXPORT: export 파일 없음 " + ExportLayoutPath);
+          return;
+        }
+
+        try
+        {
+          sideDb = new Database(false, true);
+          sideDb.ReadDwgFile(ExportLayoutPath, System.IO.FileShare.Read, true, null);
+          sourceDb = sideDb;
+          source = "side-direct";
+        }
+        catch (System.Exception ex1)
+        {
+          PlantOrthoView.FileDiag("PFSPLACEEXPORT side-direct 실패: " + ex1.GetType().Name + ": " + ex1.Message);
+          if (sideDb != null)
+          {
+            sideDb.Dispose();
+            sideDb = null;
+          }
+
+          try
+          {
+            string dir = System.IO.Path.GetDirectoryName(ExportLayoutPath);
+            string copyPath = System.IO.Path.Combine(dir, "pfs_vb_export_copy.dwg");
+            try
+            {
+              if (System.IO.File.Exists(copyPath))
+                System.IO.File.Delete(copyPath);
+            }
+            catch (System.Exception cex)
+            {
+              PlantOrthoView.FileDiag("PFSPLACEEXPORT copy cleanup 예외: " + cex.GetType().Name + ": " + cex.Message);
+            }
+
+            System.IO.File.Copy(ExportLayoutPath, copyPath, true);
+            sideDb = new Database(false, true);
+            sideDb.ReadDwgFile(copyPath, System.IO.FileShare.Read, true, null);
+            sourceDb = sideDb;
+            source = "file-copy";
+          }
+          catch (System.Exception ex2)
+          {
+            PlantOrthoView.FileDiag("PFSPLACEEXPORT file-copy 실패: " + ex2.GetType().Name + ": " + ex2.Message);
+            if (sideDb != null)
+            {
+              sideDb.Dispose();
+              sideDb = null;
+            }
+
+            string want = System.IO.Path.GetFullPath(ExportLayoutPath);
+            foreach (Document exportDoc in Application.DocumentManager)
+            {
+              string dn = exportDoc.Name;
+              if (!string.IsNullOrEmpty(dn) && string.Equals(System.IO.Path.GetFullPath(dn), want, System.StringComparison.OrdinalIgnoreCase))
+              {
+                sourceDb = exportDoc.Database;
+                source = "open-doc";
+                break;
+              }
+            }
+          }
+        }
+
+        if (sourceDb == null)
+        {
+          PlantOrthoView.FileDiag("PFSPLACEEXPORT: 소스 DB 확보 실패");
+          ed.WriteMessage("\nPFSPLACEEXPORT: 소스 DB 확보 실패");
+          return;
+        }
+
+        ObjectIdCollection ids = new ObjectIdCollection();
+        using (Transaction str = sourceDb.TransactionManager.StartTransaction())
+        {
+          BlockTable sbt = str.GetObject(sourceDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          if (sbt == null || !sbt.Has(BlockTableRecord.ModelSpace))
+          {
+            PlantOrthoView.FileDiag("PFSPLACEEXPORT: side ModelSpace 없음 source=" + source);
+            str.Commit();
+            return;
+          }
+
+          BlockTableRecord sms = str.GetObject(sbt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+          if (sms != null)
+          {
+            foreach (ObjectId id in sms)
+              ids.Add(id);
+          }
+          str.Commit();
+        }
+
+        PlantOrthoView.FileDiag("PFSPLACEEXPORT side modelspace ids=" + ids.Count + " source=" + source);
+        if (ids.Count == 0)
+        {
+          PlantOrthoView.FileDiag("PFSPLACEEXPORT: side modelspace 비어있음 source=" + source);
+          ed.WriteMessage("\nPFSPLACEEXPORT: side modelspace 비어있음");
+          return;
+        }
+
+        using (DocumentLock dlk = doc.LockDocument())
+        using (Transaction ttr = targetDb.TransactionManager.StartTransaction())
+        {
+          BlockTable tbt = ttr.GetObject(targetDb.BlockTableId, OpenMode.ForRead) as BlockTable;
+          if (tbt == null || !tbt.Has(BlockTableRecord.ModelSpace))
+          {
+            PlantOrthoView.FileDiag("PFSPLACEEXPORT: target ModelSpace 없음");
+            ttr.Commit();
+            return;
+          }
+
+          ObjectId msId = tbt[BlockTableRecord.ModelSpace];
+          ObjectId flatLayerId = this.EnsureFlattenLayer(targetDb, ttr);
+          Database oldWorking = HostApplicationServices.WorkingDatabase;
+          IdMapping idMap = new IdMapping();
+          try
+          {
+            HostApplicationServices.WorkingDatabase = targetDb;
+            sourceDb.WblockCloneObjects(ids, msId, idMap, DuplicateRecordCloning.Replace, false);
+          }
+          finally
+          {
+            HostApplicationServices.WorkingDatabase = oldWorking;
+          }
+
+          foreach (IdPair pair in idMap)
+          {
+            if (!pair.IsPrimary || !pair.IsCloned)
+              continue;
+
+            Entity e = ttr.GetObject(pair.Value, OpenMode.ForWrite, false) as Entity;
+            if (e == null)
+              continue;
+
+            e.LayerId = flatLayerId;
+            cloned++;
+          }
+          ttr.Commit();
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSPLACEEXPORT 예외: " + ex.GetType().Name + ": " + ex.Message + " source=" + source);
+        ed.WriteMessage("\nPFSPLACEEXPORT error: " + ex.GetType().Name + ": " + ex.Message);
+        return;
+      }
+      finally
+      {
+        if (sideDb != null)
+          sideDb.Dispose();
+      }
+
+      PlantOrthoView.FileDiag("PFSPLACEEXPORT cloned=" + cloned + " layer=PFS_ORTHO_FLATTEN source=" + source);
+      ed.WriteMessage("\nPFSPLACEEXPORT cloned=" + cloned + " source=" + source);
+    }
+
+  }
+}
