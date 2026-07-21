@@ -45,8 +45,10 @@ namespace PlantFlow_Support
         new Point3d(System.Math.Max(supportExt.MaxPoint.X, anchor.X), System.Math.Max(supportExt.MaxPoint.Y, anchor.Y), 0.0));
     }
 
+    // tailLength > 0 이면 꺾임 1회 리더(경사 + 수평 꼬리)로 배치한다.
+    // p1=꺾임점(elbow), p2=문자 접속점. 0이면 p1=p2=문자 접속점인 직선 1개다.
     public bool TryPlace(Point3d leaderFrom, RequiredSide requiredSide, double width, double height, double gap, double minDx,
-      string ownerTag, bool preferDown, out Point3d textCenter, out Point3d p1, out Point3d p2, out bool textLeftOfAnchor, out string diagnostic)
+      string ownerTag, bool preferDown, double tailLength, out Point3d textCenter, out Point3d p1, out Point3d p2, out bool textLeftOfAnchor, out string diagnostic)
     {
       double startRadius = System.Math.Max(15.0, System.Math.Max(width, height) / 2.0 + gap);
       double maxRadius = System.Math.Max(startRadius, System.Math.Sqrt(System.Math.Pow(System.Math.Max(leaderFrom.X - _minX, _maxX - leaderFrom.X), 2.0) + System.Math.Pow(System.Math.Max(leaderFrom.Y - _minY, _maxY - leaderFrom.Y), 2.0)) + width + height);
@@ -76,10 +78,14 @@ namespace PlantFlow_Support
             Extents3d box = new Extents3d(new Point3d(boxLeft, y - height / 2.0, 0.0), new Point3d(boxLeft + width, y + height / 2.0, 0.0));
             if (OutOfBounds(box)) { rejectOob++; continue; }
             // 문자 상자의 리더 접속점은 좌·우 변의 중단이다. 검사, 작도, 등록이 같은 점을 쓴다.
-            Point3d candP1 = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, y, 0.0);
-            Point3d candP2 = new Point3d(textLeft ? box.MinPoint.X : box.MaxPoint.X, y, 0.0);
+            Point3d candTextEdge = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, y, 0.0);
+            // 꺾임 리더는 문자 접속점에서 앵커 쪽으로 tailLength만큼 물러난 곳이 꺾임점이다.
+            // 그 결과 마지막 구간이 수평 꼬리가 된다. 직선이면 두 점이 같다.
+            Point3d candElbow = tailLength > 1e-9
+              ? new Point3d(textLeft ? candTextEdge.X + tailLength : candTextEdge.X - tailLength, y, 0.0)
+              : candTextEdge;
             string reject;
-            if (!Free(box, leaderFrom, candP1, candP1, leaderScope, ownerTag, out reject))
+            if (!Free(box, leaderFrom, candElbow, candTextEdge, leaderScope, ownerTag, out reject))
             {
               if (reject == "box") rejectBox++;
               else if (reject.StartsWith("extLeader", System.StringComparison.Ordinal))
@@ -108,10 +114,10 @@ namespace PlantFlow_Support
             {
               found = true;
               bestCost = cost;
-              bestCenter = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, y, 0.0);
+              bestCenter = candTextEdge;
               bestLeft = textLeft;
-              bestP1 = candP1;
-              bestP2 = candP1;
+              bestP1 = candElbow;
+              bestP2 = candTextEdge;
               bestDiag = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " angleW=" + angleW.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " cost=" + cost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
             }
           }
@@ -5498,6 +5504,7 @@ namespace PlantFlow_Support
         double actualWidth = System.Math.Max(1.0, mt.ActualWidth);
         double actualHeight = System.Math.Max(1.0, mt.ActualHeight);
         Point3d near = Point3d.Origin, p1 = Point3d.Origin, p2 = Point3d.Origin;
+        double tailLength = 0.0;
         bool left = requiredSide == NotabCalloutPlacer.RequiredSide.Left;
         string diagnostic = "FAIL";
         bool smartPlaced = false;
@@ -5515,8 +5522,10 @@ namespace PlantFlow_Support
         if (placer != null)
         {
           bool isPipeCallout = label == "pipe callout";
+          // 라인넘버(파이프)만 꺾임 1회. 유볼트·부재는 직선 1개를 유지한다(사용자 확정).
+          tailLength = isPipeCallout ? this.GetEnvDouble("PFS_NOTAB_PIPE_LEADER_TAIL", txt * 2.0, 0.0, 200.0) : 0.0;
           // 부재 콜아웃은 하단 선호(치수가 항상 상단·좌측에 놓인다). 라인넘버는 상하 자유.
-          smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, out near, out p1, out p2, out left, out diagnostic);
+          smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, tailLength, out near, out p1, out p2, out left, out diagnostic);
         }
         if (!smartPlaced)
         {
@@ -5528,14 +5537,17 @@ namespace PlantFlow_Support
         bool right = !left;
         double leftX = right ? System.Math.Max(near.X, leaderFrom.X + effectiveMinDx) : System.Math.Min(near.X, leaderFrom.X - effectiveMinDx) - actualWidth;
         double rightX = leftX + actualWidth;
-        // placer가 확정한 단일 종점을 그대로 사용해 충돌 모델과 작도를 일치시킨다.
-        double middleY = p1.Y;
-        double nearX = p1.X;
+        // placer가 확정한 정점을 그대로 사용해 충돌 모델과 작도를 일치시킨다.
+        // 직선이면 p1==p2, 꺾임이면 p1=꺾임점 / p2=문자 접속점이다.
+        double middleY = p2.Y;
+        double nearX = p2.X;
+        bool hasElbow = p1.DistanceTo(p2) > 1e-9;
         mt.Attachment = left ? AttachmentPoint.MiddleRight : AttachmentPoint.MiddleLeft;
         mt.Location = new Point3d(left ? rightX : leftX, middleY, 0.0);
 
         Leader leader = new Leader();
         leader.AppendVertex(leaderFrom);
+        if (hasElbow) leader.AppendVertex(p1);
         leader.AppendVertex(new Point3d(nearX, middleY, 0.0));
         leader.HasArrowHead = true;
         leader.Dimasz = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
@@ -5543,8 +5555,13 @@ namespace PlantFlow_Support
         leader.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)1);
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
-        if (placer != null) placer.Commit(leaderFrom, new Point3d(nearX, middleY, 0.0), near, actualWidth, actualHeight);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-draw designation=" + designation + " anchor=" + anchor + " leaderFrom=" + this.FormatPoint(leaderFrom) + " endX=" + this.FormatNumber(nearX) + " middleY=" + this.FormatNumber(middleY) + " effectiveMinDx=" + this.FormatNumber(effectiveMinDx) + " W=" + this.FormatNumber(actualWidth) + " H=" + this.FormatNumber(actualHeight) + " requiredSide=" + (requiredSide == NotabCalloutPlacer.RequiredSide.Left ? "left" : "right") + " sideSrc=" + sideSource + " referenceX=" + this.FormatNumber(anchor.X) + " viewportCenterX=" + this.FormatNumber(viewportCenterX) + " side=" + (right ? "right" : "left") + " sep=" + this.FormatNumber(right ? nearX - leaderFrom.X : leaderFrom.X - nearX) + " " + diagnostic);
+        // 등록도 작도와 같은 선분 구성을 쓴다. 꺾임이면 두 선분, 직선이면 한 선분.
+        if (placer != null)
+        {
+          if (hasElbow) placer.Commit(leaderFrom, p1, new Point3d(nearX, middleY, 0.0), near, actualWidth, actualHeight);
+          else placer.Commit(leaderFrom, new Point3d(nearX, middleY, 0.0), near, actualWidth, actualHeight);
+        }
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-draw designation=" + designation + " anchor=" + anchor + " leaderFrom=" + this.FormatPoint(leaderFrom) + " elbow=" + (hasElbow ? this.FormatPoint(p1) : "none") + " tail=" + this.FormatNumber(tailLength) + " endX=" + this.FormatNumber(nearX) + " middleY=" + this.FormatNumber(middleY) + " effectiveMinDx=" + this.FormatNumber(effectiveMinDx) + " W=" + this.FormatNumber(actualWidth) + " H=" + this.FormatNumber(actualHeight) + " requiredSide=" + (requiredSide == NotabCalloutPlacer.RequiredSide.Left ? "left" : "right") + " sideSrc=" + sideSource + " referenceX=" + this.FormatNumber(anchor.X) + " viewportCenterX=" + this.FormatNumber(viewportCenterX) + " side=" + (right ? "right" : "left") + " sep=" + this.FormatNumber(right ? nearX - leaderFrom.X : leaderFrom.X - nearX) + " " + diagnostic);
       }
       catch (System.Exception ex)
       {
