@@ -3,11 +3,12 @@ using Autodesk.AutoCAD.ApplicationServices.Core;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.ProcessPower.DataLinks;
 using Autodesk.ProcessPower.DataObjects;
+using ClosedXML.Excel;
 using Microsoft.CSharp.RuntimeBinder;
-using Excel = Microsoft.Office.Interop.Excel;
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -1702,43 +1703,58 @@ label_71:
       };
     }
 
+    // MTO 시트 헤더. 열 순서가 곧 to_excel_values의 열 순서다.
+    private static readonly string[] MtoHeaders = new string[]
+    { "Name", "Member", "Sub Member", "Member Type", "Profile", "Material", "Length (mm)", "Standard Type" };
+
+    // OpenXML(ClosedXML)로 직접 .xlsx를 만든다. 과거에는 Excel COM(CLSID 00024500)을 띄웠기 때문에
+    // 고객 PC에 데스크톱 Excel이 설치돼 있어야 했고, 예외 시 COM 객체가 해제되지 않아 Excel
+    // 프로세스가 유령으로 남을 수 있었다. PFO(BomExcelExporter)와 같은 규약으로 맞춘다.
     private void ExcelFormat(List<StringCollection> to_excel_values, string directory)
     {
-      // ISSUE: variable of a compiler-generated type
-      Excel.Application instance = (Excel.Application) Activator.CreateInstance(Marshal.GetTypeFromCLSID(new Guid("00024500-0000-0000-C000-000000000046")));
-      object obj = (object) Missing.Value;
-      // ISSUE: reference to a compiler-generated method
-      // ISSUE: variable of a compiler-generated type
-      Excel.Workbook o1 = instance.Workbooks.Add(obj);
-      // ISSUE: reference to a compiler-generated field
-      Excel.Worksheet o2 = (Excel.Worksheet)o1.Worksheets[1];
-      o2.Cells[(object) 1, (object) 1] = (object) "'Name";
-      o2.Cells[(object) 1, (object) 2] = (object) "'Member";
-      o2.Cells[(object) 1, (object) 3] = (object) "'Sub Member";
-      o2.Cells[(object) 1, (object) 4] = (object) "'Member Type";
-      o2.Cells[(object) 1, (object) 5] = (object) "'Profile";
-      o2.Cells[(object) 1, (object) 6] = (object) "'Material";
-      o2.Cells[(object) 1, (object) 7] = (object) "'Length (mm)";
-      o2.Cells[(object) 1, (object) 8] = (object) "'Standard Type";
-      for (int RowIndex = 2; RowIndex < to_excel_values.Count + 2; ++RowIndex)
+      string fileName = null;
+      try
       {
-        StringCollection toExcelValue = to_excel_values[RowIndex - 2];
-        for (int ColumnIndex = 1; ColumnIndex <= toExcelValue.Count; ++ColumnIndex)
-          o2.Cells[(object) RowIndex, (object) ColumnIndex] = (object) ("'" + toExcelValue[ColumnIndex - 1]);
+        string drawing = ((IEnumerable<string>) this.doc.Name.Split('\\')).Last<string>().Replace(".dwg", "");
+        string stamp = DateTime.Now.ToString("yyMMdd-HH-mm-ss");
+        fileName = Path.Combine(directory ?? string.Empty, "Support_MTO_for_" + drawing + "_drawing_" + stamp + ".xlsx");
+
+        using (XLWorkbook workbook = new XLWorkbook())
+        {
+          IXLWorksheet sheet = workbook.Worksheets.Add("MTO");
+          for (int c = 0; c < MtoHeaders.Length; c++)
+          {
+            IXLCell headerCell = sheet.Cell(1, c + 1);
+            headerCell.Value = MtoHeaders[c];
+            headerCell.Style.Font.Bold = true;
+          }
+
+          for (int r = 0; r < to_excel_values.Count; r++)
+          {
+            StringCollection row = to_excel_values[r];
+            if (row == null) continue;
+            for (int c = 0; c < row.Count; c++)
+            {
+              // 규격·프로파일에 "1-2" 같은 값이 있어 날짜로 자동 변환되면 안 된다.
+              // 과거에는 선행 작은따옴표로 강제했으나, 셀 서식을 텍스트로 지정하는 편이 정확하다.
+              IXLCell cell = sheet.Cell(r + 2, c + 1);
+              cell.Style.NumberFormat.Format = "@";
+              cell.Value = row[c] ?? string.Empty;
+            }
+          }
+
+          sheet.Columns().AdjustToContents();
+          workbook.SaveAs(fileName);
+        }
+
+        PlantOrthoView.FileDiag("MTO 내보내기 완료 rows=" + to_excel_values.Count + " path=" + fileName);
+        Application.ShowAlertDialog("MTO를 저장했습니다.\n" + fileName);
       }
-      string str1 = ((IEnumerable<string>) this.doc.Name.Split('\\')).Last<string>().Replace(".dwg", "");
-      string str2 = DateTime.Now.ToString("yyMMdd-HH-mm-ss");
-      string Filename = directory + "Support_MTO_for_" + str1 + "_drawing_" + str2 + ".xls";
-      // ISSUE: reference to a compiler-generated method
-      o1.SaveAs((object) Filename, (object) Excel.XlFileFormat.xlWorkbookNormal, obj, obj, obj, obj, Excel.XlSaveAsAccessMode.xlExclusive, obj, obj, obj, obj, obj);
-      // ISSUE: reference to a compiler-generated method
-      o1.Close((object) true, obj, obj);
-      // ISSUE: reference to a compiler-generated method
-      instance.Quit();
-      Marshal.ReleaseComObject((object) o2);
-      Marshal.ReleaseComObject((object) o1);
-      Marshal.ReleaseComObject((object) instance);
-      Application.ShowAlertDialog("Successfull!!!");
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("MTO 내보내기 실패 path=" + (fileName ?? "(미정)") + ": " + ex.GetType().Name + ": " + ex.Message);
+        Application.ShowAlertDialog("MTO 저장에 실패했습니다.\n" + ex.Message);
+      }
     }
   }
 }

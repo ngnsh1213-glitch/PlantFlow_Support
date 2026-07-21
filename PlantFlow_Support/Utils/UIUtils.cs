@@ -2273,8 +2273,6 @@ label_14:
       VPWidth = 0.0;
       VPHeight = 0.0;
       VPDepth = 0.0;
-      // ISSUE: cast to a reference type
-      // ISSUE: explicit reference operation
       viewType = (PlantFlow_Support.Commands.ViewType)0;
       strViewType = string.Empty;
       viewDir = Vector3d.ZAxis;

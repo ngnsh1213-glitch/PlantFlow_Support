@@ -1901,7 +1901,6 @@ namespace PlantFlow_Support
         bool skipClipping = false;
         if (this.commandType == UIUtils.EditType.Create)
         {
-          // ISSUE: explicit constructor call
           exts = new Extents3d();
           exts.AddPoint(this.m_lowerLeftPt);
           exts.AddPoint(this.m_upperRightPt);

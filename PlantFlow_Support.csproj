@@ -12,6 +12,8 @@
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64</Platforms>
     <NoWarn>$(NoWarn);MSB3277</NoWarn>
+    <!-- NuGet 의존 DLL(ClosedXML 등)을 출력 폴더로 복사해 배포에 포함한다(PFO와 동일). -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     
     <!-- Assembly Information -->
     <Description>PlantFlow Support Plugin for AutoCAD Plant 3D</Description>
@@ -62,10 +64,8 @@
     <Reference Include="PnP3dMain"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dMain.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="PnP3dContentMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dContentMgd.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="PnP3dDataManager"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dDataManager.dll</HintPath><Private>False</Private></Reference>
-    <Reference Include="Microsoft.Office.Interop.Excel">
-      <HintPath>Microsoft.Office.Interop.Excel.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
+    <!-- Microsoft.Office.Interop.Excel 참조 제거: MTO를 ClosedXML(OpenXML)로 전환해 불필요해졌다.
+         런타임 Excel 설치 요구도 함께 사라졌다. -->
     <Reference Include="PnPDataObjects"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PnPDataObjects.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="PnP3dCommonUIMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dCommonUIMgd.dll</HintPath><Private>False</Private></Reference>
     <Reference Include="PnP3dOrthoDrawingsUI"><HintPath>C:\Program Files\Autodesk\AutoCAD 2026\PLNT3D\PnP3dOrthoDrawingsUI.dll</HintPath><Private>False</Private></Reference>
@@ -124,6 +124,8 @@
   <!-- [프리뷰 B] WebView2 (PFO와 동일 버전). 서포트 형상 three.js 라이브 렌더 호스트. -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2849.39" />
+    <!-- [MTO] Excel 리포트 생성. Excel 설치 불요(OpenXML 기반). PFO와 동일 버전. -->
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
   </ItemGroup>
 
 
