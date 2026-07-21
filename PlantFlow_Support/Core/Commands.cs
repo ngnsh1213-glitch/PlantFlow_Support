@@ -45,11 +45,11 @@ namespace PlantFlow_Support
         new Point3d(System.Math.Max(supportExt.MaxPoint.X, anchor.X), System.Math.Max(supportExt.MaxPoint.Y, anchor.Y), 0.0));
     }
 
-    public bool TryPlace(Point3d anchor, RequiredSide requiredSide, double width, double height, double gap, double minDx,
+    public bool TryPlace(Point3d leaderFrom, RequiredSide requiredSide, double width, double height, double gap, double minDx,
       string ownerTag, bool preferDown, out Point3d textCenter, out Point3d p1, out Point3d p2, out bool textLeftOfAnchor, out string diagnostic)
     {
       double startRadius = System.Math.Max(15.0, System.Math.Max(width, height) / 2.0 + gap);
-      double maxRadius = System.Math.Max(startRadius, System.Math.Sqrt(System.Math.Pow(System.Math.Max(anchor.X - _minX, _maxX - anchor.X), 2.0) + System.Math.Pow(System.Math.Max(anchor.Y - _minY, _maxY - anchor.Y), 2.0)) + width + height);
+      double maxRadius = System.Math.Max(startRadius, System.Math.Sqrt(System.Math.Pow(System.Math.Max(leaderFrom.X - _minX, _maxX - leaderFrom.X), 2.0) + System.Math.Pow(System.Math.Max(leaderFrom.Y - _minY, _maxY - leaderFrom.Y), 2.0)) + width + height);
       // 루프가 한 번도 돌지 않는 경우까지 컴파일러가 out 할당을 증명할 수 있도록 루프 밖에 둔다.
       string failDiag = "FAIL";
       for (int tier = 0; tier < 3; tier++)
@@ -69,8 +69,8 @@ namespace PlantFlow_Support
           {
             double angle = fanOffset * System.Math.PI / 180.0;
             double horizontal = System.Math.Max(minDx, radius * System.Math.Abs(System.Math.Cos(angle)));
-            double x = anchor.X + sign * horizontal;
-            double y = anchor.Y + radius * System.Math.Sin(angle);
+            double x = leaderFrom.X + sign * horizontal;
+            double y = leaderFrom.Y + radius * System.Math.Sin(angle);
             bool textLeft = requiredSide == RequiredSide.Left;
             double boxLeft = textLeft ? x - width : x;
             Extents3d box = new Extents3d(new Point3d(boxLeft, y - height / 2.0, 0.0), new Point3d(boxLeft + width, y + height / 2.0, 0.0));
@@ -79,7 +79,7 @@ namespace PlantFlow_Support
             Point3d candP1 = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, baseY, 0.0);
             Point3d candP2 = new Point3d(textLeft ? box.MinPoint.X : box.MaxPoint.X, baseY, 0.0);
             string reject;
-            if (!Free(box, anchor, candP1, candP2, leaderScope, ownerTag, out reject))
+            if (!Free(box, leaderFrom, candP1, candP1, leaderScope, ownerTag, out reject))
             {
               if (reject == "box") rejectBox++;
               else if (reject.StartsWith("extLeader", System.StringComparison.Ordinal))
@@ -103,7 +103,7 @@ namespace PlantFlow_Support
               + System.Math.Abs(fanOffset) * angleW
               // 하단 선호: 앵커보다 위로 올라간 만큼만 가산한다. 제약이 아니라 편향이므로
               // 아래가 막히면 위로 올라가는 탐색은 그대로 살아 있다.
-              + ((preferDown && y > anchor.Y) ? (y - anchor.Y) * ReadEnvDouble("PFS_NOTAB_CALLOUT_DOWN_W", 1.0) : 0.0);
+              + ((preferDown && y > leaderFrom.Y) ? (y - leaderFrom.Y) * ReadEnvDouble("PFS_NOTAB_CALLOUT_DOWN_W", 1.0) : 0.0);
             if (cost < bestCost)
             {
               found = true;
@@ -111,7 +111,7 @@ namespace PlantFlow_Support
               bestCenter = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, y, 0.0);
               bestLeft = textLeft;
               bestP1 = candP1;
-              bestP2 = candP2;
+              bestP2 = candP1;
               bestDiag = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " angleW=" + angleW.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " cost=" + cost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
             }
           }
@@ -137,14 +137,21 @@ namespace PlantFlow_Support
       return false;
     }
 
-    public void Commit(Point3d anchor, Point3d p1, Point3d p2, Point3d textCenter, double width, double height)
+    public void Commit(Point3d leaderFrom, Point3d leaderTo, Point3d textCenter, double width, double height)
     {
-      bool textLeft = textCenter.X < anchor.X;
+      bool textLeft = textCenter.X < leaderFrom.X;
       _placedBoxes.Add(textLeft
         ? new Extents3d(new Point3d(textCenter.X - width, textCenter.Y - height / 2.0, 0.0), new Point3d(textCenter.X, textCenter.Y + height / 2.0, 0.0))
         : new Extents3d(new Point3d(textCenter.X, textCenter.Y - height / 2.0, 0.0), new Point3d(textCenter.X + width, textCenter.Y + height / 2.0, 0.0)));
-      _placedLeaders.Add(new Point3d[] { anchor, p1 });
-      _placedLeaders.Add(new Point3d[] { p1, p2 });
+      _placedLeaders.Add(new Point3d[] { leaderFrom, leaderTo });
+    }
+
+    // 기존 MLeader 경로 호환용. 직접 콜아웃은 위 단일 선분 overload를 사용한다.
+    public void Commit(Point3d anchor, Point3d p1, Point3d p2, Point3d textCenter, double width, double height)
+    {
+      Commit(anchor, p1, textCenter, width, height);
+      if (p1.DistanceTo(p2) > 1e-9)
+        _placedLeaders.Add(new Point3d[] { p1, p2 });
     }
 
     // 밸룬은 원이라 Commit의 "textCenter.X < anchor.X" 좌우 추론이 성립하지 않는다.
@@ -5000,6 +5007,43 @@ namespace PlantFlow_Support
       return true;
     }
 
+    private bool TryGetNotabBalloonItemBox(System.Collections.Generic.List<NotabMemberBox> boxes, Point3d rawAnchor, bool verticalMember, out Extents3d itemBox)
+    {
+      itemBox = new Extents3d(Point3d.Origin, Point3d.Origin);
+      if (boxes == null || boxes.Count == 0)
+        return false;
+      if (verticalMember)
+      {
+        NotabMemberBox vertical;
+        string reason;
+        if (this.TryGetNotabVerticalMemberBox(boxes, out vertical, out reason))
+        {
+          itemBox = vertical.PaperBox;
+          return true;
+        }
+      }
+
+      int best = -1;
+      double bestDist2 = double.MaxValue, bestArea = double.MaxValue;
+      string bestHandle = string.Empty;
+      for (int i = 0; i < boxes.Count; i++)
+      {
+        Extents3d box = boxes[i].PaperBox;
+        double dx = rawAnchor.X < box.MinPoint.X ? box.MinPoint.X - rawAnchor.X : rawAnchor.X > box.MaxPoint.X ? rawAnchor.X - box.MaxPoint.X : 0.0;
+        double dy = rawAnchor.Y < box.MinPoint.Y ? box.MinPoint.Y - rawAnchor.Y : rawAnchor.Y > box.MaxPoint.Y ? rawAnchor.Y - box.MaxPoint.Y : 0.0;
+        double dist2 = dx * dx + dy * dy;
+        double area = System.Math.Max(0.0, box.MaxPoint.X - box.MinPoint.X) * System.Math.Max(0.0, box.MaxPoint.Y - box.MinPoint.Y);
+        string handle = boxes[i].Handle ?? string.Empty;
+        if (dist2 < bestDist2 - 1e-9 || (System.Math.Abs(dist2 - bestDist2) <= 1e-9 &&
+          (area < bestArea - 1e-9 || (System.Math.Abs(area - bestArea) <= 1e-9 && string.CompareOrdinal(handle, bestHandle) < 0))))
+        { best = i; bestDist2 = dist2; bestArea = area; bestHandle = handle; }
+      }
+      if (best < 0)
+        return false;
+      itemBox = boxes[best].PaperBox;
+      return true;
+    }
+
     private void AppendNotabPaperDimensions(Transaction tr, BlockTableRecord layoutBtr, Extents3d supportPaperExt, Extents3d viewportPaperExt, double pipeCenterXPaper, double pipeCenterYPaper, double pipePaperRadius, double realW, double realH, ObjectId dimStyleId, ObjectId layerId, ObjectId textStyleId, Database db, System.Collections.Generic.List<NotabMemberBox> memberBoxes, Viewport vp)
     {
       if (tr == null || layoutBtr == null)
@@ -5299,7 +5343,7 @@ namespace PlantFlow_Support
         this.AppendNotabUboltCallouts(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, vp, memberBoxes);
         // 밸룬은 마지막. 기존 확정 배치(치수·파이프·부재·U-bolt)의 회귀를 최소화한다.
         this.AppendNotabBalloons(tr, layoutBtr, db, textStyleId, layerId, viewportPaperExt, txt, calloutPlacer, vp,
-          hasVerticalPortAnchor, verticalAnchorX, verticalAnchorBaseY, verticalAnchorTopY, dimReferenceMinX, maxX);
+          memberBoxes, hasVerticalPortAnchor, verticalAnchorX, verticalAnchorBaseY, verticalAnchorTopY, dimReferenceMinX, maxX);
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " vMode=" + verticalMode + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
@@ -5508,11 +5552,22 @@ namespace PlantFlow_Support
         bool left = requiredSide == NotabCalloutPlacer.RequiredSide.Left;
         string diagnostic = "FAIL";
         bool smartPlaced = false;
+        // 유볼트는 실제 화살표 시작점을 먼저 확정한 뒤, 동일한 점으로 배치 검사·등록·작도를 수행한다.
+        Point3d leaderFrom = hasAnchorBox
+          ? NotabCalloutPlacer.BoxVerticalEdgeMidpointToward(anchorBox,
+            new Point3d(requiredSide == NotabCalloutPlacer.RequiredSide.Left ? anchor.X - 1.0 : anchor.X + 1.0, anchor.Y, 0.0))
+          : anchor;
+        double effectiveMinDx = minDx;
+        if (hasAnchorBox)
+        {
+          double centerToEdge = System.Math.Abs(leaderFrom.X - anchor.X);
+          effectiveMinDx = System.Math.Max(minDx, centerToEdge + gap);
+        }
         if (placer != null)
         {
           bool isPipeCallout = label == "pipe callout";
           // 부재 콜아웃은 하단 선호(치수가 항상 상단·좌측에 놓인다). 라인넘버는 상하 자유.
-          smartPlaced = placer.TryPlace(anchor, requiredSide, actualWidth, actualHeight, gap, minDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, out near, out p1, out p2, out left, out diagnostic);
+          smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, out near, out p1, out p2, out left, out diagnostic);
         }
         if (!smartPlaced)
         {
@@ -5522,32 +5577,25 @@ namespace PlantFlow_Support
         }
 
         bool right = !left;
-        double leftX = right ? System.Math.Max(near.X, anchor.X + minDx) : System.Math.Min(near.X, anchor.X - minDx) - actualWidth;
+        double leftX = right ? System.Math.Max(near.X, leaderFrom.X + effectiveMinDx) : System.Math.Min(near.X, leaderFrom.X - effectiveMinDx) - actualWidth;
         double rightX = leftX + actualWidth;
         double textGap = this.GetEnvDouble("PFS_NOTAB_CALLOUT_TEXT_GAP", 3.0, 0.0, 50.0);
-        // placer가 확정한 리더 정점을 그대로 사용해 충돌 모델과 작도를 일치시킨다.
+        // placer가 확정한 단일 종점을 그대로 사용해 충돌 모델과 작도를 일치시킨다.
         double baseY = p1.Y;
         double nearX = p1.X;
-        double farX = p2.X;
         mt.Location = new Point3d(leftX, baseY + textGap, 0.0);
 
-        // 유볼트는 U자 하변 중앙이 빈 공간이므로 대상의 좌우 변 중점에서만 출발한다.
-        Point3d arrowFrom = hasAnchorBox
-          ? NotabCalloutPlacer.BoxVerticalEdgeMidpointToward(anchorBox, new Point3d(nearX, baseY, 0.0))
-          : anchor;
-
         Leader leader = new Leader();
-        leader.AppendVertex(arrowFrom);
+        leader.AppendVertex(leaderFrom);
         leader.AppendVertex(new Point3d(nearX, baseY, 0.0));
-        leader.AppendVertex(new Point3d(farX, baseY, 0.0));
         leader.HasArrowHead = true;
         leader.Dimasz = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         if (layerId != ObjectId.Null) leader.LayerId = layerId;
         leader.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)1);
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
-        if (placer != null) placer.Commit(anchor, new Point3d(nearX, baseY, 0.0), new Point3d(farX, baseY, 0.0), near, actualWidth, actualHeight);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-draw designation=" + designation + " anchor=" + anchor + " nearX=" + this.FormatNumber(nearX) + " farX=" + this.FormatNumber(farX) + " baseY=" + this.FormatNumber(baseY) + " W=" + this.FormatNumber(actualWidth) + " H=" + this.FormatNumber(actualHeight) + " requiredSide=" + (requiredSide == NotabCalloutPlacer.RequiredSide.Left ? "left" : "right") + " sideSrc=" + sideSource + " referenceX=" + this.FormatNumber(anchor.X) + " viewportCenterX=" + this.FormatNumber(viewportCenterX) + " side=" + (right ? "right" : "left") + " sep=" + this.FormatNumber(right ? nearX - anchor.X : anchor.X - nearX) + " " + diagnostic);
+        if (placer != null) placer.Commit(leaderFrom, new Point3d(nearX, baseY, 0.0), near, actualWidth, actualHeight);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-draw designation=" + designation + " anchor=" + anchor + " leaderFrom=" + this.FormatPoint(leaderFrom) + " endX=" + this.FormatNumber(nearX) + " baseY=" + this.FormatNumber(baseY) + " effectiveMinDx=" + this.FormatNumber(effectiveMinDx) + " W=" + this.FormatNumber(actualWidth) + " H=" + this.FormatNumber(actualHeight) + " requiredSide=" + (requiredSide == NotabCalloutPlacer.RequiredSide.Left ? "left" : "right") + " sideSrc=" + sideSource + " referenceX=" + this.FormatNumber(anchor.X) + " viewportCenterX=" + this.FormatNumber(viewportCenterX) + " side=" + (right ? "right" : "left") + " sep=" + this.FormatNumber(right ? nearX - leaderFrom.X : leaderFrom.X - nearX) + " " + diagnostic);
       }
       catch (System.Exception ex)
       {
@@ -5824,7 +5872,7 @@ namespace PlantFlow_Support
       {
         double arr = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         double gap = arr + txt * 0.6;
-        double minDx = this.GetEnvDouble("PFS_NOTAB_CALLOUT_MIN_DX", 40.0, 0.0, 500.0);
+        double minDx = this.GetEnvDouble("PFS_NOTAB_UBOLT_MIN_DX", 10.0, 0.0, 500.0);
         double viewportCenterX = (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0;
         for (int i = 0; i < s_isoUbolts.Count; i++)
         {
@@ -8228,6 +8276,7 @@ namespace PlantFlow_Support
     private void AppendNotabBalloons(Transaction tr, BlockTableRecord layoutBtr, Database db,
       ObjectId textStyleId, ObjectId layerId, Extents3d viewportPaperExt,
       double txt, NotabCalloutPlacer placer, Viewport vp,
+      System.Collections.Generic.List<NotabMemberBox> memberBoxes,
       // memberRect는 폐지됐지만 이 값들은 앵커 보정(vertical-mid / horizontal-mid)에 계속 쓰인다.
       bool hasVerticalAnchor, double verticalX, double verticalBaseY, double verticalTopY,
       double horizontalMinX, double horizontalMaxX)
@@ -8296,6 +8345,13 @@ namespace PlantFlow_Support
           anchorAdjust = "horizontal-mid";
         }
 
+        // ITEM의 포트에 가장 가까운 개별 형상 상자를 사용한다. 같은 거리면 면적이 작은 상자,
+        // 그 다음 Handle 사전순으로 고정해 다른 부재의 외곽을 가리키지 않게 한다.
+        Extents3d itemBox;
+        bool hasItemBox = this.TryGetNotabBalloonItemBox(memberBoxes, rawAnchor, isVerticalMember, out itemBox);
+        if (hasItemBox)
+          anchorAdjust += "+local-box";
+
         // 밸룬 옆 부재 코드(ANGLE A6 → A6). 표를 보지 않아도 규격을 알 수 있다.
         string subLabel = this.GetNotabBalloonSubLabel(bomDesc);
         double subGap = subLabel.Length == 0 ? 0.0 : txt * 0.4;
@@ -8320,6 +8376,8 @@ namespace PlantFlow_Support
         double maxSteps = this.GetEnvDouble("PFS_NOTAB_BALLOON_MAX_STEPS", 4.0, 1.0, 16.0);
         int candidateCount = 0, freeCount = 0;
         double maxClearance = double.MinValue;
+        Point3d bestAnchor = anchor;
+        System.Collections.Generic.Dictionary<string, int> rejBy = new System.Collections.Generic.Dictionary<string, int>();
 
         for (int d = 0; d < dirs.Length; d++)
         {
@@ -8327,7 +8385,9 @@ namespace PlantFlow_Support
           {
             double cx = anchor.X + dirs[d][0] * dist;
             double cy = anchor.Y + dirs[d][1] * dist;
-            bool toLeft = cx < anchor.X || (System.Math.Abs(cx - anchor.X) < 1e-9 && dirs[d][0] <= 0);
+            Point3d c = new Point3d(cx, cy, 0.0);
+            Point3d candidateAnchor = hasItemBox ? NotabCalloutPlacer.BoxEdgeMidpointToward(itemBox, c) : anchor;
+            bool toLeft = cx < candidateAnchor.X || (System.Math.Abs(cx - candidateAnchor.X) < 1e-9 && dirs[d][0] <= 0);
 
             double bMinX = toLeft ? cx - radius - subGap - subW : cx - radius;
             double bMaxX = toLeft ? cx + radius : cx + radius + subGap + subW;
@@ -8338,18 +8398,23 @@ namespace PlantFlow_Support
             maxClearance = System.Math.Max(maxClearance, clearance);
             if (!placer.WithinBounds(box)) continue;
 
-            Point3d c = new Point3d(cx, cy, 0.0);
-            Vector3d dir = c - anchor;
+            Vector3d dir = c - candidateAnchor;
             if (dir.Length < 1e-9) continue;
             Point3d touchPt = c - dir.GetNormal() * radius;
             string rej;
-            if (!placer.IsBalloonFree(box, anchor, touchPt, out rej)) continue;
+            if (!placer.IsBalloonFree(box, candidateAnchor, touchPt, out rej))
+            {
+              int rejected;
+              rejBy.TryGetValue(rej, out rejected);
+              rejBy[rej] = rejected + 1;
+              continue;
+            }
             freeCount++;
 
             double score = clearance - dir.Length * leaderW;
             if (score > bestScore)
             {
-              bestScore = score; ballCenter = c; ballBox = box; outwardLeft = toLeft; placed = true;
+              bestScore = score; ballCenter = c; ballBox = box; bestAnchor = candidateAnchor; outwardLeft = toLeft; placed = true;
               placeDiag = "dir=" + d + " dist=" + this.FormatNumber(dir.Length)
                 + " clear=" + this.FormatNumber(clearance)
                 + " score=" + this.FormatNumber(score);
@@ -8359,11 +8424,16 @@ namespace PlantFlow_Support
 
         if (!placed)
         {
+          System.Text.StringBuilder rejSummary = new System.Text.StringBuilder();
+          foreach (System.Collections.Generic.KeyValuePair<string, int> kv in rejBy)
+          { if (rejSummary.Length > 0) rejSummary.Append(","); rejSummary.Append(kv.Key).Append("=").Append(kv.Value); }
           PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item + " reason=no-space perimeter"
             + " cand=" + candidateCount + " free=" + freeCount
-            + " maxClear=" + this.FormatNumber(maxClearance));
+            + " maxClear=" + this.FormatNumber(maxClearance) + " rejBy{" + rejSummary.ToString() + "}");
           continue;
         }
+
+        anchor = bestAnchor;
 
         bool left = outwardLeft;
         string diag = placeDiag;

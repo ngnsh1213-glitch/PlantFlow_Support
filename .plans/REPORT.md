@@ -1,16 +1,16 @@
 # REPORT — Codex → Claude
 
-- **cycle**: 98
+- **cycle**: 99
 - **status**: pending_verification
 - **completed_at**: 2026-07-21
-- **title**: 밸룬 앵커 기준 전환 + 유볼트 좌우 변 화살표
+- **title**: 밸룬 F1/F2 외곽 변 앵커 + 유볼트 단일 리더
 
 ## 변경 요약
 
-- 밸룬 후보 생성·충돌 검사·작도 화살표를 모두 보정된 `anchor` 기준으로 통일하고, 실측 부재 박스 선택 및 `balloon member-rect` 진단을 제거했다.
-- 원본 투영점은 `rawAnchor=`로 보존하고, `balloon-draw`·공간부족 `balloon-skip`에 `cand/free/maxClear` 통계를 기록한다.
-- 유볼트 화살표 전용 `BoxVerticalEdgeMidpointToward`를 추가했다. 좌우 세로 변 중점만 선택하며 중심선 동률은 우변으로 고정한다.
-- `PFS_NOTAB_BALLOON_LEADER_W=2.0`, `PFS_NOTAB_BALLOON_MAX_STEPS=4`의 기존 설정은 변경하지 않았다.
+- 밸룬은 포트에 가장 가까운 ITEM 로컬 형상 상자를 선택한다. 동률은 작은 면적, Handle 사전순으로 고정하며 후보 방향의 외곽 변 중점을 화살표 앵커로 쓴다.
+- `IsBalloonFree`의 거절 사유를 `balloon-skip`의 `rejBy{...}`로 집계한다.
+- 유볼트는 `PFS_NOTAB_UBOLT_MIN_DX`(기본 10)를 사용한다. 외곽 세로 변 중점을 실제 시작점으로 확정해 배치 검사·등록·작도를 모두 단일 선분으로 통일했다.
+- `PFS_NOTAB_BALLOON_LEADER_W=2.0`, `PFS_NOTAB_BALLOON_MAX_STEPS=4`, 전역 `PFS_NOTAB_CALLOUT_MIN_DX`는 변경하지 않았다.
 
 ## 변경 파일
 
@@ -19,15 +19,15 @@
 ## 검증
 
 - `git diff --check` 통과.
-- `memberRect`·`memberCenter`·`balloon member-rect` 참조가 제거됐음을 정적 검색으로 확인했다.
-- `dotnet build`는 프로젝트의 빌드 수동 원칙에 따라 실행하지 않았다.
+- `dotnet build PlantFlow_Support.sln --no-restore` 통과: 오류 0, 경고 14.
 
 ## 라이브 검증 필요
 
 - `dev_test.bat` 후 F1·F2 화살표가 허공이 아닌 부재 선 위에 닿는지 확인.
 - 유볼트 화살표가 하변 중앙이 아닌 좌·우 다리 중 하나에 닿는지 확인.
-- 모든 `balloon-draw`에 `rawAnchor/cand/free/maxClear`가 출력되고, `dist`가 50 미만인지 확인.
+- 공간 부족 시 `balloon-skip`의 `rejBy{...}`가 실제 차단 사유를 집계하는지 확인.
+- 유볼트 `callout-draw`의 `leaderFrom/endX/effectiveMinDx`로 외곽 시작·짧은 이격을 확인.
 
 ## 커밋
 
-- `e2d0606` `fix: anchor notab balloons and ubolt leaders`
+- `1b55d76` `fix: restore notab balloon and ubolt leaders`
