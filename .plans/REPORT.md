@@ -29,4 +29,4 @@
 
 ## 커밋
 
-- 대기 중: 다음 커밋에서 기록.
+- `1f3a276` `fix: restore notab balloon placement`
