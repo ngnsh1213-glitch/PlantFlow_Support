@@ -331,12 +331,13 @@ namespace PlantFlow_Support
 
       // 부속(유볼트류)은 개별 도면 대상이 아니다. 본체 도면에는 AutoIncludeRelatedParts가 자동 포함한다.
       // 판별자 = Plant ShortDescription. 실측(cycle103): 유볼트 6건 전부 "UB",
-      // 본체는 타입 코드 그대로(RC1/GD1/RS1/FS…)라 접두와 일치한다. guide 전용은 "UBD" 군.
+      // 본체는 타입 코드 그대로(RC1/GD1/RS1/FS…)라 접두와 일치한다.
+      // 유볼트 계열은 카탈로그에 UB / UB1 / UB2 / UBD 4종이 있다(Support 폴더 실재 확인).
       // 하드코딩 금지 — 카탈로그가 늘면 env로 추가한다.
       System.Collections.Generic.HashSet<string> excludeCodes =
         new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
       string excludeRaw = System.Environment.GetEnvironmentVariable("PFS_NOTAB_BATCH_EXCLUDE");
-      if (string.IsNullOrWhiteSpace(excludeRaw)) excludeRaw = "UB,UBD";
+      if (string.IsNullOrWhiteSpace(excludeRaw)) excludeRaw = "UB,UB1,UB2,UBD";
       foreach (string part in excludeRaw.Split(','))
       {
         string code = (part ?? string.Empty).Trim();
