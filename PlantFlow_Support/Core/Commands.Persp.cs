@@ -62,6 +62,19 @@ namespace PlantFlow_Support
     private static System.DateTime s_perspGuardUntilUtc = System.DateTime.MinValue;
     private static object s_perspGuardValue = null;
     private static bool s_perspRestoring = false;
+    private static long s_perspGuardGeneration = 0;
+    private static Document s_perspGuardDocument = null;
+    private static Autodesk.AutoCAD.ApplicationServices.CommandEventHandler s_perspCommandWillStartHandler = null;
+    private static Autodesk.AutoCAD.ApplicationServices.CommandEventHandler s_perspCommandEndedHandler = null;
+    private static bool s_perspCommandEventsSubscribed = false;
+    private static System.EventHandler s_perspGuardExpiryIdleHandler = null;
+
+    private enum PerspOrigin
+    {
+      StrongRibbon,
+      NativeCommand,
+      Unknown
+    }
 
     [CommandMethod("PFSPERSPWATCH", CommandFlags.Session)]
     public void PerspectiveWatchCommand()
@@ -131,8 +144,12 @@ namespace PlantFlow_Support
     {
       try
       {
+        if (s_perspCommandEventsSubscribed)
+          Commands.ReleasePerspCommandEvents("rearm");
         s_perspGuardValue = savedPerspective;
-        double seconds = 8.0;
+        s_perspGuardGeneration++;
+        s_perspGuardDocument = Application.DocumentManager == null ? null : Application.DocumentManager.MdiActiveDocument;
+        double seconds = 60.0;
         string env = System.Environment.GetEnvironmentVariable("PFS_PERSP_GUARD_SEC");
         if (!string.IsNullOrWhiteSpace(env))
         {
@@ -144,12 +161,122 @@ namespace PlantFlow_Support
         }
         s_perspGuardUntilUtc = System.DateTime.UtcNow.AddSeconds(seconds);
         Commands.EnsurePerspGuardInstalled();
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard armed seconds=" + seconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + " value=" + (savedPerspective == null ? "(null)" : savedPerspective.ToString()));
+        Commands.EnsurePerspCommandEventsSubscribed();
+        Commands.SchedulePerspGuardExpiryCheck(s_perspGuardGeneration);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard armed seconds=" + seconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + " value=" + (savedPerspective == null ? "(null)" : savedPerspective.ToString()) + " generation=" + s_perspGuardGeneration + " doc=" + Commands.GetPerspDocumentName(s_perspGuardDocument));
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard arm 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
+    }
+
+    private static string GetPerspDocumentName(Document doc)
+    {
+      try { return doc == null ? "(null)" : (string.IsNullOrEmpty(doc.Name) ? "(unnamed)" : doc.Name); }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 문서명 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return "(name-error)";
+      }
+    }
+
+    private static void EnsurePerspCommandEventsSubscribed()
+    {
+      try
+      {
+        if (s_perspGuardDocument == null)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 명령 구독 skip: 대상 문서 null");
+          return;
+        }
+        if (s_perspCommandWillStartHandler == null)
+          s_perspCommandWillStartHandler = new Autodesk.AutoCAD.ApplicationServices.CommandEventHandler(Commands.OnPerspGuardCommandWillStart);
+        if (s_perspCommandEndedHandler == null)
+          s_perspCommandEndedHandler = new Autodesk.AutoCAD.ApplicationServices.CommandEventHandler(Commands.OnPerspGuardCommandEnded);
+        if (s_perspCommandEventsSubscribed)
+          return;
+        s_perspGuardDocument.CommandWillStart += s_perspCommandWillStartHandler;
+        s_perspGuardDocument.CommandEnded += s_perspCommandEndedHandler;
+        s_perspCommandEventsSubscribed = true;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 명령 구독 generation=" + s_perspGuardGeneration + " doc=" + Commands.GetPerspDocumentName(s_perspGuardDocument));
+      }
+      catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 명령 구독 예외: " + ex.GetType().Name + ": " + ex.Message); }
+    }
+
+    private static void ReleasePerspCommandEvents(string reason)
+    {
+      try
+      {
+        if (s_perspCommandEventsSubscribed && s_perspGuardDocument != null)
+        {
+          s_perspGuardDocument.CommandWillStart -= s_perspCommandWillStartHandler;
+          s_perspGuardDocument.CommandEnded -= s_perspCommandEndedHandler;
+        }
+        s_perspCommandEventsSubscribed = false;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 명령 구독 해제 reason=" + reason + " generation=" + s_perspGuardGeneration);
+      }
+      catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 명령 구독 해제 예외: " + ex.GetType().Name + ": " + ex.Message); }
+    }
+
+    private static void OnPerspGuardCommandWillStart(object sender, CommandEventArgs e) { Commands.LogPerspGuardViewCubeCommand("start", e); }
+    private static void OnPerspGuardCommandEnded(object sender, CommandEventArgs e) { Commands.LogPerspGuardViewCubeCommand("end", e); }
+
+    private static void LogPerspGuardViewCubeCommand(string phase, CommandEventArgs e)
+    {
+      try
+      {
+        string command = e == null ? "" : e.GlobalCommandName;
+        if (!string.IsNullOrEmpty(command) && command.IndexOf("VIEWCUBEACTION", System.StringComparison.OrdinalIgnoreCase) >= 0)
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard VIEWCUBEACTION " + phase + " generation=" + s_perspGuardGeneration + " doc=" + Commands.GetPerspDocumentName(s_perspGuardDocument));
+      }
+      catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 명령 계측 예외: " + ex.GetType().Name + ": " + ex.Message); }
+    }
+
+    private static void SchedulePerspGuardExpiryCheck(long generation)
+    {
+      try
+      {
+        if (s_perspGuardExpiryIdleHandler != null)
+          Autodesk.AutoCAD.ApplicationServices.Application.Idle -= s_perspGuardExpiryIdleHandler;
+        s_perspGuardExpiryIdleHandler = delegate(object sender, System.EventArgs e)
+        {
+          try
+          {
+            Document active = Application.DocumentManager == null ? null : Application.DocumentManager.MdiActiveDocument;
+            if (generation != s_perspGuardGeneration || !object.ReferenceEquals(active, s_perspGuardDocument) || System.DateTime.UtcNow > s_perspGuardUntilUtc)
+            {
+              Commands.ReleasePerspCommandEvents(generation != s_perspGuardGeneration ? "generation" : (!object.ReferenceEquals(active, s_perspGuardDocument) ? "document" : "expired"));
+              Autodesk.AutoCAD.ApplicationServices.Application.Idle -= s_perspGuardExpiryIdleHandler;
+              s_perspGuardExpiryIdleHandler = null;
+            }
+          }
+          catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 만료 확인 예외: " + ex.GetType().Name + ": " + ex.Message); }
+        };
+        Autodesk.AutoCAD.ApplicationServices.Application.Idle += s_perspGuardExpiryIdleHandler;
+      }
+      catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 만료 예약 예외: " + ex.GetType().Name + ": " + ex.Message); }
+    }
+
+    private static PerspOrigin ClassifyPerspOrigin(string cmd)
+    {
+      try
+      {
+        System.Diagnostics.StackTrace trace = new System.Diagnostics.StackTrace();
+        System.Diagnostics.StackFrame[] frames = trace.GetFrames();
+        int take = frames == null ? 0 : System.Math.Min(40, frames.Length);
+        for (int i = 0; i < take; i++)
+        {
+          System.Reflection.MethodBase method = frames[i] == null ? null : frames[i].GetMethod();
+          System.Type type = method == null ? null : method.DeclaringType;
+          string assembly = type == null || type.Assembly == null ? null : type.Assembly.GetName().Name;
+          string nameSpace = type == null ? null : type.Namespace;
+          if (string.Equals(assembly, "AdWindows", System.StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("Autodesk.Windows", System.StringComparison.Ordinal)))
+            return PerspOrigin.StrongRibbon;
+        }
+      }
+      catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSPERSPWATCH stack 분류 예외: " + ex.GetType().Name + ": " + ex.Message); }
+      return !string.IsNullOrEmpty(cmd) && cmd.IndexOf("VIEWCUBE", System.StringComparison.OrdinalIgnoreCase) >= 0 ? PerspOrigin.NativeCommand : PerspOrigin.Unknown;
     }
 
     private static void OnSysVarChangedForPersp(object sender, Autodesk.AutoCAD.ApplicationServices.SystemVariableChangedEventArgs e)
@@ -160,38 +287,39 @@ namespace PlantFlow_Support
         if (!string.Equals(e.Name, "PERSPECTIVE", System.StringComparison.OrdinalIgnoreCase)) return;
         object val = Application.GetSystemVariable("PERSPECTIVE");
         object cmd = Application.GetSystemVariable("CMDNAMES");
-        PlantOrthoView.FileDiag("PFSPERSPWATCH PERSPECTIVE -> " + (val == null ? "(null)" : val.ToString()) + " CMDNAMES='" + (cmd == null ? "" : cmd.ToString()) + "'");
-        // 스택 계측: SETVAR가 managed 리액터(우리/서드파티 .NET)에서 오는지 vs 네이티브 UI(뷰큐브 등)
-        // 에서 오는지 판별. managed 발원이면 프레임에 해당 타입/메서드가 찍히고, 네이티브면 이벤트
-        // 디스패치만 얕게 찍힌다. 앞 ~20프레임만 기록.
-        try
-        {
-          string st = System.Environment.StackTrace;
-          if (st != null)
-          {
-            string[] lines = st.Split('\n');
-            int take = System.Math.Min(20, lines.Length);
-            System.Text.StringBuilder sb = new System.Text.StringBuilder();
-            for (int i = 0; i < take; i++) sb.Append(lines[i].Trim()).Append(" | ");
-            PlantOrthoView.FileDiag("PFSPERSPWATCH stack: " + sb.ToString());
-          }
-        }
-        catch (System.Exception sx) { PlantOrthoView.FileDiag("PFSPERSPWATCH stack 예외: " + sx.GetType().Name); }
-        Commands.TryRestorePerspGuard(val);
+        string commandNames = cmd == null ? "" : cmd.ToString();
+        PerspOrigin origin = Commands.ClassifyPerspOrigin(commandNames);
+        Document active = Application.DocumentManager == null ? null : Application.DocumentManager.MdiActiveDocument;
+        PlantOrthoView.FileDiag("PFSPERSPWATCH PERSPECTIVE -> " + (val == null ? "(null)" : val.ToString()) + " CMDNAMES='" + commandNames + "' origin=" + origin.ToString().ToLowerInvariant() + " generation=" + s_perspGuardGeneration + " doc=" + Commands.GetPerspDocumentName(active));
+        Commands.TryRestorePerspGuard(val, origin, commandNames, active);
       }
       catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSPERSPWATCH 핸들러 예외: " + ex.GetType().Name + ": " + ex.Message); }
     }
 
-    private static void TryRestorePerspGuard(object currentValue)
+    private static void TryRestorePerspGuard(object currentValue, PerspOrigin origin, string commandNames, Document activeDocument)
     {
       if (s_perspRestoring)
         return;
       if (s_perspGuardValue == null)
         return;
       if (System.DateTime.UtcNow > s_perspGuardUntilUtc)
+      {
+        Commands.ReleasePerspCommandEvents("expired");
         return;
+      }
+      if (!object.ReferenceEquals(activeDocument, s_perspGuardDocument))
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 관망 reason=document origin=" + origin.ToString().ToLowerInvariant() + " generation=" + s_perspGuardGeneration + " doc=" + Commands.GetPerspDocumentName(activeDocument));
+        Commands.ReleasePerspCommandEvents("document");
+        return;
+      }
       if (object.Equals(currentValue, s_perspGuardValue))
         return;
+      if (origin != PerspOrigin.StrongRibbon)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 관망 origin=" + origin.ToString().ToLowerInvariant() + " cmd=" + commandNames + " generation=" + s_perspGuardGeneration);
+        return;
+      }
 
       object fromValue = currentValue;
       object toValue = s_perspGuardValue;
@@ -199,8 +327,7 @@ namespace PlantFlow_Support
       {
         s_perspRestoring = true;
         Application.SetSystemVariable("PERSPECTIVE", toValue);
-        s_perspGuardUntilUtc = System.DateTime.MinValue;
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 교정 " + (fromValue == null ? "(null)" : fromValue.ToString()) + " -> " + toValue);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL persp guard 교정 " + (fromValue == null ? "(null)" : fromValue.ToString()) + " -> " + toValue + " origin=strong-ribbon generation=" + s_perspGuardGeneration);
         Commands.SchedulePerspGuardRegen();
       }
       catch (System.Exception ex)

@@ -1,32 +1,29 @@
 # REPORT — Codex → Claude
 
-- **cycle**: 101
+- **cycle**: 103
 - **status**: completed
-- **completed_at**: 2026-07-21
-- **title**: 밸룬 F 계열 local-box 보정 제거 (화살표를 부재 중심선에 고정)
+- **completed_at**: 2026-07-22
+- **title**: PERSPECTIVE 가드 발원 기반 재설계
 
 ## 변경 요약
 
-- F1/F2 밸룬의 `local-box` 앵커 재계산을 제거했다. `vertical-mid`/`horizontal-mid` 보정 직후의 앵커를 후보 검사, 리더 길이 점수, 작도, 등록에 공통 사용한다.
-- P1은 기존대로 `rawAnchor`와 `adjust=port`를 유지한다.
-- 더 이상 사용되지 않는 `TryGetNotabBalloonItemBox`와 `BoxEdgeMidpointToward`를 제거했다. `TryGetNotabVerticalMemberBox`는 프로필 콜아웃에서 계속 사용하므로 유지했다.
-- 확장 탐색, 유볼트, 파이프 콜아웃은 변경하지 않았다.
+- StackTrace 프레임의 `AdWindows` 어셈블리와 `Autodesk.Windows` 네임스페이스로 발원을 분류해 strong-ribbon일 때만 복원한다.
+- 기본 가드 창을 60초로 늘리고, 첫 복원 후 무장 해제하던 동작을 제거했다.
+- generation·대상 문서 범위 및 VIEWCUBEACTION 시작/종료 계측을 추가하고, 만료·문서 전환에서 구독을 해제한다.
 
 ## 변경 파일
 
-- `PlantFlow_Support/Core/Commands.cs`
+- `PlantFlow_Support/Core/Commands.Persp.cs`
 
 ## 검증
 
-- `rg` 확인: `local-box`, `BoxEdgeMidpointToward`, `TryGetNotabBalloonItemBox` 참조 없음.
-- `git diff --check -- PlantFlow_Support/Core/Commands.cs` 통과.
-- `dotnet build --no-restore` 통과: 오류 0, 경고 15 (허용 상한 15).
+- `git diff --check` 통과.
+- `dotnet build` 통과: 오류 0, 경고 15 (증가 없음).
 
 ## 라이브 검증 필요
 
-- `dev_test.bat` 후 F1/F2 `balloon-draw` 로그의 `adjust=horizontal-mid`/`vertical-mid`, `free>0`를 확인한다.
-- F1 화살표가 가로재, F2 화살표가 세로재 중심선에 닿는지 확인한다.
+- `dev_test.bat`에서 strong-ribbon만 교정되고 VIEWCUBEACTION은 관망 로그만 남는지 확인.
 
 ## 커밋
 
-- 코드: `54d84fa` `fix: anchor F balloons to member centerline`
+- 코드: 커밋 후 해시 기록 예정.
