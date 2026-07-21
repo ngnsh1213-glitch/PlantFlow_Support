@@ -3,6 +3,10 @@
 _완료 항목은 여기서 지우고 `CHANGELOG.md`로 옮긴다._
 
 ## ★무탭 엔진 (현재 트랙, 2026-07-14)
+- [x] 밸룬·콜아웃 배치 종결(cycle97~102, `947663e`). 라이브 3회 skip 0건, 사용자 판정 이상없음 → CHANGELOG
+- [ ] **라인넘버(파이프) 콜아웃만 꺾임 1회 리더로 복원** (유볼트는 1자 유지). cycle 100에서 공통 경로를
+      1자로 통일하며 파이프까지 직선이 됐다. 검사(`TryPlace`)·작도·등록(`Commit` 3점 오버로드)을
+      2선분으로 동시에 맞춰야 한다. 파이프 `textEdge`(문자 중단 접속)는 유지하고 앞에 `elbow`만 추가.
 - [x] 무탭 Main 라이브 PASS (은선 정투영, cycle 30)
 - [x] RECOVER 해결 (H5=sourceDb 조기 Dispose, cycle 37, 커밋 d7897e5)
 - [x] 진단 코드 cleanup (cycle 39): pnp-purge/plotter-normalize/keyscan/wblock-fallback 제거, 직접 SaveAs 원복
