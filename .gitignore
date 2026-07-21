@@ -29,3 +29,13 @@ primitiv_probe.txt
 
 # === 수동 스파이크 백업 (파일명 중간 _bak_ 형태) ===
 *_bak_*
+
+# === Python 바이트코드 (소스 .py가 원본) ===
+__pycache__/
+*.pyc
+
+# === 빌드 산출물 (루트 잔재 포함) ===
+*.pdb
+
+# === AutoCAD 플롯 로그 (사용자명·캐시경로 포함) ===
+plot.log
