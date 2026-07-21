@@ -18,6 +18,13 @@ set "PFS_NOTAB_BOM_SPIKE=1"
 rem --- auto-extract tags (comma-separated). PFSNOTABTEST loops each. Edit to change types. ---
 set "PFS_NOTAB_TEST_TAG=GD1-001,GD2-001,GD3-001"
 
+rem --- PFSNOTABBATCH dry-run (1 = classify + log only, no drawings) ---
+rem     PFSNOTABBATCH needs an interactive selection, so it is NOT auto-run by this script.
+rem     Usage: run this script, then in ACAD select everything (window/crossing) and type PFSNOTABBATCH.
+rem     Logs: "PFSNOTABBATCH probe" per item (ShortDescription etc.) and "probe-summary" totals.
+rem     Set back to 0 to actually extract drawings.
+set "PFS_NOTAB_BATCH_DRYRUN=1"
+
 rem --- notab callout text position offsets (paper mm, +X=right +Y=up, range +-2000) ---
 rem     Edit these numbers and re-run (no code change). Inherited by AutoCAD via child process env.
 set "PFS_NOTAB_PIPE_CALLOUT_DX=180"
