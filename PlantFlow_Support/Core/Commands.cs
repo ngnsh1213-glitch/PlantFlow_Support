@@ -5289,7 +5289,7 @@ namespace PlantFlow_Support
         this.AppendNotabUboltCallouts(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, vp, memberBoxes);
         // 밸룬은 마지막. 기존 확정 배치(치수·파이프·부재·U-bolt)의 회귀를 최소화한다.
         this.AppendNotabBalloons(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, viewportPaperExt, txt, calloutPlacer, vp,
-          hasVerticalPortAnchor, verticalAnchorX, verticalAnchorBaseY, verticalAnchorTopY, dimReferenceMinX, maxX);
+          hasVerticalPortAnchor, verticalAnchorX, verticalAnchorBaseY, verticalAnchorTopY, dimReferenceMinX, maxX, memberBoxes);
 
         PlantOrthoView.FileDiag("PFSNOTABDETAIL dim append H=" + this.FormatNumber(realW) + " V=" + this.FormatNumber(realH) + " dimV(F)=" + dimVText + " dimVBarSpan=" + dimVBarSpan + " vMode=" + verticalMode + " barRealH=" + (double.IsNaN(barPaperH) ? (string.IsNullOrWhiteSpace(s_isoSupportProfileHeight) ? "empty" : s_isoSupportProfileHeight) : this.FormatNumber(barRealH)) + " barPaperH=" + (double.IsNaN(barPaperH) ? "NaN" : this.FormatNumber(barPaperH)) + " paperH=" + this.FormatNumber(paperH) + " vScale=" + this.FormatNumber(vScale) + " callout=" + (string.IsNullOrWhiteSpace(s_isoSupportDesignation) ? "skip" : s_isoSupportDesignation) + " BI=" + (string.IsNullOrWhiteSpace(s_isoSupportBI) ? "skip" : s_isoSupportBI) + " split=(" + (double.IsNaN(leftReal) ? "skip" : this.FormatNumber(leftReal)) + "," + (double.IsNaN(rightReal) ? "skip" : this.FormatNumber(rightReal)) + ") side=" + (horizontalBottom ? "bottom" : "top") + " sideMode=" + horizontalSide + " type=" + (string.IsNullOrWhiteSpace(s_isoSupportTag) ? "unknown" : this.GetSupportTypePrefix(s_isoSupportTag)) + " std=" + standardName + " pipeCenterX(paper)=" + (double.IsNaN(pipeCenterXPaper) ? "NaN" : this.FormatNumber(pipeCenterXPaper)) + " pipeCenterY(paper)=" + (double.IsNaN(pipeCenterYPaper) ? "NaN" : this.FormatNumber(pipeCenterYPaper)) + " centerY=" + this.FormatNumber(centerY) + " splitGuard=" + splitGuard + " paperExt=" + this.FormatExtents(supportPaperExt) + " txt=" + this.FormatNumber(txt) + " offset=" + this.FormatNumber(offset) + " stack=" + this.FormatNumber(stack));
       }
@@ -8219,7 +8219,7 @@ namespace PlantFlow_Support
       ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, Extents3d viewportPaperExt,
       double txt, NotabCalloutPlacer placer, Viewport vp,
       bool hasVerticalAnchor, double verticalX, double verticalBaseY, double verticalTopY,
-      double horizontalMinX, double horizontalMaxX)
+      double horizontalMinX, double horizontalMaxX, System.Collections.Generic.List<NotabMemberBox> memberBoxes)
     {
       if (tr == null || layoutBtr == null || db == null || placer == null)
         return;
@@ -8293,22 +8293,51 @@ namespace PlantFlow_Support
         double subW = subLabel.Length == 0 ? 0.0 : subLabel.Length * txt * 0.7;
 
         // ── 부재 사각형 ────────────────────────────────────────────
-        // 화살표는 부재 중심이 아니라 부재 외곽에 닿아야 한다. 병합 솔리드라 기하로는
-        // 부재를 못 뽑지만, 구간은 이미 안다(cycle90 A+A1 / cycle92 기둥 구간).
+        // 화살표는 부재 중심이 아니라 부재 외곽에 닿아야 한다. 실측 박스를 우선하고,
+        // 해당 박스가 없을 때만 기존 구간 추정을 사용한다.
         double memberThick = System.Math.Max(txt, radius);
-        Extents3d memberRect;
-        if (isVerticalMember)
-          memberRect = new Extents3d(
-            new Point3d(verticalX - memberThick / 2.0, verticalBaseY, 0.0),
-            new Point3d(verticalX + memberThick / 2.0, verticalTopY, 0.0));
-        else if (string.Equals(anchorAdjust, "horizontal-mid", System.StringComparison.Ordinal))
-          memberRect = new Extents3d(
-            new Point3d(horizontalMinX, anchor.Y - memberThick / 2.0, 0.0),
-            new Point3d(horizontalMaxX, anchor.Y + memberThick / 2.0, 0.0));
-        else
-          memberRect = new Extents3d(
-            new Point3d(anchor.X - memberThick / 2.0, anchor.Y - memberThick / 2.0, 0.0),
-            new Point3d(anchor.X + memberThick / 2.0, anchor.Y + memberThick / 2.0, 0.0));
+        Extents3d memberRect = new Extents3d(Point3d.Origin, Point3d.Origin);
+        bool measuredMemberRect = false;
+        double measuredArea = double.MaxValue;
+        if (memberBoxes != null)
+        {
+          for (int boxIndex = 0; boxIndex < memberBoxes.Count; boxIndex++)
+          {
+            Extents3d candidate = memberBoxes[boxIndex].PaperBox;
+            double candidateW = candidate.MaxPoint.X - candidate.MinPoint.X;
+            double candidateH = candidate.MaxPoint.Y - candidate.MinPoint.Y;
+            if (candidateW <= 1e-6 || candidateH <= 1e-6
+              || anchor.X < candidate.MinPoint.X || anchor.X > candidate.MaxPoint.X
+              || anchor.Y < candidate.MinPoint.Y || anchor.Y > candidate.MaxPoint.Y)
+              continue;
+            double candidateArea = candidateW * candidateH;
+            if (candidateArea < measuredArea)
+            {
+              memberRect = candidate;
+              measuredArea = candidateArea;
+              measuredMemberRect = true;
+            }
+          }
+        }
+        if (!measuredMemberRect)
+        {
+          if (isVerticalMember)
+            memberRect = new Extents3d(
+              new Point3d(verticalX - memberThick / 2.0, verticalBaseY, 0.0),
+              new Point3d(verticalX + memberThick / 2.0, verticalTopY, 0.0));
+          else if (string.Equals(anchorAdjust, "horizontal-mid", System.StringComparison.Ordinal))
+            memberRect = new Extents3d(
+              new Point3d(horizontalMinX, anchor.Y - memberThick / 2.0, 0.0),
+              new Point3d(horizontalMaxX, anchor.Y + memberThick / 2.0, 0.0));
+          else
+            memberRect = new Extents3d(
+              new Point3d(anchor.X - memberThick / 2.0, anchor.Y - memberThick / 2.0, 0.0),
+              new Point3d(anchor.X + memberThick / 2.0, anchor.Y + memberThick / 2.0, 0.0));
+        }
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon member-rect key=" + item
+          + " source=" + (measuredMemberRect ? "measured" : "estimated")
+          + " W=" + this.FormatNumber(memberRect.MaxPoint.X - memberRect.MinPoint.X)
+          + " H=" + this.FormatNumber(memberRect.MaxPoint.Y - memberRect.MinPoint.Y));
 
         // ── 한적한 자리 찾기 ──────────────────────────────────────
         // 서포트 bbox 밖으로만 밀어내면 도면 내부의 빈 공간을 못 쓴다.
@@ -8326,7 +8355,8 @@ namespace PlantFlow_Support
         bool outwardLeft = false;
         string placeDiag = "none";
         double bestScore = double.MinValue;
-        double leaderW = this.GetEnvDouble("PFS_NOTAB_BALLOON_LEADER_W", 0.6, 0.0, 10.0);
+        double leaderW = this.GetEnvDouble("PFS_NOTAB_BALLOON_LEADER_W", 2.0, 0.0, 10.0);
+        double maxSteps = this.GetEnvDouble("PFS_NOTAB_BALLOON_MAX_STEPS", 4.0, 1.0, 16.0);
 
         Point3d memberCenter = new Point3d(
           (memberRect.MinPoint.X + memberRect.MaxPoint.X) / 2.0,
@@ -8334,7 +8364,7 @@ namespace PlantFlow_Support
 
         for (int d = 0; d < dirs.Length; d++)
         {
-          for (double dist = gap + radius; dist <= gap + radius + step * 8.0; dist += step)
+          for (double dist = gap + radius; dist <= gap + radius + step * maxSteps; dist += step)
           {
             // 부재 외곽에서 그 방향으로 dist만큼. 긴 부재는 중심이 아니라 가까운 변에서 출발한다.
             Point3d from = NotabCalloutPlacer.BoxEdgeToward(memberRect, new Point3d(
