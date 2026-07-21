@@ -39,3 +39,7 @@ __pycache__/
 
 # === AutoCAD 플롯 로그 (사용자명·캐시경로 포함) ===
 plot.log
+
+# === Claude Code 도구 설정 (승인 기록 자동 생성물) ===
+.claude/settings.json
+.claude/settings.local.json

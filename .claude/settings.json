@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(Set-Location D:\\\\PlantFlow\\\\PlantFlow_Ortho\\\\PlantFlow_Ortho; Write-Output \"=== projectRoot를 어떻게 얻는가 ===\"; Select-String -Path Services\\\\BomExtractionService.cs -Pattern 'CurrentProject' -Context 2,8 | Select-Object -First 1 | ForEach-Object { $_.Context.PreContext + $_.Line + $_.Context.PostContext } | ForEach-Object { \"  \" + $_.Trim\\(\\) })"
-    ]
-  }
-}
