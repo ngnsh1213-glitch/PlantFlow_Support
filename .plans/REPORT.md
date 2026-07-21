@@ -30,4 +30,4 @@
 
 ## 커밋
 
-- 커밋 전
+- `e2d0606` `fix: anchor notab balloons and ubolt leaders`
