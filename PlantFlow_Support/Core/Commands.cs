@@ -8360,52 +8360,62 @@ namespace PlantFlow_Support
             geomSource = "horizontal-span minX=" + this.FormatNumber(endMinX) + " maxX=" + this.FormatNumber(endMaxX);
           }
 
-          double outDist = gap + radius;
           double bestClear = double.MinValue;
           string endDiag = "none";
-          // 좌 끝단(바깥=왼쪽) / 우 끝단(바깥=오른쪽) 두 후보만 본다.
-          for (int e = 0; e < 2; e++)
+          // 기둥은 서포트 실루엣 안쪽에 있어 고정 거리로는 좌우 모두 막힌다(cycle102 실측).
+          // 같은 수평 방향으로 단계적으로 밀어내되, 자유 후보가 나오는 첫 단계에서 멈춰
+          // 리더가 필요 이상 길어지지 않게 한다. F1은 대개 k=0에서 끝난다.
+          // 실측 필요 단계: 축 292.5는 우측 8, 311은 6, 342는 4 → 기본 12로 여유를 둔다.
+          double memberSteps = this.GetEnvDouble("PFS_NOTAB_MEMBER_BALLOON_MAX_STEPS", 12.0, 0.0, 32.0);
+          for (int k = 0; k <= (int)memberSteps && !placed; k++)
           {
-            bool toLeftEnd = e == 0;
-            double endX = toLeftEnd ? endMinX : endMaxX;
-            Point3d endAnchor = new Point3d(endX, endY, 0.0);
-            double cx = toLeftEnd ? endX - outDist : endX + outDist;
-            Point3d c = new Point3d(cx, endY, 0.0);
+            double outDist = gap + radius + step * k;
+            // 좌 끝단(바깥=왼쪽) / 우 끝단(바깥=오른쪽) 두 후보를 같은 단계에서 모두 평가한다.
+            // 한쪽을 먼저 찾았다고 즉시 채택하면 "여유 큰 쪽" 규칙이 깨진다.
+            for (int e = 0; e < 2; e++)
+            {
+              bool toLeftEnd = e == 0;
+              double endX = toLeftEnd ? endMinX : endMaxX;
+              // 화살표 시작점은 k와 무관하게 끝단에 고정된다. 멀어지는 것은 원 중심뿐이다.
+              Point3d endAnchor = new Point3d(endX, endY, 0.0);
+              double cx = toLeftEnd ? endX - outDist : endX + outDist;
+              Point3d c = new Point3d(cx, endY, 0.0);
 
-            double bMinX = toLeftEnd ? cx - radius - subGap - subW : cx - radius;
-            double bMaxX = toLeftEnd ? cx + radius : cx + radius + subGap + subW;
-            double half = System.Math.Max(radius, txt / 2.0);
-            Extents3d box = new Extents3d(new Point3d(bMinX, endY - half, 0.0), new Point3d(bMaxX, endY + half, 0.0));
-            candidateCount++;
-            double clearance = placer.ClearanceTo(box);
-            maxClearance = System.Math.Max(maxClearance, clearance);
-            if (!placer.WithinBounds(box))
-            {
-              int oob;
-              rejBy.TryGetValue("oob", out oob);
-              rejBy["oob"] = oob + 1;
-              continue;
-            }
-            Point3d touchPt = new Point3d(toLeftEnd ? cx + radius : cx - radius, endY, 0.0);
-            string rejEnd;
-            if (!placer.IsBalloonFree(box, endAnchor, touchPt, out rejEnd))
-            {
-              int rejected;
-              rejBy.TryGetValue(rejEnd, out rejected);
-              rejBy[rejEnd] = rejected + 1;
-              continue;
-            }
-            freeCount++;
-            // 여유가 큰 쪽 채택. 리더 길이는 두 후보가 동일(outDist)하므로 동점이면 우측을 쓴다.
-            if (clearance > bestClear || (System.Math.Abs(clearance - bestClear) < 1e-9 && !toLeftEnd))
-            {
-              bestClear = clearance;
-              ballCenter = c; ballBox = box; bestAnchor = endAnchor; outwardLeft = toLeftEnd; placed = true;
-              placementTier = "member-end";
-              endDiag = "tier=member-end end=" + (toLeftEnd ? "left" : "right")
-                + " dist=" + this.FormatNumber(outDist)
-                + " clear=" + this.FormatNumber(clearance)
-                + " geom=" + geomSource;
+              double bMinX = toLeftEnd ? cx - radius - subGap - subW : cx - radius;
+              double bMaxX = toLeftEnd ? cx + radius : cx + radius + subGap + subW;
+              double half = System.Math.Max(radius, txt / 2.0);
+              Extents3d box = new Extents3d(new Point3d(bMinX, endY - half, 0.0), new Point3d(bMaxX, endY + half, 0.0));
+              candidateCount++;
+              double clearance = placer.ClearanceTo(box);
+              maxClearance = System.Math.Max(maxClearance, clearance);
+              if (!placer.WithinBounds(box))
+              {
+                int oob;
+                rejBy.TryGetValue("oob", out oob);
+                rejBy["oob"] = oob + 1;
+                continue;
+              }
+              Point3d touchPt = new Point3d(toLeftEnd ? cx + radius : cx - radius, endY, 0.0);
+              string rejEnd;
+              if (!placer.IsBalloonFree(box, endAnchor, touchPt, out rejEnd))
+              {
+                int rejected;
+                rejBy.TryGetValue(rejEnd, out rejected);
+                rejBy[rejEnd] = rejected + 1;
+                continue;
+              }
+              freeCount++;
+              // 같은 단계에서 여유가 큰 쪽 채택. 동점이면 우측.
+              if (clearance > bestClear || (System.Math.Abs(clearance - bestClear) < 1e-9 && !toLeftEnd))
+              {
+                bestClear = clearance;
+                ballCenter = c; ballBox = box; bestAnchor = endAnchor; outwardLeft = toLeftEnd; placed = true;
+                placementTier = "member-end";
+                endDiag = "tier=member-end end=" + (toLeftEnd ? "left" : "right")
+                  + " k=" + k + " dist=" + this.FormatNumber(outDist)
+                  + " clear=" + this.FormatNumber(clearance)
+                  + " geom=" + geomSource;
+              }
             }
           }
           placeDiag = endDiag;
