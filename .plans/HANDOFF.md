@@ -3,88 +3,97 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 97
+- **cycle**: 98
 - **status**: ready
 - **issued_at**: 2026-07-21
-- **title**: 밸룬 화살표를 실측 부재 변 중점에 붙이고 리더 길이를 절반으로 줄인다
+- **title**: 밸룬 화살표·후보 생성 기준을 앵커로 전환, 유볼트는 좌우 변만
 - **작업 경로**: `d:\PlantFlow\PlantFlow_Support\PlantFlow_Support\Core\Commands.cs`
 - **핸드오프 위치**: `d:\PlantFlow\PlantFlow_Support\.plans\HANDOFF.md`
-- **선행 커밋**: `8cfd311` (유볼트 화살표 변 중점 + 최소 면적 박스 채택 — 라이브 PASS)
+- **선행 커밋**: `5383da6` (cycle 97 — 리더 길이 축소는 성공, **화살표 위치는 회귀**)
+- **자문**: Codex(§9) 1회. 지적 3건 반영, 3번째 항목(여유 게이트)은 cycle 99로 분리.
 
-## 배경 (재조사 금지 — 실측 확정)
+## 확정된 원인 (라이브 3회 실측 + 사용자 육안. 재조사 금지)
 
-직전 커밋 `8cfd311`로 **유볼트** 화살표는 해결됐다. 로그(09:05 라이브) 실측:
+cycle 97로 리더 길이는 요구대로 줄었다(F2 `dist=19.6` = 최솟값). **그 성과는 유지한다.**
+회귀한 것은 화살표 위치이며, 근본 원인은 하나다:
 
+> **박스의 변 중점이 부재 위에 있다는 보장이 없다.**
+
+`BoxEdgeMidpointToward`는 "박스 = 부재 실루엣"일 때만 옳다. 실제로는 두 가지가 깨진다.
+1. **병합 박스** — `balloon member-rect key=F2 source=measured W=100 H=120`.
+   기둥·가로재가 병합된 박스라 그 변 중점은 실체 없는 **빈 공간**이다. → F1·F2가 허공에 뜬다.
+2. **U자 형상** — 유볼트 박스의 하변 중점은 **두 다리 사이 빈 공간**이다.
+   → UB-004/UB-006 화살표가 유볼트 중심(빈 곳)을 찍는다.
+   사용자 확정 요구: **"하부가 아닌 사이드가 자연스럽다".**
+
+그리고 cycle 97의 최소 면적 규칙이 **F1에서 유볼트 박스를 오채택**한다:
 ```
-ubolt-box 채택 tag=UB-002 W=17.82 H=17.82 oversizeRejected=1
-ubolt-box 채택 tag=UB-003 W=33.6  H=29.6  oversizeRejected=1
-ubolt-box 채택 tag=UB-004 W=17.82 H=17.82 oversizeRejected=0
-ubolt-box 채택 tag=UB-006 W=17.82 H=17.82 oversizeRejected=0
+balloon member-rect key=F1 source=measured W=33.6 H=29.6   ← UB-003의 박스 (3회 라이브 동일)
 ```
-`ubolt-box 없음` 0건. 사용자 육안 확인 "UB-003 위치 양호". **이 경로는 건드리지 말 것.**
 
-남은 결함은 **밸룬(F1/F2/P1) 경로** 2건이다.
+## 집도 지시 (2건)
 
-### 결함 A — 화살표가 실제 부재 구석에 붙는다
-`8cfd311`에서 `BoxEdgeMidpointToward`(변 중점)를 밸룬에도 적용했는데도 F2 화살표가
-세로기둥 좌상단 구석에 보인다. 원인은 화살표 함수가 아니라 **기준 사각형**이다.
+### 1) 밸룬: 화살표 **와 후보 생성 기준**을 앵커로 전환
+**주의 — 화살표만 바꾸면 안 된다(자문 지적).** `memberRect`는 화살표 위치뿐 아니라
+후보 중심의 출발점·방향까지 결정한다(약 8369행 `from`, `memberCenter`).
+F1처럼 박스를 오채택하면 밸룬이 유볼트 주변에 배치되어, 앵커까지 **오히려 더 긴 리더**가
+생기고 `dist<50` 기준도 깨진다.
 
-`Commands.cs` 약 8298~8311행:
-```csharp
-double memberThick = System.Math.Max(txt, radius);   // = 9.6, 실측 아님 추정값
-if (isVerticalMember)
-  memberRect = new Extents3d(
-    new Point3d(verticalX - memberThick / 2.0, verticalBaseY, 0.0),
-    new Point3d(verticalX + memberThick / 2.0, verticalTopY, 0.0));
-```
-기둥 폭을 **9.6으로 가정한 가상 사각형**이다. 실제 기둥 폭·중심과 어긋나므로,
-그 가상 사각형의 변 중점을 정확히 찍어도 눈에는 실제 기둥의 구석으로 보인다.
+- 화살표 시작점: 약 8339행의
+  `anchor = NotabCalloutPlacer.BoxEdgeMidpointToward(memberRect, ballCenter);`
+  **재대입을 제거**하고 앵커를 그대로 쓴다.
+- 충돌 검사용 `arrowPt`(약 8312행)도 **같은 점**으로 맞춘다. 검사와 작도가 어긋나면 판정이 무의미하다.
+- **후보 생성 기준도 앵커로 옮긴다**: `memberCenter`/`from` 기반으로 방향·거리를 잡던 것을
+  앵커 기준으로 바꾼다. 즉 `dist`는 **앵커에서 밸룬 중심까지의 거리**가 된다.
+  이렇게 하면 `memberRect` 오채택이 배치에 미치는 영향이 실제로 사라진다.
+- 그 결과 `memberRect`와 실측 박스 채택 로직이 **완전히 미사용이 되면 제거**하고,
+  `balloon member-rect` 로그도 함께 정리한다. 죽은 코드를 남기지 말 것.
+  (여전히 쓰이는 곳이 있으면 유지하고, `REPORT.md`에 어디에 남았는지 적을 것.)
 
-### 결함 B — 리더가 항상 최대 길이로 뻗는다
-라이브 로그 `balloon-draw` 9건 중 **6건이 `dist=96.4`(후보 상한)**, 나머지 58 / 38.8.
-최솟값 19.6을 고른 건은 0건이다.
-```
-key=F2 center=(292.5,478.65) r=9.6 dir=2 dist=96.4 clear=78.3 score=20.46
-```
-점수식이 `score = clear - dist * leaderW` (leaderW 기본 0.6)인데, 멀어질수록 `clear`가
-페널티보다 빠르게 커져 **"가장 멀고 한적한 곳"이 항상 이긴다.** F2는 주변에 간섭이
-전혀 없는데도 86.8(=96.4-9.6) 길이의 리더가 그려진다. 사용자 요구 = **절반 수준으로**.
+### 2) 유볼트 화살표는 좌우 변 중점만 허용
+- 유볼트 콜아웃 경로(약 5506행, `AppendNotabDirectCallout`의 `hasAnchorBox` 분기)에서
+  **세로 변(좌/우) 중점만** 고른다. 목표점이 박스 오른쪽이면 우변 중점, 왼쪽이면 좌변 중점.
+  상하 판정은 하지 않는다.
+- **동률 규칙을 명시할 것**(자문 지적): 목표점이 박스 중심선 위(dx == 0)일 때 어느 쪽을 쓸지
+  코드와 주석에 못박는다. 암묵적 동작을 남기지 말 것.
+- 구현은 **좌우 전용 헬퍼를 새로 두는 방식**으로 한다.
+  `BoxEdgeMidpointToward`의 현행 4변 동작은 직접 콜아웃(약 5524행)도 쓰므로 **변경 금지**.
+- 유볼트 박스 채택 로직(`ubolt-box 채택`, 최소 면적 + 과대 기각)은 **수정 금지** — 라이브 PASS 상태다.
 
-## 집도 지시
+### 3) 계측 추가 (다음 사이클 판단 근거)
+- **`rawAnchor` 보존**(자문 지적): 현재 `anchor`는 투영 직후 `vertical-mid`/`horizontal-mid`로
+  **보정된 값**이다(약 8273행). TaggingPoints 원본 투영점을 별도 변수로 보관해
+  `balloon-draw` 줄에 `rawAnchor=(x,y)`로 남긴다. `adjust=`는 현행 유지.
+- 후보 통계를 `balloon-draw`/`balloon-skip` 줄에 추가: `cand=전체후보수 free=충돌없는후보수
+  maxClear=후보중최대여유`. cycle 99의 여유 게이트 기본값을 이 분포로 정한다.
 
-### 1) `memberRect`를 실측 박스 우선으로 (결함 A)
-- `AppendNotabBalloons`에 `List<NotabMemberBox> memberBoxes` 파라미터를 추가한다.
-  **호출부는 `Commands.cs:5291`** 한 곳이며, 그 스코프에 `memberBoxes`가 이미 존재한다
-  (`AppendNotabUboltCallouts`에 같은 것을 넘기고 있다).
-- `memberRect` 결정 순서를 바꾼다:
-  1. `anchor`를 포함하는 `memberBoxes` 중 **최소 면적** 박스를 찾는다.
-     (유볼트에서 쓴 것과 동일한 판정. 단 **과대 박스 기각은 적용하지 말 것** —
-     밸룬은 기둥·가로재 같은 큰 부재를 정당하게 가리킨다.)
-  2. 찾으면 그것을 `memberRect`로 쓴다.
-  3. 못 찾으면 **현행 추정 사각형 로직을 그대로 폴백**으로 남긴다(제거 금지).
-- 어느 경로를 탔는지 로그에 남긴다:
-  `balloon member-rect key=... source=measured|estimated W=.. H=..`
-- `isVerticalMember` / `horizontal-mid` 분기는 폴백 안에서 현행 그대로 유지한다.
+## 이번 사이클에서 하지 말 것
+- `PFS_NOTAB_BALLOON_LEADER_W`(2.0), `PFS_NOTAB_BALLOON_MAX_STEPS`(4) **변경 금지.**
+  리더 길이는 사용자 승인 상태다.
+- **최소 여유 게이트는 넣지 말 것.** cycle 99로 분리했다.
+  이유(자문): 화살표 회귀가 고쳐진 것인지 밸룬이 skip된 것인지 라이브에서 구분 불가.
+  또한 채택 10건 중 8건의 clear가 9.6 미만이라 대량 소실 위험이 있다.
+- **P1이 플레이트가 아닌 부재를 가리키는 문제도 범위 밖.** 앵커 출처 문제이며 `rawAnchor`
+  계측 결과를 보고 별도 사이클에서 다룬다.
+- `BoxEdgeToward`, `BoxEdgeMidpointToward`의 기존 동작 — 손대지 말 것.
 
-### 2) 리더 길이 축소 (결함 B)
-- `PFS_NOTAB_BALLOON_LEADER_W` **기본값 0.6 → 2.0** (범위는 현행 0.0~10.0 유지).
-- 후보 상한 하드코딩 `step * 8.0`을 env로 뺀다:
-  `PFS_NOTAB_BALLOON_MAX_STEPS` **기본 4**, 범위 1~16.
-  → 상한이 `gap + radius + step * 4` = 약 48.4가 된다.
-- 기존 `balloon-draw` 로그의 `dist=` 출력은 유지한다(검증 지표).
+## 알려진 미해결 (cycle 99 예정, 이번엔 손대지 말 것)
+`IsBalloonFree`(약 162행)는 **밸룬 리더와 장애물의 교차를 검사하지 않는다**(자문 발견).
+`ClearanceTo`(약 185행)도 원의 상자만 본다. 따라서 원이 떨어져 있어도 **리더가 치수선을
+가로지를 수 있다.** P1의 치수 겹침이 리더 겹침이라면 이번 사이클로는 해소되지 않는다.
 
 ## 제약
-- 유볼트 경로(`AppendNotabUboltCallouts`, `BoxEdgeMidpointToward`)는 **수정 금지**.
-- `BoxEdgeToward`는 삭제하지 말 것(밸룬 후보 방향 산출 8340행에서 계속 쓴다).
-- 빈 catch 금지. 실패 경로는 반드시 `FileDiag`로 남긴다.
-- 상수 추가는 전부 `GetEnvDouble` 경유(하드코딩 금지).
+- 빈 catch 금지. 실패 경로는 `FileDiag`로 남긴다.
+- 신규 상수는 전부 `GetEnvDouble` 경유(하드코딩 금지).
+- 검사(`IsBalloonFree`)와 작도가 쓰는 점은 항상 동일해야 한다.
+- `ClearanceTo`는 한 후보에서 **1회 계산해 보관**하고 점수·로그에 같은 값을 쓴다(자문 지적).
 
-## 검증 (Codex가 직접 수행)
-1. `dotnet build` — 오류 0. (현재 경고 15건은 기존, 늘리지 말 것)
-2. 커밋 후 `REPORT.md`에 기록.
-3. 라이브 판정은 사용자가 `dev_test.bat`로 수행한다. Codex는 빌드까지만.
+## 검증 (Codex)
+1. `dotnet build` — 오류 0, 경고 15 초과 금지.
+2. 커밋 후 `REPORT.md` 기록. 라이브는 사용자가 `dev_test.bat`로 수행한다.
 
-## 성공 기준 (다음 라이브에서 판정)
-- `balloon member-rect ... source=measured` 가 최소 1건 이상 출력된다.
-- `balloon-draw` 의 `dist=` 가 96.4 상한 고정에서 벗어나고, **F2가 50 미만**으로 내려온다.
-- 육안: F2 화살표가 세로기둥 **상변 정중앙**에 닿는다.
+## 성공 기준 (다음 라이브)
+- F1·F2 화살표가 **허공이 아니라 부재 선 위**에 닿는다.
+- 유볼트 화살표가 U자 **다리(좌 또는 우 측면)**에 닿는다. 하변 중앙 아님.
+- `balloon-draw`의 `dist`가 여전히 50 미만 — 리더 길이 회귀 없음.
+- `rawAnchor=` 와 `cand/free/maxClear` 가 전 건에 출력된다(cycle 99 입력값).
