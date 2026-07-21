@@ -13,9 +13,17 @@ namespace PlantFlow_Support
     {
         // ── 그리드 시스템 저장 위치 ────────────────────────────────────────────
         // 과거에는 C:\TEMP\CADLIB\GridSystem.json을 하드코딩했다(원 개발 환경 경로).
-        // 고객 PC에 그 경로가 없으면 동작하지 않으므로, 열린 Plant 프로젝트 경로를 키로
-        // 사용자 로컬에 보관한다. PFO(BomConfigService)와 동일한 규약이다:
-        //   %LocalAppData%\PlantFlow\projects\<sha1(정규화된 프로젝트 경로)>_gridsystem.json
+        // 고객 PC에 그 경로가 없으면 동작하지 않는다.
+        //
+        // [제품 데이터 저장 규약 2026-07-21] 프로젝트별 데이터는 활성 Plant 프로젝트 폴더 아래
+        // 제품 전용 폴더에 둔다: <ProjectDirectory>\PlantFlow_PFS\GridSystem.json
+        // 그리드는 도면 기준 데이터라 프로젝트와 함께 이동·백업되고 팀원과 공유되어야 한다.
+        // (PFO도 같은 규약으로 <ProjectDirectory>\PlantFlow_PFO\bom.json을 쓴다.)
+        //
+        // 이관 순서: 새 위치 → (없으면) LocalAppData 해시 경로 → (없으면) CADLIB 레거시.
+        // 앞선 위치에서 발견하면 새 위치로 1회 복사한다.
+        private const string ProductFolderName = "PlantFlow_PFS";
+        private const string GridSystemFileName = "GridSystem.json";
         private const string LegacyGridSystemPath = @"C:\TEMP\CADLIB\GridSystem.json";
 
         // 활성 Plant 3D 프로젝트의 Piping 파트 디렉터리. 프로젝트가 없으면 null.
@@ -62,26 +70,23 @@ namespace PlantFlow_Support
         // ensureDirectory=true면 저장 직전에 폴더를 만든다.
         public static string GetGridSystemPath(bool ensureDirectory)
         {
-            string norm = NormalizeRoot(GetActiveProjectRoot());
-            if (string.IsNullOrEmpty(norm))
+            string root = GetActiveProjectRoot();
+            if (string.IsNullOrWhiteSpace(root))
             {
                 PlantOrthoView.FileDiag("ProjectDataUtils 그리드 경로 확정 실패: 활성 Plant 프로젝트 없음");
                 return null;
             }
 
-            string hash;
-            using (System.Security.Cryptography.SHA1 sha = System.Security.Cryptography.SHA1.Create())
+            string folder;
+            try
             {
-                byte[] bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(norm));
-                System.Text.StringBuilder sb = new System.Text.StringBuilder(bytes.Length * 2);
-                foreach (byte b in bytes) sb.Append(b.ToString("x2"));
-                hash = sb.ToString();
+                folder = Path.Combine(Path.GetFullPath(root.Trim()), ProductFolderName);
             }
-
-            string folder = Path.Combine(
-                System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
-                "PlantFlow", "projects");
-            string path = Path.Combine(folder, hash + "_gridsystem.json");
+            catch (System.Exception ex)
+            {
+                PlantOrthoView.FileDiag("ProjectDataUtils 제품 폴더 해석 예외: " + ex.GetType().Name + ": " + ex.Message + " root=" + root);
+                return null;
+            }
 
             if (ensureDirectory)
             {
@@ -91,11 +96,31 @@ namespace PlantFlow_Support
                 }
                 catch (System.Exception ex)
                 {
+                    // 공유 폴더 권한·Vault 체크아웃 등으로 실패할 수 있다. 호출부가 판단하도록 null.
                     PlantOrthoView.FileDiag("ProjectDataUtils 그리드 폴더 생성 예외: " + ex.GetType().Name + ": " + ex.Message + " folder=" + folder);
                     return null;
                 }
             }
-            return path;
+            return Path.Combine(folder, GridSystemFileName);
+        }
+
+        // [레거시] %LocalAppData%\PlantFlow\projects\<sha1(정규화된 프로젝트 경로)>_gridsystem.json
+        // 2026-07-21 이전 방식. 이관 원본으로만 쓴다.
+        private static string GetLegacyHashedGridPath()
+        {
+            string norm = NormalizeRoot(GetActiveProjectRoot());
+            if (string.IsNullOrEmpty(norm)) return null;
+            string hash;
+            using (System.Security.Cryptography.SHA1 sha = System.Security.Cryptography.SHA1.Create())
+            {
+                byte[] bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(norm));
+                System.Text.StringBuilder sb = new System.Text.StringBuilder(bytes.Length * 2);
+                foreach (byte b in bytes) sb.Append(b.ToString("x2"));
+                hash = sb.ToString();
+            }
+            return Path.Combine(
+                System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
+                "PlantFlow", "projects", hash + "_gridsystem.json");
         }
 
         // 읽기용 경로. 새 위치에 없고 레거시 파일이 있으면 1회 이관한 뒤 새 위치를 쓴다.
@@ -103,35 +128,46 @@ namespace PlantFlow_Support
         public static string ResolveGridSystemPathForRead()
         {
             string path = GetGridSystemPath(false);
-            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            if (!string.IsNullOrEmpty(path) && SafeFileExists(path))
                 return path;
 
-            bool hasLegacy = false;
-            try { hasLegacy = File.Exists(LegacyGridSystemPath); }
-            catch (System.Exception ex)
-            { PlantOrthoView.FileDiag("ProjectDataUtils 레거시 그리드 확인 예외: " + ex.GetType().Name + ": " + ex.Message); }
-
-            if (!hasLegacy)
-                return path;
-
-            if (string.IsNullOrEmpty(path))
+            // 이관 원본 우선순위: LocalAppData 해시(직전 방식) → CADLIB(원 개발 환경).
+            string[] sources = new string[] { GetLegacyHashedGridPath(), LegacyGridSystemPath };
+            for (int i = 0; i < sources.Length; i++)
             {
-                PlantOrthoView.FileDiag("ProjectDataUtils 그리드 레거시 사용(활성 프로젝트 없음) path=" + LegacyGridSystemPath);
-                return LegacyGridSystemPath;
+                string source = sources[i];
+                if (string.IsNullOrEmpty(source) || !SafeFileExists(source)) continue;
+
+                if (string.IsNullOrEmpty(path))
+                {
+                    PlantOrthoView.FileDiag("ProjectDataUtils 그리드 레거시 사용(새 경로 확정 실패) path=" + source);
+                    return source;
+                }
+
+                try
+                {
+                    string folder = Path.GetDirectoryName(path);
+                    if (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder)) Directory.CreateDirectory(folder);
+                    File.Copy(source, path, false);
+                    PlantOrthoView.FileDiag("ProjectDataUtils 그리드 레거시 이관 " + source + " -> " + path);
+                    return path;
+                }
+                catch (System.Exception ex)
+                {
+                    PlantOrthoView.FileDiag("ProjectDataUtils 그리드 레거시 이관 실패(레거시 사용): " + ex.GetType().Name + ": " + ex.Message + " source=" + source);
+                    return source;
+                }
             }
+            return path;
+        }
 
-            try
-            {
-                string folder = Path.GetDirectoryName(path);
-                if (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder)) Directory.CreateDirectory(folder);
-                File.Copy(LegacyGridSystemPath, path, false);
-                PlantOrthoView.FileDiag("ProjectDataUtils 그리드 레거시 이관 " + LegacyGridSystemPath + " -> " + path);
-                return path;
-            }
+        private static bool SafeFileExists(string path)
+        {
+            try { return !string.IsNullOrEmpty(path) && File.Exists(path); }
             catch (System.Exception ex)
             {
-                PlantOrthoView.FileDiag("ProjectDataUtils 그리드 레거시 이관 실패(레거시 사용): " + ex.GetType().Name + ": " + ex.Message);
-                return LegacyGridSystemPath;
+                PlantOrthoView.FileDiag("ProjectDataUtils 파일 확인 예외: " + ex.GetType().Name + ": " + ex.Message + " path=" + path);
+                return false;
             }
         }
 
