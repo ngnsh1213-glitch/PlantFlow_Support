@@ -30,4 +30,4 @@
 
 ## 커밋
 
-- `1b55d76` `fix: restore notab balloon and ubolt leaders`
+- `3017b1d` `fix: restore notab balloon and ubolt leaders`
