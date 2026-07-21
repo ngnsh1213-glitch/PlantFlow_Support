@@ -4,6 +4,8 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <OutputType>Library</OutputType>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- 리본(Autodesk.Windows)은 WPF 타입을 쓴다. 버튼 아이콘(BitmapImage)·ICommand에 필요. PFO와 동일. -->
+    <UseWPF>true</UseWPF>
     <LangVersion>latest</LangVersion>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
