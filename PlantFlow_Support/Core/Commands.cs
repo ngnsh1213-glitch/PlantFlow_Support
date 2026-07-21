@@ -75,9 +75,9 @@ namespace PlantFlow_Support
             double boxLeft = textLeft ? x - width : x;
             Extents3d box = new Extents3d(new Point3d(boxLeft, y - height / 2.0, 0.0), new Point3d(boxLeft + width, y + height / 2.0, 0.0));
             if (OutOfBounds(box)) { rejectOob++; continue; }
-            double baseY = y - height / 2.0 - ReadEnvDouble("PFS_NOTAB_CALLOUT_TEXT_GAP", 3.0);
-            Point3d candP1 = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, baseY, 0.0);
-            Point3d candP2 = new Point3d(textLeft ? box.MinPoint.X : box.MaxPoint.X, baseY, 0.0);
+            // 문자 상자의 리더 접속점은 좌·우 변의 중단이다. 검사, 작도, 등록이 같은 점을 쓴다.
+            Point3d candP1 = new Point3d(textLeft ? box.MaxPoint.X : box.MinPoint.X, y, 0.0);
+            Point3d candP2 = new Point3d(textLeft ? box.MinPoint.X : box.MaxPoint.X, y, 0.0);
             string reject;
             if (!Free(box, leaderFrom, candP1, candP1, leaderScope, ownerTag, out reject))
             {
@@ -5538,7 +5538,7 @@ namespace PlantFlow_Support
       {
         mt.Contents = designation;
         mt.TextHeight = txt;
-        mt.Attachment = AttachmentPoint.BottomLeft;
+        mt.Attachment = AttachmentPoint.MiddleLeft;
         mt.Location = Point3d.Origin;
         if (textStyleId != ObjectId.Null) mt.TextStyleId = textStyleId;
         if (layerId != ObjectId.Null) mt.LayerId = layerId;
@@ -5579,23 +5579,23 @@ namespace PlantFlow_Support
         bool right = !left;
         double leftX = right ? System.Math.Max(near.X, leaderFrom.X + effectiveMinDx) : System.Math.Min(near.X, leaderFrom.X - effectiveMinDx) - actualWidth;
         double rightX = leftX + actualWidth;
-        double textGap = this.GetEnvDouble("PFS_NOTAB_CALLOUT_TEXT_GAP", 3.0, 0.0, 50.0);
         // placer가 확정한 단일 종점을 그대로 사용해 충돌 모델과 작도를 일치시킨다.
-        double baseY = p1.Y;
+        double middleY = p1.Y;
         double nearX = p1.X;
-        mt.Location = new Point3d(leftX, baseY + textGap, 0.0);
+        mt.Attachment = left ? AttachmentPoint.MiddleRight : AttachmentPoint.MiddleLeft;
+        mt.Location = new Point3d(left ? rightX : leftX, middleY, 0.0);
 
         Leader leader = new Leader();
         leader.AppendVertex(leaderFrom);
-        leader.AppendVertex(new Point3d(nearX, baseY, 0.0));
+        leader.AppendVertex(new Point3d(nearX, middleY, 0.0));
         leader.HasArrowHead = true;
         leader.Dimasz = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
         if (layerId != ObjectId.Null) leader.LayerId = layerId;
         leader.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)1);
         layoutBtr.AppendEntity(leader);
         tr.AddNewlyCreatedDBObject(leader, true);
-        if (placer != null) placer.Commit(leaderFrom, new Point3d(nearX, baseY, 0.0), near, actualWidth, actualHeight);
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-draw designation=" + designation + " anchor=" + anchor + " leaderFrom=" + this.FormatPoint(leaderFrom) + " endX=" + this.FormatNumber(nearX) + " baseY=" + this.FormatNumber(baseY) + " effectiveMinDx=" + this.FormatNumber(effectiveMinDx) + " W=" + this.FormatNumber(actualWidth) + " H=" + this.FormatNumber(actualHeight) + " requiredSide=" + (requiredSide == NotabCalloutPlacer.RequiredSide.Left ? "left" : "right") + " sideSrc=" + sideSource + " referenceX=" + this.FormatNumber(anchor.X) + " viewportCenterX=" + this.FormatNumber(viewportCenterX) + " side=" + (right ? "right" : "left") + " sep=" + this.FormatNumber(right ? nearX - leaderFrom.X : leaderFrom.X - nearX) + " " + diagnostic);
+        if (placer != null) placer.Commit(leaderFrom, new Point3d(nearX, middleY, 0.0), near, actualWidth, actualHeight);
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-draw designation=" + designation + " anchor=" + anchor + " leaderFrom=" + this.FormatPoint(leaderFrom) + " endX=" + this.FormatNumber(nearX) + " middleY=" + this.FormatNumber(middleY) + " effectiveMinDx=" + this.FormatNumber(effectiveMinDx) + " W=" + this.FormatNumber(actualWidth) + " H=" + this.FormatNumber(actualHeight) + " requiredSide=" + (requiredSide == NotabCalloutPlacer.RequiredSide.Left ? "left" : "right") + " sideSrc=" + sideSource + " referenceX=" + this.FormatNumber(anchor.X) + " viewportCenterX=" + this.FormatNumber(viewportCenterX) + " side=" + (right ? "right" : "left") + " sep=" + this.FormatNumber(right ? nearX - leaderFrom.X : leaderFrom.X - nearX) + " " + diagnostic);
       }
       catch (System.Exception ex)
       {
@@ -8349,7 +8349,15 @@ namespace PlantFlow_Support
         // 그 다음 Handle 사전순으로 고정해 다른 부재의 외곽을 가리키지 않게 한다.
         Extents3d itemBox;
         bool hasItemBox = this.TryGetNotabBalloonItemBox(memberBoxes, rawAnchor, isVerticalMember, out itemBox);
-        if (hasItemBox)
+        // P1은 포트 자체가 실제 부재 접속점이다. 외곽 접점 보정이 앵커를 부재 밖으로
+        // 밀어내므로 P1에 한해서 rawAnchor를 유지한다. F 계열 포트 보정은 그대로 둔다.
+        bool useLocalBoxAnchor = hasItemBox && !string.Equals(bomItem, "P1", System.StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(bomItem, "P1", System.StringComparison.OrdinalIgnoreCase))
+        {
+          anchor = rawAnchor;
+          anchorAdjust = "port";
+        }
+        if (useLocalBoxAnchor)
           anchorAdjust += "+local-box";
 
         // 밸룬 옆 부재 코드(ANGLE A6 → A6). 표를 보지 않아도 규격을 알 수 있다.
@@ -8374,51 +8382,68 @@ namespace PlantFlow_Support
         double bestScore = double.MinValue;
         double leaderW = this.GetEnvDouble("PFS_NOTAB_BALLOON_LEADER_W", 2.0, 0.0, 10.0);
         double maxSteps = this.GetEnvDouble("PFS_NOTAB_BALLOON_MAX_STEPS", 4.0, 1.0, 16.0);
+        double extSteps = this.GetEnvDouble("PFS_NOTAB_BALLOON_EXT_STEPS", 12.0, 1.0, 32.0);
+        extSteps = System.Math.Max(maxSteps, extSteps);
         int candidateCount = 0, freeCount = 0;
         double maxClearance = double.MinValue;
         Point3d bestAnchor = anchor;
         System.Collections.Generic.Dictionary<string, int> rejBy = new System.Collections.Generic.Dictionary<string, int>();
+        string placementTier = "normal";
 
-        for (int d = 0; d < dirs.Length; d++)
+        // 1단계는 기존 거리 범위를 모두 평가해 짧은 리더 선호를 보존한다.
+        // 2단계는 1단계가 완전히 실패했을 때만 시작하고, 처음 자유 후보가 나온 거리 링만
+        // 평가한다. 따라서 clearance 점수가 먼 거리를 과도하게 선호하지 않는다.
+        for (int tier = 0; tier < 2 && !placed; tier++)
         {
-          for (double dist = gap + radius; dist <= gap + radius + step * maxSteps; dist += step)
+          double firstStep = tier == 0 ? 0.0 : maxSteps + 1.0;
+          double lastStep = tier == 0 ? maxSteps : extSteps;
+          for (double stepIndex = firstStep; stepIndex <= lastStep && !(tier == 1 && placed); stepIndex++)
           {
-            double cx = anchor.X + dirs[d][0] * dist;
-            double cy = anchor.Y + dirs[d][1] * dist;
-            Point3d c = new Point3d(cx, cy, 0.0);
-            Point3d candidateAnchor = hasItemBox ? NotabCalloutPlacer.BoxEdgeMidpointToward(itemBox, c) : anchor;
-            bool toLeft = cx < candidateAnchor.X || (System.Math.Abs(cx - candidateAnchor.X) < 1e-9 && dirs[d][0] <= 0);
-
-            double bMinX = toLeft ? cx - radius - subGap - subW : cx - radius;
-            double bMaxX = toLeft ? cx + radius : cx + radius + subGap + subW;
-            double half = System.Math.Max(radius, txt / 2.0);
-            Extents3d box = new Extents3d(new Point3d(bMinX, cy - half, 0.0), new Point3d(bMaxX, cy + half, 0.0));
-            candidateCount++;
-            double clearance = placer.ClearanceTo(box);
-            maxClearance = System.Math.Max(maxClearance, clearance);
-            if (!placer.WithinBounds(box)) continue;
-
-            Vector3d dir = c - candidateAnchor;
-            if (dir.Length < 1e-9) continue;
-            Point3d touchPt = c - dir.GetNormal() * radius;
-            string rej;
-            if (!placer.IsBalloonFree(box, candidateAnchor, touchPt, out rej))
+            double dist = gap + radius + step * stepIndex;
+            bool freeAtThisDistance = false;
+            for (int d = 0; d < dirs.Length; d++)
             {
-              int rejected;
-              rejBy.TryGetValue(rej, out rejected);
-              rejBy[rej] = rejected + 1;
-              continue;
-            }
-            freeCount++;
+              double cx = anchor.X + dirs[d][0] * dist;
+              double cy = anchor.Y + dirs[d][1] * dist;
+              Point3d c = new Point3d(cx, cy, 0.0);
+              Point3d candidateAnchor = useLocalBoxAnchor ? NotabCalloutPlacer.BoxEdgeMidpointToward(itemBox, c) : anchor;
+              bool toLeft = cx < candidateAnchor.X || (System.Math.Abs(cx - candidateAnchor.X) < 1e-9 && dirs[d][0] <= 0);
 
-            double score = clearance - dir.Length * leaderW;
-            if (score > bestScore)
-            {
-              bestScore = score; ballCenter = c; ballBox = box; bestAnchor = candidateAnchor; outwardLeft = toLeft; placed = true;
-              placeDiag = "dir=" + d + " dist=" + this.FormatNumber(dir.Length)
-                + " clear=" + this.FormatNumber(clearance)
-                + " score=" + this.FormatNumber(score);
+              double bMinX = toLeft ? cx - radius - subGap - subW : cx - radius;
+              double bMaxX = toLeft ? cx + radius : cx + radius + subGap + subW;
+              double half = System.Math.Max(radius, txt / 2.0);
+              Extents3d box = new Extents3d(new Point3d(bMinX, cy - half, 0.0), new Point3d(bMaxX, cy + half, 0.0));
+              candidateCount++;
+              double clearance = placer.ClearanceTo(box);
+              maxClearance = System.Math.Max(maxClearance, clearance);
+              if (!placer.WithinBounds(box)) continue;
+
+              Vector3d dir = c - candidateAnchor;
+              if (dir.Length < 1e-9) continue;
+              Point3d touchPt = c - dir.GetNormal() * radius;
+              string rej;
+              if (!placer.IsBalloonFree(box, candidateAnchor, touchPt, out rej))
+              {
+                int rejected;
+                rejBy.TryGetValue(rej, out rejected);
+                rejBy[rej] = rejected + 1;
+                continue;
+              }
+              freeCount++;
+              freeAtThisDistance = true;
+
+              double score = clearance - dir.Length * leaderW;
+              if (score > bestScore)
+              {
+                bestScore = score; ballCenter = c; ballBox = box; bestAnchor = candidateAnchor; outwardLeft = toLeft; placed = true;
+                placementTier = tier == 0 ? "normal" : "extended";
+                placeDiag = "tier=" + placementTier + " dir=" + d + " dist=" + this.FormatNumber(dir.Length)
+                  + " clear=" + this.FormatNumber(clearance)
+                  + " score=" + this.FormatNumber(score);
+              }
             }
+            // 확장 단계는 최초 자유 거리 링의 후보만 비교한다.
+            if (tier == 1 && freeAtThisDistance) break;
           }
         }
 
@@ -8429,7 +8454,7 @@ namespace PlantFlow_Support
           { if (rejSummary.Length > 0) rejSummary.Append(","); rejSummary.Append(kv.Key).Append("=").Append(kv.Value); }
           PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item + " reason=no-space perimeter"
             + " cand=" + candidateCount + " free=" + freeCount
-            + " maxClear=" + this.FormatNumber(maxClearance) + " rejBy{" + rejSummary.ToString() + "}");
+            + " maxClear=" + this.FormatNumber(maxClearance) + " tier=extended extended=true rejBy{" + rejSummary.ToString() + "}");
           continue;
         }
 
@@ -8494,9 +8519,9 @@ namespace PlantFlow_Support
             + " sub='" + subLabel + "' adjust=" + anchorAdjust
             + " rawAnchor=" + this.FormatPoint(rawAnchor) + " anchor=" + this.FormatPoint(anchor) + " center=" + this.FormatPoint(ballCenter)
             + " r=" + this.FormatNumber(radius)
-            + " box=" + this.FormatExtents(ballBox)
+          + " box=" + this.FormatExtents(ballBox)
             + " side=" + (left ? "left" : "right") + " cand=" + candidateCount
-            + " free=" + freeCount + " maxClear=" + this.FormatNumber(maxClearance) + " " + diag);
+            + " free=" + freeCount + " maxClear=" + this.FormatNumber(maxClearance) + " tier=" + placementTier + " extended=" + (placementTier == "extended" ? "true" : "false") + " " + diag);
         }
         catch (System.Exception ex)
         {
