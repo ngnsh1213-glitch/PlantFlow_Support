@@ -33,4 +33,4 @@
 
 ## 커밋
 
-- 코드: 커밋 대기
+- 코드: `bb020e5` `feat: integrate notab drawing batch UI`
