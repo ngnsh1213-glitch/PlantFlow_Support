@@ -176,9 +176,29 @@
 2. `GetNotabTypeConfig`: RC4·RC5(param/F2/vertical), RC7·RC8(none).
 3. vertical dim 코드에 **`VerticalMode="none"` 분기 신규** — 세로 치수 미작도(값·앵커 모두 skip). rcMemberGeometry여도 none이면 세로 안 그림.
 
-## 후속(별 사이클, 변동 없음)
-- F1·F2 밸룬(RC5): TaggingPoint가 F1=하단 가로재/F2=세로 기둥 가리키게. `IsNotabVerticalMemberPort` WcsP0==S2 불일치 근인.
-- P1 밸룬 누락, RC9 F3 — 단 RC6/RC9는 사용자가 제외했으므로 P1 후속은 다른 타입 필요 시.
+## ★ cycle 105 라이브 검증 PASS (2026-07-22)
+- RC5: 가로 400/250/**650**(=A+A1), 세로 **600**(F2). 치수 이상없음(사용자 확정). RC4/7/8도 동일 원리로 통과 예상.
+- F1·F2 밸룬 미이동 = 예상대로(cycle 105 치수 전용).
+
+## cycle 106 = RC7 분할 + 밸룬(라이브 2차 실측 2026-07-22)
+### RC7 가로 A/A1 분할 누락 (치수, 진단 완료)
+- 로그: `split=(skip,skip) splitGuard=True pipeCenterX=368 paperExt X=288~383`. 우측=383-368=**15 paper < 한계 16**.
+- 코드: 3623~3634. `paramsHorizontal`이면 분할점=A/A1 경계(3625), 값=A/A1(3629-30) **정확**. 하지만 3633 `splitGuard`(파이프센터용)가 A1=150→15paper(vScale 0.1)를 억제.
+- 수정: **`paramsHorizontal`이면 splitGuard 우회**(A/A1 분할은 작아도 의미 있음). 3634 조건에 `|| paramsHorizontal` 또는 param일 때 limit 축소.
+
+### 밸룬 앵커 소스 확정 (StandardSupport.cs TaggingPoints)
+- `s_isoBalloonAnchors`는 `StandardSupport.StandardInformation(std)`의 `TaggingPoints`(p0)에서 옴(Commands.cs:6713-6726).
+- **RC5**: `keys={F1|F2|P1_0|P1_1}` 4개 다 존재. F2 p0=상단플레이트(paper 402.5,401), F1 p0=좌측. **위치 오류=StandardSupport RC5 TaggingPoint 포트 지정 문제.** F2는 S2(기둥)여야, F1은 가로재여야.
+- **RC9**: `keys={F1|F2|F3|P1_0|P1_1}` — P1_0·P1_1 **둘 다 존재**. 작도 중 1개 skip(뷰포트/배치). 생성 문제 아님. p0: P1_0=(-1719.93,…) P1_1=(-2574.93,…).
+- 파일: `PlantFlow_Support/Ortho/StandardSupport.cs`.
+
+### §9 Codex 자문 결론 (2026-07-22)
+- **A. RC7 분할**: `splitGuard = !paramsHorizontal && (…)`로 param 분할 우회. 전역 limit 축소는 파이프센터 분할 회귀 위험이라 지양. 텍스트는 splitY 행, 총폭은 totalY 행이라 겹침 없음. 라이브에서 15-paper 화살표 가독만 확인.
+- **B. RC5 F1/F2 포트 역전**(StandardSupport.cs ≈982-995): RC1/2/3=F1:PPorts[2]/F2:PPorts[1](S2). RC5=F1:PPorts[1]/F2:PPorts[2](역전). **F2→PPorts[1]**(S2=기둥)로 교정. **F1은 PPorts[2]=상단플레이트라 단순 스왑 불가** — 하단 가로재 포트 별도 특정(PPorts[0] 등 미사용 포트 검증 필요).
+- **C. RC9 P1_1 배치 실패**: P1_0 먼저 배치→상자/리더 등록, P1_1은 `IsBalloonFree` 충돌(support38/box24/leader41/dim1)로 자유 후보 0. BOM 매칭·중복 아님. 배치 완화(P1 여유 확대/우선 배치) 필요.
+
+## cycle 106 발행 범위
+1. RC7 split 우회(확실). 2. RC5 F2→PPorts[1] + F1 하단 가로재 포트 특정(Codex 조사, balloon-anchor 로그로 검증). 3. RC9 P1_1 배치 완화. StandardSupport.cs는 오쏘 공용 → RC5 분기만 국소 수정.
 
 ## 후속(별 사이클)
 - **F1·F2 밸룬**: 둘 다 파란 위치로. TaggingPoint 생성이 F1=하단 가로재/F2=세로 기둥을 가리키게 — 타입별 TaggingPoint 검토. (`IsNotabVerticalMemberPort` WcsP0==S2 불일치가 근인.)
