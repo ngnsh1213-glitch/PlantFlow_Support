@@ -1,5 +1,40 @@
 ﻿# SESSION — 현재 작업 상태
 
+## ★★★ 진행 중 트랙 — 무탭 RC4~9 타입 회귀 검증 (cycle 105~107, 2026-07-22)
+
+전 서포트 타입 3D 모델(각 `<TYPE>-001`)을 `dev_test.bat`로 추출해 타입별 결함을 라이브로 잡는 트랙.
+진단 원장 = `.plans/notab_rc5_9_review_20260722.md`(전 과정·로그·자문 기록). 코드 = `Core/Commands.cs`·`Core/NotabCalloutPlacer.cs`·`Ortho/StandardSupport.cs`.
+
+### ① 치수 (cycle 105·106) — ✅ 라이브 PASS
+- **근인**: `GetNotabTypeConfig`(Commands.cs:4781)에 RC4~9 행이 없어 기본 폴백(`fheight`=부재 단면 F). `rcMemberGeometry`(3559)가 가로 A+A1·세로 S2 앵커를 동시 게이트(하드코딩 RC1/2/3).
+- **cycle 105**: `rcMemberGeometry`에 RC4/5/7 추가 + config 행(RC4/5=param/F2/vertical, RC7/8=`none` 신규 모드=세로 미작도). RC6/9 제외(사용자 verdict).
+- **cycle 106**: RC7 `paramsHorizontal`이면 splitGuard 우회(A/A1 분할 표시).
+- **결과**: RC4 세로100→600·가로500유지 / RC5 가로700→**650**·세로50→**600** / RC7 가로 분할·세로삭제 / RC8 세로삭제. 사용자 "치수 이상없음". ★가로 650이 정답(700 버그)=RC1~3과 동일(가로재+플레이트 병합 solid bbox 오염).
+
+### ② 밸룬 (cycle 106·107) — 라이브 3차, **검증 대기**
+밸룬 앵커 = `StandardSupport.StandardInformation(std)`의 `TaggingPoints` p0(Commands.cs:6713 캡처). 배치=`AppendNotabBalloons`+`NotabCalloutPlacer.IsBalloonFree`.
+- **cycle 106**: RC5 F1/F2 포트 역전 교정(`RC5()` 내부: F1→PPorts[0]=하단가로재, F2→PPorts[1]=S2기둥). RC9 P1 확장탐색 노브.
+- **라이브 2·3차 실패 → §1 3-스트라이크 발동 → §9 Codex 코드자문으로 근인 확정**:
+  - RC5 F2: 앵커는 S2(기둥) 맞으나 **우측(기둥 내부)이 support 상자 장애물에 막혀** 좌측 허공 배치. `IsBalloonFree`가 리더 support 교차만 면제·상자 겹침 미면제.
+  - RC7: 분할 값 맞으나 좌우 반대(투영 좌우가 규격과 반대). F2 밸룬이 대각재 아님(RS2() PPorts[2]인데 가로 끝단 규칙 강제).
+  - RC9 P1_1: 완전 포화(free=0), 차단 다수가 상자 무겹침·**리더만 교차**. `SetLeaderExemptOwner`는 IsBalloonFree 미참조라 무효.
+- **cycle 107 (집도 완료·빌드검증 PASS, 라이브 대기)**:
+  1. 세로재 밸룬에 `IsBalloonFree(exemptSupportBox)` 옵트인 → 기둥 인접 배치.
+  2. RC7 소비부서만 paramLeft↔paramRight 스왑 + RC7 F2 대각재 앵커 분기(`isRc7DiagonalMember`).
+  3. P1 `tier==1 && free==0`서만 리더 교차 폴백(`tier=p1-leader-fallback`).
+  - 안전장치: 면제 옵션 기본 false(기존 동작 불변), RC7·P1 조건 국소 → RC1~3·GD·RC4/6/8 무회귀 설계.
+
+### ③ 다음 결정 분기 (라이브 검증 후)
+- **PASS**: RC5 F2=기둥/F1=가로재, RC7 분할 150(좌)/800(우)·F2=대각재, RC9 P1 2개. → RC 트랙 종결, CHANGELOG 이동.
+- **FAIL**: 해당 항목 로그(`balloon-draw`/`balloon-skip reason`/`tier`)로 재진단. RC7 2b(대각재)·RC5 F2 배치가 배치 로직 변경이라 최우선 확인.
+- 커밋: cycle105 `1ee2287`·cycle106 `f9b14f5`·cycle107 `c5fa9c0`.
+
+### ④ 별도 대기 트랙 (미착수)
+- **무탭 UI 통합**: cycle 104 집도 완료(`bb020e5`, Drawing 팔레트 구오쏘→무탭·일괄선택·로딩오버레이). **라이브 미검증**. 계획서 `.plans/plan_notab_ui_batch_20260722.md`.
+- **effort 다이얼 규칙 v2**: `<appDataDir>\scratch\plan_effort_dial_rule_20260722.md` 보관(글로벌 룰 반영 보류=메타-제품 균형).
+
+---
+
 ## ★ PERSPECTIVE 가드 재설계 — **종결** (cycle 103, 2026-07-22, 라이브 PASS)
 
 무탭 추출 직후 원본 뷰가 Parallel→Perspective로 뒤집히던 간헐 재현(리본 WPF 바인딩發)을 **발원 기반 가드**로 해소. 사용자 판정 "화면 이상없음" + 로그 확정.
