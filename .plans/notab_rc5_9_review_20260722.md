@@ -208,6 +208,15 @@
 2. **RC7**: `TryGetNotabRcHorizontalParams`(≈3471)는 공통 규칙 left=A/right=A1. **RC7만 소비부(3623 전후)에서 paramLeft/paramRight 교환** → tick·값 좌우 반전. RC5 불변. RC7 F2 밸룬=RS2() 재사용 PPorts[2](StandardSupport:365/175)인데 Commands가 F*·비세로면 가로 span 끝단 강제 → **RC7 F2를 대각재 앵커로 별도 분류**(PPorts[2] raw anchor 그대로, 가로 member-end 미적용).
 3. **RC9 P1**: `SetLeaderExemptOwner("support")` 무효(IsBalloonFree 미참조). 차단 다수가 상자 무겹침·리더만 교차. **P1 정상탐색 free=0일 때만 2차 폴백: 콜아웃 상자/리더와의 리더 교차 허용(상자 겹침·support·치수는 계속 금지)**. P1+free=0 한정, RC1~3 무회귀. 순서 선배치는 차선.
 
+## ★ cycle 107 라이브 결과 (2026-07-22)
+- **RC6·RC7·RC8 이상없음** ✅ (RC7 분할 반전+대각재 F2 통과).
+- **RC5 잔여 — F1/F2 포트 재매핑 필요(근본)**: 포트 paper 실측 — S1(0)=(354.5,289.91)=파이프/기둥, S2(1)=(274.5,281)=좌측, S6(5)=(354.5,281). pipeCenterX=355.5=기둥 위치. 현재 F1=PPorts[0]=S1(기둥)인데 가로재로 취급→우측끝 작도, F2=PPorts[1]=S2(좌측)=엉뚱한 세로. **사용자: F2=기둥(위치2, x≈354.5), F1=가로재 우측 끝(위치1).** cycle106 F1/F2 스왑이 여전히 기하와 불일치.
+- **RC9 P1 방향**: cycle107 폴백으로 P1_1 작도되나 **리더가 F3 관통**. 좌측 P1_0(하단 플레이트 아래·하향)과 같은 방향으로 우측에 생성 원함. 리더교차 폴백이 나쁜 자리를 허용함.
+
+### §9 Codex 자문 (cycle 108 근거, 2026-07-22)
+- **RC5 포트 재확정(cycle106 오지정 정정)**: `RC5.py` 실제 순서 = S1(PPorts0)=원점, S2(PPorts1)=**가로재 F1 끝점**, S3(PPorts2)=**세로재 F2 자유단**, S4/S5=플레이트, S6=하부기준. x≈354.5(S1/S6)는 파이프 중심선(기둥 아님). → StandardSupport.RC5(): **F1→PPorts[1], F2→PPorts[2]**. + `IsNotabVerticalMemberPort`(Commands.cs:6252)를 RC5 F2만 index==2 인식하도록 국소 분기(현재 index==1/S2만). **밸룬 전용**(세로 치수 앵커 S2 유지 — 통일은 별 검증). 주의: S3 paper=(402.5,401)이 상단 플레이트와 만나 걸쳐 보일 수 있음 → 라이브 확인.
+- **RC9 P1_1**: p1-leader-fallback이 상자/리더 교차를 의도 무시 → F3 관통은 설계 직접결과. 권고=폴백 완화 아닌 **RC9+P1_1 전용 하향 배치**: 일반 8방향 탐색 전 `standardName=="RC9"&&item=="P1_1"`이면 dir=(0,-1)만 짧은 거리부터, 표준 `IsBalloonFree(...,false,false)`(F3/치수/support 계속 차단), 첫 자유 후보 채택·없으면 `skip reason=rc9-p1-down-no-space`(폴백 미복귀). P1_0 dir 복제는 내외 반전 위험이라 지양. AppendNotabBalloons만 국소.
+
 ## cycle 106 발행 범위
 1. RC7 split 우회(확실). 2. RC5 F2→PPorts[1] + F1 하단 가로재 포트 특정(Codex 조사, balloon-anchor 로그로 검증). 3. RC9 P1_1 배치 완화. StandardSupport.cs는 오쏘 공용 → RC5 분기만 국소 수정.
 
