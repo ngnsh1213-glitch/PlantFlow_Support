@@ -34,4 +34,4 @@
 
 ## 커밋
 
-- 코드: 기록 예정
+- 코드: `a27e24e` (`fix: correct RC5 ports and RC9 P1 placement`)
