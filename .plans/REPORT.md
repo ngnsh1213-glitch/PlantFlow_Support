@@ -30,4 +30,4 @@
 
 ## 커밋
 
-- 대기 중
+- 코드: `7de446d` (`feat: extend vertical balloon leaders`)
