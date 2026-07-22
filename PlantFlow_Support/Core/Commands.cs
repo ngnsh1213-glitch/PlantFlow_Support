@@ -3736,7 +3736,12 @@ namespace PlantFlow_Support
         string verticalAnchorSource = "fallback=" + dimReferenceSource;
         string verticalFallback = "not-rc";
         bool hasVerticalPortAnchor = false;
-        if (rcMemberGeometry)
+        // 세로 S2 포트 앵커는 param+F2+vertical config를 가진 타입에서 활성(RC1~6,9). 가로 게이트와 분리.
+        NotabTypeConfig cfgV = this.GetNotabTypeConfig(standardName);
+        bool verticalPortGate = string.Equals(cfgV.VerticalMode, "param", System.StringComparison.OrdinalIgnoreCase)
+          && string.Equals(cfgV.VerticalParamKey, "F2", System.StringComparison.OrdinalIgnoreCase)
+          && string.Equals(cfgV.MemberAnchorSide, "vertical", System.StringComparison.OrdinalIgnoreCase);
+        if (verticalPortGate)
         {
           NotabSupportPortSnapshot s2 = null;
           for (int i = 0; i < s_isoSupportPorts.Count; i++)
@@ -4773,6 +4778,14 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "RC2", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "RC3", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+      if (string.Equals(standardName, "RC4", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+      if (string.Equals(standardName, "RC5", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+      if (string.Equals(standardName, "RC6", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+      if (string.Equals(standardName, "RC9", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "pipecenter", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "16", "215" } };
