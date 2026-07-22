@@ -217,6 +217,10 @@
 - **RC5 포트 재확정(cycle106 오지정 정정)**: `RC5.py` 실제 순서 = S1(PPorts0)=원점, S2(PPorts1)=**가로재 F1 끝점**, S3(PPorts2)=**세로재 F2 자유단**, S4/S5=플레이트, S6=하부기준. x≈354.5(S1/S6)는 파이프 중심선(기둥 아님). → StandardSupport.RC5(): **F1→PPorts[1], F2→PPorts[2]**. + `IsNotabVerticalMemberPort`(Commands.cs:6252)를 RC5 F2만 index==2 인식하도록 국소 분기(현재 index==1/S2만). **밸룬 전용**(세로 치수 앵커 S2 유지 — 통일은 별 검증). 주의: S3 paper=(402.5,401)이 상단 플레이트와 만나 걸쳐 보일 수 있음 → 라이브 확인.
 - **RC9 P1_1**: p1-leader-fallback이 상자/리더 교차를 의도 무시 → F3 관통은 설계 직접결과. 권고=폴백 완화 아닌 **RC9+P1_1 전용 하향 배치**: 일반 8방향 탐색 전 `standardName=="RC9"&&item=="P1_1"`이면 dir=(0,-1)만 짧은 거리부터, 표준 `IsBalloonFree(...,false,false)`(F3/치수/support 계속 차단), 첫 자유 후보 채택·없으면 `skip reason=rc9-p1-down-no-space`(폴백 미복귀). P1_0 dir 복제는 내외 반전 위험이라 지양. AppendNotabBalloons만 국소.
 
+## ★ cycle 108 라이브 결과 (2026-07-22)
+- **RC5 F1/F2 위치 정상** ✅ (포트 재지정 성공). 잔여=**F2 리더가 기둥에 안 닿고 끊김**. 로그: rawAnchor=(402.5,401)=S3, arrow=(407.3,341)=axisX402.5+halfThick4.8, balloon center=(426.9,341). halfThick(가독성 하한 4.8)이 실제 기둥 반폭보다 커 화살표가 기둥 우측 허공에 살짝 뜸 → 리더를 실제 변까지 연장 필요.
+- **RC9 P1_1 다시 누락**: cycle108 하향배치 `skip reason=rc9-p1-down-no-space cand=5 free=0 maxClear=38.8`. F3가 우측 하단 점유해 하향 5후보 전부 차단. P1_0(좌)=dir3 곧장 아래 깔끔. cycle107(F3관통)↔108(누락) 진동. 사용자: 좌측 P1과 같은 방향(하향) 우측 생성.
+
 ## cycle 106 발행 범위
 1. RC7 split 우회(확실). 2. RC5 F2→PPorts[1] + F1 하단 가로재 포트 특정(Codex 조사, balloon-anchor 로그로 검증). 3. RC9 P1_1 배치 완화. StandardSupport.cs는 오쏘 공용 → RC5 분기만 국소 수정.
 

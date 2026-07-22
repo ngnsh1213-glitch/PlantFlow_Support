@@ -3,51 +3,52 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 108
+- **cycle**: 109
 - **status**: ready
 - **issued_at**: 2026-07-22
-- **title**: RC5 F1/F2 포트 재지정(cycle106 오지정 정정) + RC9 P1_1 하향 배치
-- **작업 경로**: `Ortho/StandardSupport.cs`(RC5 포트), `Core/Commands.cs`(IsNotabVerticalMemberPort·AppendNotabBalloons)
+- **title**: RC5 F2 리더 기둥까지 연장 + RC9 P1_1 down-out 배치(+rejBy 계측)
+- **작업 경로**: `Core/Commands.cs`(AppendNotabBalloons member-end·P1 down 경로)
 - **진단 원장**: `.plans/notab_rc5_9_review_20260722.md`
-- **기준 커밋**: `0bf945c`
-- **자문**: §9 Codex. `RC5.py` 실 포트 순서로 cycle106 오지정 정정.
+- **기준 커밋**: `60ca015`
+- **자문**: §9 Codex. RC5=화살표 끝점 축으로, RC9=down-out+계측.
 
 ## ⚠ 검증 필수
 `dotnet build` 오류 0(경고 14 초과 금지). 미실행 시 커밋 금지·`status: blocked`. Claude가 REPORT 수령 후 직접 빌드 재확인.
-**항목별 독립**: 불확실 건은 해당 항목만 `blocked/partial`.
 
-## 배경 (라이브 4차 + 자문, 재측정 불요)
-RC6·RC7·RC8 이상없음(종결). 잔여 = RC5 밸룬, RC9 P1 방향.
-- **RC5**: cycle106이 F1=PPorts[0]/F2=PPorts[1]로 지정했으나 **오지정**. `RC5.py` 실제=S2(PPorts1)=가로재 F1끝, S3(PPorts2)=세로재 F2 자유단. x≈354.5(S1/S6)는 파이프중심선(기둥 아님). F2가 S2(좌측)를 가리켜 엉뚱한 곳.
-- **RC9**: cycle107 p1-leader-fallback으로 P1_1 작도되나 리더가 F3 관통. 좌측 P1_0처럼 하단·하향이어야.
+## 배경 (라이브 5차 + 자문)
+RC4·RC6·RC7·RC8 종결. RC5 F1/F2 **위치 정상**(cycle108) — 잔여는 F2 리더가 기둥에 안 닿음. RC9 P1_1은 cycle107(F3관통)↔108(누락) 진동.
 
 ## 집도 지시
 
-### 1) RC5 F1/F2 포트 재지정 (StandardSupport.cs `RC5()` + Commands.cs)
-- **StandardSupport.RC5()**: `F1: PPorts[0]→PPorts[1]`(S2=가로재 끝점), `F2: PPorts[1]→PPorts[2]`(S3=세로재 자유단). cycle106의 "PPorts[0]=가로재" 주석은 `RC5.py`와 불일치 → 정정.
-- **Commands.IsNotabVerticalMemberPort()**(≈6252): 현재 `index==1`(S2)만 세로재 판정. **RC5에 한해 F2 앵커(index==2/S3)를 세로재로 인식**하도록 국소 분기 추가(타 타입 불변). 안 하면 F2가 다시 가로재 끝단 규칙으로 빠짐.
-- **밸룬 전용**: 세로 치수 앵커(rcMemberGeometry 블록의 S2/index==1)는 **그대로 둘 것**. 치수는 이미 PASS(600). 치수까지 S3 통일 금지(별 검증).
-- **라이브 주의(Codex 지적)**: S3 paper=(402.5,401)이 상단 플레이트와 만나는 자유단이라 밸룬이 플레이트에 걸쳐 보일 수 있음. balloon-draw 로그로 F2가 세로재(vertical-port) 판정·기둥 축 배치인지 확인. 어긋나면 `partial` 반려.
+### 1) RC5 F2 리더를 기둥까지 연장 (Commands.cs ≈6420, member-end 세로 분기)
+- 근인: 세로재 화살표 끝점 `endMinX/endMaxX = rawAnchor.X ± halfThick`. `halfThick`(가독성 하한 4.8)이 실제 기둥 반폭보다 커 화살표가 기둥 우측 허공에 뜸.
+- 수정: **세로재(isVerticalMember) 화살표 끝점을 `rawAnchor.X`(기둥 축)로** 둔다(endMinX=endMaxX=rawAnchor.X). rawAnchor.X가 기둥 중심축이라 화살표가 실제 부재를 관통해 닿는다.
+- `halfThick`은 밸룬 원·문자 간격 등 **다른 용도엔 그대로 유지**(제거하면 원·문자 규칙 영향). 화살표 끝점 산출에서만 빼는 국소 변경.
+- `memberBoxes`로 실제 폭 산출은 **금지**(기둥·가로재·플레이트 병합 솔리드라 폭 특정 불가). F2=600은 세로 길이지 폭 아님.
+- 검증: F2 balloon-draw 화살표 X가 기둥 축(≈402.5)에 닿는지.
 
-### 2) RC9 P1_1 하향 배치 (Commands.cs `AppendNotabBalloons` P1 경로)
-- 근인: `p1-leader-fallback`(cycle107)이 콜아웃 상자/리더 교차를 무시 → F3 관통.
-- 수정: 일반 8방향 탐색 **이전에**, `standardName=="RC9" && item=="P1_1"`이면 **dir=(0,-1)(하향)만 짧은 거리부터** 탐색. 후보 검사는 **표준 `IsBalloonFree(..., exemptSupportBox:false, allowCalloutLeaderCrossing:false)`** — F3 밸룬/리더·치수·support·기존 상자 전부 계속 차단.
-- 첫 자유 후보 채택. 없으면 `balloon-skip reason=rc9-p1-down-no-space`로 종료하고 **일반 탐색·리더교차 폴백으로 되돌아가지 말 것**(하향 규칙 보장).
-- P1_0의 실제 dir을 복제하지 말 것(내외 반전 위험). "하향"을 RC9 P1_1에만 명시 적용 → RC1~3·단일 P1 무회귀.
-- `p1-leader-fallback`(cycle107)은 RC9 P1_1엔 미적용(위 하향 경로가 선점). 다른 타입 P1엔 유지.
+### 2) RC9 P1_1 down-out 배치 + rejBy 계측 (Commands.cs ≈6521, rc9-p1-down 경로)
+- 근인: cycle108 순수 하향(dir=(0,-1)) 5후보 전부 차단. `maxClear=38.8·free=0` → **리더 교차** 탈락 유력(F3가 부재 pass서 먼저 배치·등록). 거리 확대만으론 같은 교차 반복 가능.
+- 수정: rc9-p1-down 경로에서 **순수 하향을 첫 후보로 유지**, 실패 시 **소량 외측 하향 `(+ε, -1)` 후보 추가**(우측 플레이트 외측=+X 방향, ε는 작게 단계 확대). 검사는 **표준 `IsBalloonFree(..., exemptSupportBox:false, allowCalloutLeaderCrossing:false)`** 유지(F3/치수/support/기존상자 계속 차단).
+- 첫 자유 후보 채택. 없으면 `balloon-skip reason=rc9-p1-down-no-space`로 종료(일반 탐색·p1-leader-fallback 미복귀 유지).
+- **계측 추가(필수)**: rc9-p1-down skip 로그에 **`rejBy{...}` 집계**(box:support/box:callout/leader:calloutLeader/leader:calloutBox 등)를 포함. 다음 라이브에서 box 충돌인지 리더 교차인지 확정 위함.
+- **`balloon-draw key=F3`의 anchor/center/box도 로그에 남는지 확인**(F3 좌표 확보). 이미 남으면 추가 불필요.
+- RC9/P1_1 조건 국소 → P1_0·F3·RC1~3 무회귀.
 
 ## 하지 말 것
-- RC5 세로/가로 **치수** 변경 금지(PASS 상태). RC6/7/8·RC1~3·GD 회귀 금지.
-- `IsNotabVerticalMemberPort`의 비-RC5 판정(index==1) 변경 금지.
-- 전역 밸룬 배치 규칙·`NotabCalloutPlacer` 시그니처 변경 불필요(호출부 국소).
+- RC5/RC7/RC8·RC1~3·GD 회귀 금지. 치수 변경 금지.
+- P1_1 선배치(순서 변경) 금지 — F3 회귀 위험(자문 비권고).
+- `IsBalloonFree` 면제 옵션을 RC9 하향에 켜지 말 것(F3 관통 재발).
+- `halfThick`의 밸룬 원·문자 간격 용도 변경 금지.
 
 ## 제약
-- 빈 catch 금지. `#nullable disable`면 null 가드. 신규 노브는 env.
+- 빈 catch 금지. 신규 노브는 env. `#nullable disable`면 null 가드.
 
 ## 검증 (Codex, 필수)
 1. `dotnet build` 오류 0, 경고 14 초과 금지.
-2. `REPORT.md`에 항목별 결과·RC5 F2 balloon-draw geom·빌드 결과. 라이브는 사용자.
+2. `REPORT.md`에 항목별 결과·RC5 화살표 X·RC9 rejBy 계측 추가 여부·빌드 결과. 라이브는 사용자.
 
 ## 성공 기준 (다음 라이브)
-- RC5: F2 밸룬=세로 기둥(S3, vertical-port), F1=가로재. RC9: P1_1이 우측 플레이트 아래 하향(F3 미관통), 좌측 P1과 대칭.
-- RC1~3·RC6/7/8·GD 회귀 0.
+- RC5 F2 리더가 기둥에 닿음(끊김 없음).
+- RC9 P1_1이 우측 플레이트 아래(하향, F3 미관통) 작도. 실패 시 skip 로그에 rejBy로 원인 노출.
+- RC1~3·RC4~8·GD 회귀 0.
