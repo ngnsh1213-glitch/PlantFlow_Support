@@ -48,7 +48,7 @@ namespace PlantFlow_Support
     // tailLength > 0 이면 꺾임 1회 리더(경사 + 수평 꼬리)로 배치한다.
     // p1=꺾임점(elbow), p2=문자 접속점. 0이면 p1=p2=문자 접속점인 직선 1개다.
     public bool TryPlace(Point3d leaderFrom, RequiredSide requiredSide, double width, double height, double gap, double minDx,
-      string ownerTag, bool preferDown, double tailLength, out Point3d textCenter, out Point3d p1, out Point3d p2, out bool textLeftOfAnchor, out string diagnostic)
+      string ownerTag, bool preferDown, double tailLength, double pipeDyW, out Point3d textCenter, out Point3d p1, out Point3d p2, out bool textLeftOfAnchor, out string diagnostic)
     {
       double startRadius = System.Math.Max(15.0, System.Math.Max(width, height) / 2.0 + gap);
       double maxRadius = System.Math.Max(startRadius, System.Math.Sqrt(System.Math.Pow(System.Math.Max(leaderFrom.X - _minX, _maxX - leaderFrom.X), 2.0) + System.Math.Pow(System.Math.Max(leaderFrom.Y - _minY, _maxY - leaderFrom.Y), 2.0)) + width + height);
@@ -101,7 +101,10 @@ namespace PlantFlow_Support
             }
             scanned++;
             double angleW = System.Math.Max(0.0, ReadEnvDouble("PFS_NOTAB_CALLOUT_ANGLE_W", 0.0));
-            double cost = System.Math.Max(0.0, box.MaxPoint.X - _costRefExt.MaxPoint.X)
+            // 파이프는 앵커 높이대 근처를 우선한다. 0이면 cycle114 이전 비용식과 같다.
+            double effectivePipeDyW = ownerTag == "pipe" ? pipeDyW : 0.0;
+            double dy = System.Math.Abs(y - leaderFrom.Y);
+            double baseCost = System.Math.Max(0.0, box.MaxPoint.X - _costRefExt.MaxPoint.X)
               + System.Math.Max(0.0, _costRefExt.MinPoint.X - box.MinPoint.X)
               + System.Math.Max(0.0, box.MaxPoint.Y - _costRefExt.MaxPoint.Y)
               + System.Math.Max(0.0, _costRefExt.MinPoint.Y - box.MinPoint.Y)
@@ -110,6 +113,7 @@ namespace PlantFlow_Support
               // 하단 선호: 앵커보다 위로 올라간 만큼만 가산한다. 제약이 아니라 편향이므로
               // 아래가 막히면 위로 올라가는 탐색은 그대로 살아 있다.
               + ((preferDown && y > leaderFrom.Y) ? (y - leaderFrom.Y) * ReadEnvDouble("PFS_NOTAB_CALLOUT_DOWN_W", 1.0) : 0.0);
+            double cost = baseCost + dy * effectivePipeDyW;
             if (cost < bestCost)
             {
               found = true;
@@ -118,7 +122,7 @@ namespace PlantFlow_Support
               bestLeft = textLeft;
               bestP1 = candElbow;
               bestP2 = candTextEdge;
-              bestDiag = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " angleW=" + angleW.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " cost=" + cost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+              bestDiag = "tier=" + tier + " r=" + radius.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " fan=" + fanOffset + " angleW=" + angleW.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " dy=" + dy.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " dyW=" + effectivePipeDyW.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " baseCost=" + baseCost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " cost=" + cost.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
             }
           }
         }

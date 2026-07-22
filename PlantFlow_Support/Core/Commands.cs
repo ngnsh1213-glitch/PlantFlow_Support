@@ -4178,7 +4178,10 @@ namespace PlantFlow_Support
             }
           }
           if (!smartPlaced)
-            smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, tailLength, out near, out p1, out p2, out left, out diagnostic);
+          {
+            double pipeDyW = isPipeCallout ? this.GetEnvDouble("PFS_NOTAB_PIPE_DY_W", 0.25, 0.0, 10.0) : 0.0;
+            smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, tailLength, pipeDyW, out near, out p1, out p2, out left, out diagnostic);
+          }
         }
         if (!smartPlaced)
         {
@@ -4596,11 +4599,23 @@ namespace PlantFlow_Support
         NotabCalloutPlacer.RequiredSide requiredSide = this.ResolveNotabRequiredSide("PFS_NOTAB_DIR_" + this.GetSupportTypePrefix(s_isoSupportTag) + "_PIPE", anchor.X, (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0, out sideSource);
         double manualDx, manualDy;
         bool hasManualPosition = this.TryGetNotabPipePosition(standardName, out manualDx, out manualDy);
+        string pipePositionSource = hasManualPosition ? "env" : "auto";
+        if (!hasManualPosition)
+        {
+          NotabTypeConfig typeConfig = this.GetNotabTypeConfig(standardName);
+          if (typeConfig.HasPipeCalloutPosition)
+          {
+            manualDx = typeConfig.PipeCalloutDx;
+            manualDy = typeConfig.PipeCalloutDy;
+            hasManualPosition = true;
+            pipePositionSource = "config";
+          }
+        }
         Point3d manualTextEdge = hasManualPosition ? new Point3d(anchor.X + manualDx, anchor.Y + manualDy, 0.0) : Point3d.Origin;
         if (hasManualPosition)
         {
           requiredSide = manualDx < 0.0 ? NotabCalloutPlacer.RequiredSide.Left : NotabCalloutPlacer.RequiredSide.Right;
-          sideSource = "env";
+          sideSource = pipePositionSource;
         }
 
         // cycle83: MLeader 경로는 접속점을 확정할 수 없어 직접 MText+Leader 작도로 교체했다.
@@ -4859,6 +4874,9 @@ namespace PlantFlow_Support
       public string VerticalMode;
       public string VerticalParamKey;
       public string PipeCalloutSide;
+      public double PipeCalloutDx;
+      public double PipeCalloutDy;
+      public bool HasPipeCalloutPosition;
       public string HorizontalSide;
       // 가로 부재가 도면 위아래 어디에 있는가. "bottom"(GD 계열, 기본) | "top"(RC 계열).
       // 부재 콜아웃 앵커의 상하 기준면을 결정한다.
@@ -4903,7 +4921,7 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "RC4", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "RC5", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", PipeCalloutDx = 100.0, PipeCalloutDy = 20.0, HasPipeCalloutPosition = true, HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "RC6", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase))
