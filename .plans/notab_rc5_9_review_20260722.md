@@ -123,8 +123,65 @@
 → **RC4·RC5·RC6·RC9**: `GetNotabTypeConfig`에 RC1식 행 4줄 추가로 **결함 1·2a 동시 해결**.
 → **RC7·RC8**: F2 세로재 없음. 세로 치수 H를 무엇으로 할지 규격/사용자 결정 필요(대각재 수직투영? 부재 높이? 세로 치수 생략?).
 
-## 진단 다음 단계
-1. **결함 2b (P1 누락)**: RC 타입 메서드의 P1 TaggingPoint 생성부 읽기 — RC9 P1 0건 / RC6 P1_0 누락 원인(생성 vs 배치).
-2. **RC7·RC8 세로 치수 정의** 사용자/규격 확정.
-3. §9 자문 후 핸드오프. (RC4·5·6·9 행 추가는 저위험, 즉시 가능.)
+## ★★★ §9 자문 후 최종 확정 (2026-07-22, Codex+Gemini)
+- **게이트 얽힘**: `rcMemberGeometry`(3559, 하드코딩 RC1/2/3)가 가로 치수(3564)와 세로 앵커(3739)를 **동시 게이트**. 사용처는 3559/3564/3594(로그만)/3739 4곳뿐(Codex 전수).
+- **가로 함정 확정**: RC5 A+A1=650인데 정상 가로 700(기하). rcMemberGeometry를 넓히면 가로 깨짐 → **가로는 RC1/2/3 유지 필수**.
+- **세로 게이트만 분리** → config 파생: `verticalMode=="param" && VerticalParamKey=="F2" && MemberAnchorSide=="vertical"`(하드코딩 리스트 대신). RC1~3 불변, RC4/5/6/9 세로 앵커 활성.
+- **★결함 2a는 게이트로 안 고쳐짐(Codex 발견)**: F2 밸룬 `isVerticalMember = hasVerticalAnchor && IsNotabVerticalMemberPort(WcsP0)`(6312). `IsNotabVerticalMemberPort`(6217)는 **밸룬 TaggingPoint WcsP0 == S2 WCS** 요구. RC5 F2 WcsP0는 상단 플레이트(paper 402.5,401)라 S2(274.5,281)와 불일치 → 게이트 열어도 F2는 세로 안 됨. **F2 밸룬은 TaggingPoint 생성 문제 = 후속.**
+- **RC9 F2/F3**: S2 포트 1개뿐. F3 별도 앵커 없음 → F3 밸룬은 후속(범위 밖). 양쪽 다 horizontal-span 찍힌 것도 WcsP0≠S2 때문.
+- RC4~9 전부 S2 포트 보유(로그 확인). RC7/RC8은 F2 없음 → 세로 치수 없는 게 정답(config 미추가).
+
+## ★★★ 정정 (2026-07-22, 사용자 RC5 추가 피드백) — 가로 전제 뒤집힘
+- **가로 650이 정답, 현재 700이 버그**(사용자 확정). RC1~3과 동일 원인: 가로재+플레이트가 한 Solid라 bbox(700)에 플레이트 섞임. 실제=`A+A1`(650).
+- → **게이트 분리(직전 계획)는 폐기.** RC4/5/6/9를 `rcMemberGeometry`에 **그대로 포함**해야 가로(A+A1)와 세로(S2+F2)가 함께 교정됨.
+- 자문(Codex/Gemini)의 "가로 불변" 결론은 내가 "700 정상"이라는 **틀린 전제를 준 탓** → 무효.
+- 가로 대조: RC4 500=A+A1(무변) / RC5 700→650 / RC6 665→650 / RC9 855→850.
+- **F1도 오배치 추가**(하단 가로재로). F2와 함께 TaggingPoint 문제 = 후속.
+
+## ★★★ 마스터 스펙표 (2026-07-22, 사용자 타입별 최종 verdict 반영)
+| 타입 | params | 가로 현재→목표 | 세로 현재→목표 | 밸룬 | 조치 |
+|---|---|---|---|---|---|
+| RC4 | A250 A1250 F2600 | 500=A+A1 (무변) | 100(fheight)→**600(F2)** | (미확인) | config row |
+| RC5 | A400 A1250 F2600 | 700→**650(A+A1)** | 50→**600(F2)** | F1·F2 오배치(후속) | rcMemberGeom+config |
+| RC6 | A400 A1250 F2600 | 665→? | 50→? | ? | **★이상없음? 확인 필요** |
+| RC7 | A800 A1150 (F2없음) | 950단일→**A/A1 분할(800/150) 신규** | 75→**삭제** | — | rcMemberGeom(가로분할)+세로억제 |
+| RC8 | A300 A1150 (F2없음) | 150/300/450 (무변) | 75→**삭제** | — | 세로억제만 |
+| RC9 | A600 A1250 F2500 F3500 | 855→**850(A+A1)** | 75→**500(F2)** | P1 2개 누락·F3(후속) | rcMemberGeom+config |
+
+### ★RC6·RC9 충돌 (확인 필요)
+- 앞선 보고: RC6 세로 50 무의미+P1_0 누락 / RC9 세로 75 무의미+P1 2개 누락.
+- 지금: **"RC6 이상없음", "RC9 이상없음".**
+- 해석 후보: (a)그대로 두라=수정 제외 (b)가로만 OK, 세로는 여전히 수정. → **사용자 확인 필요.**
+- RC4는 verdict 없음(세로 fheight=100 상태).
+
+### 새 범위: 세로 치수 억제(RC7/RC8)
+- 현재 RC7/RC8은 config 폴백 `fheight`라 75를 그림. **삭제하려면 `VerticalMode="none"`(신규) 분기**를 vertical dim 코드에 추가하고 config 행 부여.
+- RC7은 가로 A/A1 분할도 필요 → `rcMemberGeometry`에 RC7 포함(가로 경로). 단 세로는 F2 없음+none.
+- RC8은 가로 이미 정상 → `rcMemberGeometry` 미포함(가로 불변), 세로 none만.
+
+## ★ cycle 105 범위 확정 (사용자 최종 verdict 2026-07-22)
+- **RC6·RC9 = 완전 제외**(그대로 둠, 무변경). **RC4 = RC5처럼 세로 수정**(100→600, 가로 500 무변).
+- 치수 전용. 밸룬(F1/F2·P1) 전부 후속.
+
+| 타입 | rcMemberGeometry(3559) | config | 결과 |
+|---|---|---|---|
+| RC4 | 추가 | param/F2/vertical | 세로 100→600, 가로 500(=A+A1) 무변 |
+| RC5 | 추가 | param/F2/vertical | 가로 700→650, 세로 50→600 |
+| RC7 | 추가 | **none** | 가로 950→A/A1분할(800/150), 세로 75 삭제 |
+| RC8 | **미추가** | **none** | 세로 75 삭제만(가로 150/300/450 무변) |
+| RC6·RC9 | — | — | 제외(무변경) |
+
+집도 3요소:
+1. `rcMemberGeometry`(3559)에 **RC4·RC5·RC7** 추가(RC8·RC6·RC9 제외).
+2. `GetNotabTypeConfig`: RC4·RC5(param/F2/vertical), RC7·RC8(none).
+3. vertical dim 코드에 **`VerticalMode="none"` 분기 신규** — 세로 치수 미작도(값·앵커 모두 skip). rcMemberGeometry여도 none이면 세로 안 그림.
+
+## 후속(별 사이클, 변동 없음)
+- F1·F2 밸룬(RC5): TaggingPoint가 F1=하단 가로재/F2=세로 기둥 가리키게. `IsNotabVerticalMemberPort` WcsP0==S2 불일치 근인.
+- P1 밸룬 누락, RC9 F3 — 단 RC6/RC9는 사용자가 제외했으므로 P1 후속은 다른 타입 필요 시.
+
+## 후속(별 사이클)
+- **F1·F2 밸룬**: 둘 다 파란 위치로. TaggingPoint 생성이 F1=하단 가로재/F2=세로 기둥을 가리키게 — 타입별 TaggingPoint 검토. (`IsNotabVerticalMemberPort` WcsP0==S2 불일치가 근인.)
+- 결함 2b: P1 밸룬 누락(RC6 P1_0/RC9 전부).
+- RC9 F3 밸룬. RC7/RC8 세로 치수 억제(fheight=75 제거, "none" 모드 필요).
 - 관련 메모리: [[pfs-hantec-annotation-engine]] [[pfs-notab-callout-placement-rules]] [[pfs-hantec-support-standard-catalog]] [[pfs-notab-bom-balloon]].
