@@ -3558,7 +3558,10 @@ namespace PlantFlow_Support
         double paramTotal = double.NaN, paramLeft = double.NaN, paramRight = double.NaN;
         bool rcMemberGeometry = string.Equals(standardName, "RC1", System.StringComparison.OrdinalIgnoreCase)
           || string.Equals(standardName, "RC2", System.StringComparison.OrdinalIgnoreCase)
-          || string.Equals(standardName, "RC3", System.StringComparison.OrdinalIgnoreCase);
+          || string.Equals(standardName, "RC3", System.StringComparison.OrdinalIgnoreCase)
+          || string.Equals(standardName, "RC4", System.StringComparison.OrdinalIgnoreCase)
+          || string.Equals(standardName, "RC5", System.StringComparison.OrdinalIgnoreCase)
+          || string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase);
         string dimHSource = "fallback=legacy";
         string dimHFallback = "not-rc";
         if (rcMemberGeometry && this.TryGetNotabRcHorizontalParams(out paramTotal, out paramLeft, out paramRight))
@@ -3669,7 +3672,17 @@ namespace PlantFlow_Support
         bool dimVBarSpan = false;
         string verticalMode = this.GetNotabVerticalDimMode(standardName);
         string dimVText = this.FormatNumber(realH);
-        if (string.Equals(verticalMode, "fheight", System.StringComparison.OrdinalIgnoreCase))
+        double verticalAnchorX = dimReferenceMinX;
+        double verticalAnchorBaseY = minY;
+        double verticalAnchorTopY = dimVTopY;
+        string verticalAnchorSource = "fallback=" + dimReferenceSource;
+        string verticalFallback = "not-rc";
+        bool hasVerticalPortAnchor = false;
+        if (string.Equals(verticalMode, "none", System.StringComparison.OrdinalIgnoreCase))
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV skip: mode=none");
+        }
+        else if (string.Equals(verticalMode, "fheight", System.StringComparison.OrdinalIgnoreCase))
         {
           if (double.TryParse(s_isoSupportProfileHeight, out barRealH) && barRealH > 1e-6)
           {
@@ -3730,12 +3743,6 @@ namespace PlantFlow_Support
           }
         }
 
-        double verticalAnchorX = dimReferenceMinX;
-        double verticalAnchorBaseY = minY;
-        double verticalAnchorTopY = dimVTopY;
-        string verticalAnchorSource = "fallback=" + dimReferenceSource;
-        string verticalFallback = "not-rc";
-        bool hasVerticalPortAnchor = false;
         // 세로 S2 포트 앵커는 param+F2+vertical config를 가진 타입에서 활성(RC1~6,9). 가로 게이트와 분리.
         NotabTypeConfig cfgV = this.GetNotabTypeConfig(standardName);
         bool verticalPortGate = string.Equals(cfgV.VerticalMode, "param", System.StringComparison.OrdinalIgnoreCase)
@@ -3788,13 +3795,16 @@ namespace PlantFlow_Support
             }
           }
         }
-        double verticalX = verticalAnchorX - offset - dimClear;
-        PlantOrthoView.FileDiag("PFSNOTABDETAIL dimH src=" + dimReferenceSource + " x=(" + this.FormatNumber(minX) + "," + this.FormatNumber(maxX) + ")"
-          + " | dimV src=" + verticalAnchorSource + " x=" + this.FormatNumber(verticalAnchorX) + " baseY=" + this.FormatNumber(verticalAnchorBaseY) + " topY=" + this.FormatNumber(verticalAnchorTopY) + " lineX=" + this.FormatNumber(verticalX)
-          + " | fallback=" + (string.IsNullOrEmpty(verticalFallback) ? "none" : verticalFallback));
-        RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(verticalAnchorX, verticalAnchorBaseY, 0.0), new Point3d(verticalAnchorX, verticalAnchorTopY, 0.0), new Point3d(verticalX, verticalAnchorBaseY, 0.0), Matrix3d.Identity, dimStyleId);
-        double dimVRealValue = string.Equals(verticalMode, "param", System.StringComparison.OrdinalIgnoreCase) && dimVBarSpan ? dimVParamRealH : realH;
-        this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, dimVRealValue, txt, "dimV", dimVText);
+        if (!string.Equals(verticalMode, "none", System.StringComparison.OrdinalIgnoreCase))
+        {
+          double verticalX = verticalAnchorX - offset - dimClear;
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL dimH src=" + dimReferenceSource + " x=(" + this.FormatNumber(minX) + "," + this.FormatNumber(maxX) + ")"
+            + " | dimV src=" + verticalAnchorSource + " x=" + this.FormatNumber(verticalAnchorX) + " baseY=" + this.FormatNumber(verticalAnchorBaseY) + " topY=" + this.FormatNumber(verticalAnchorTopY) + " lineX=" + this.FormatNumber(verticalX)
+            + " | fallback=" + (string.IsNullOrEmpty(verticalFallback) ? "none" : verticalFallback));
+          RotatedDimension dimV = PSUtil.CreateVerticalDimension(new Point3d(verticalAnchorX, verticalAnchorBaseY, 0.0), new Point3d(verticalAnchorX, verticalAnchorTopY, 0.0), new Point3d(verticalX, verticalAnchorBaseY, 0.0), Matrix3d.Identity, dimStyleId);
+          double dimVRealValue = string.Equals(verticalMode, "param", System.StringComparison.OrdinalIgnoreCase) && dimVBarSpan ? dimVParamRealH : realH;
+          this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimV, dimStyleId, layerId, dimVRealValue, txt, "dimV", dimVText);
+        }
         // 치수가 먼저 자리를 확정하고, 모든 콜아웃이 같은 충돌 상태를 공유한다.
         // 콜아웃 허용영역은 실제 뷰포트 사각형이다. 서포트 extents ± 100은 폭 넓은
         // 라인넘버 텍스트가 좌우 고정 상태에서 전량 영역 밖으로 떨어지게 만든다.
@@ -4785,6 +4795,10 @@ namespace PlantFlow_Support
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "RC6", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+      if (string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
+      if (string.Equals(standardName, "RC8", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RC9", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
