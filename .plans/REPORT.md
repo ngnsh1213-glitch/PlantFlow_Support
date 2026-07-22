@@ -1,37 +1,32 @@
 # REPORT — Codex → Claude
 
-- **cycle**: 111
+- **cycle**: 112
 - **status**: completed
 - **completed_at**: 2026-07-22
-- **title**: RC5 파이프콜아웃 기둥회피(장애물 X 교정) + F2 리더 가시화(밸룬 유지)
+- **title**: RC5 파이프콜아웃 기둥 box-only + F2 자기 기둥 간섭 제외
 
 ## 결과
 
-1. **RC5 기둥 장애물**
-   - `vertical-member` 상자를 치수 S2 축 대신 RC5 F2의 실제 S3(PPorts[2]) 포트 투영값으로 만들었다.
-   - F2 포트 또는 지원 범위 내 세로 span이 없으면 해당 장애물을 등록하지 않는다.
-   - 라이브 로그에 `vertical-member source=RC5-F2-port=... x=... spanY=...`를 남긴다. 콜아웃 실제 elbow/endX/fan은 라이브 추출 후 확인한다.
-
-2. **RC5 F2 리더**
-   - cycle110의 밸룬 중심 거리 확장을 되돌려 기존 `radius + gap + step*k` 배치를 유지했다.
-   - 세로재 리더에만 화살표 크기를 실제 노출 리더 길이의 45% 이하로 축소했다. 전역 `Dimasz`와 치수는 변경하지 않았다.
-   - 라이브 로그에 `leaderArrow=`를 남긴다.
+1. `vertical-member` 장애물의 강제 리더 차단 옵션을 제거했다. 기둥은 콜아웃 문자 상자 겹침만 막고, tier 1·2에서는 리더 교차를 허용한다.
+2. F2 세로재 밸룬의 끝단 탐색에서만 자기 `vertical-member` 상자를 충돌·여유도 계산에서 제외했다. support·치수·기존 콜아웃 충돌 규칙은 유지한다.
+3. F2 리더 화살촉은 기존대로 `min(default, leaderLength × 0.45)`를 유지했다.
 
 ## 변경 파일
 
 - `PlantFlow_Support/Core/Commands.cs`
+- `PlantFlow_Support/Core/NotabCalloutPlacer.cs`
 
 ## 검증
 
 - `git diff --check` 통과.
-- `dotnet build PlantFlow_Support.csproj --no-restore` 통과: 오류 0, 경고 14.
+- `dotnet build PlantFlow_Support.sln --no-restore` 통과: 오류 0, 경고 14.
 
 ## 라이브 검증 필요
 
-- RC5 파이프 콜아웃의 `elbow/endX/fan`과 기둥·플레이트 미관통 여부.
-- RC5 F2 밸룬이 기둥 근처에 유지되며 리더 선분이 보이는지.
+- RC5 파이프 콜아웃의 새 elbow/endX/fan 및 텍스트의 기둥·플레이트 미겹침.
+- RC5 F2 밸룬의 기둥 근처 복귀(clear 회복)와 리더 선분 가시성.
 - RC1~3, RC4·6~9, GD 회귀 여부.
 
 ## 커밋
 
-- 코드: `fa6f987` (`fix: correct RC5 callout obstacle and F2 leader`)
+- 코드: `bb31cd1` (`fix: allow RC5 callout leader through vertical member`)
