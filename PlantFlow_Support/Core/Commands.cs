@@ -6419,8 +6419,9 @@ namespace PlantFlow_Support
             }
             // 실제 단면폭이 아니라 "얇은 기둥 위에 화살표가 닿게" 하는 가독성 하한이다.
             double halfThick = System.Math.Max(txt, radius) / 2.0;
-            endMinX = rawAnchor.X - halfThick;
-            endMaxX = rawAnchor.X + halfThick;
+            // 화살표 끝점만 기둥 축에 둔다. halfThick은 밸룬/문자 여백 계산에 계속 사용한다.
+            endMinX = rawAnchor.X;
+            endMaxX = rawAnchor.X;
             endY = (verticalBaseY + verticalTopY) / 2.0;
             geomSource = "vertical-port axisX=" + this.FormatNumber(rawAnchor.X)
               + " halfThick=" + this.FormatNumber(halfThick)
@@ -6520,48 +6521,58 @@ namespace PlantFlow_Support
         // 자유 후보가 없더라도 일반 탐색이나 리더 교차 폴백으로 되돌아가지 않는다.
         if (isRc9P1DownOnly)
         {
+          // 먼저 순수 하향을 시도하고, 막힌 경우에만 우측 플레이트 바깥으로 조금씩 벗어난다.
+          // 모든 후보는 기존의 엄격한 상자/리더 교차 검사를 그대로 적용한다.
+          double[] outwardSteps = new double[] { 0.0, 0.25, 0.5, 0.75 };
           for (double stepIndex = 0.0; stepIndex <= maxSteps && !placed; stepIndex++)
           {
             double dist = gap + radius + step * stepIndex;
-            Point3d c = new Point3d(anchor.X, anchor.Y - dist, 0.0);
-            double bMinX = c.X - radius - subGap - subW;
-            double bMaxX = c.X + radius;
-            double half = System.Math.Max(radius, txt / 2.0);
-            Extents3d box = new Extents3d(new Point3d(bMinX, c.Y - half, 0.0), new Point3d(bMaxX, c.Y + half, 0.0));
-            candidateCount++;
-            double clearance = placer.ClearanceTo(box);
-            maxClearance = System.Math.Max(maxClearance, clearance);
-            if (!placer.WithinBounds(box))
+            for (int outwardIndex = 0; outwardIndex < outwardSteps.Length && !placed; outwardIndex++)
             {
-              int oob;
-              rejBy.TryGetValue("oob", out oob);
-              rejBy["oob"] = oob + 1;
-              continue;
-            }
+              double outward = step * outwardSteps[outwardIndex];
+              Point3d c = new Point3d(anchor.X + outward, anchor.Y - dist, 0.0);
+              double bMinX = c.X - radius - subGap - subW;
+              double bMaxX = c.X + radius;
+              double half = System.Math.Max(radius, txt / 2.0);
+              Extents3d box = new Extents3d(new Point3d(bMinX, c.Y - half, 0.0), new Point3d(bMaxX, c.Y + half, 0.0));
+              candidateCount++;
+              double clearance = placer.ClearanceTo(box);
+              maxClearance = System.Math.Max(maxClearance, clearance);
+              if (!placer.WithinBounds(box))
+              {
+                int oob;
+                rejBy.TryGetValue("oob", out oob);
+                rejBy["oob"] = oob + 1;
+                continue;
+              }
 
-            Vector3d dir = c - anchor;
-            Point3d touchPt = c - dir.GetNormal() * radius;
-            string rej;
-            if (!placer.IsBalloonFree(box, anchor, touchPt, out rej, false, false))
-            {
-              int rejected;
-              rejBy.TryGetValue(rej, out rejected);
-              rejBy[rej] = rejected + 1;
-              continue;
-            }
+              Vector3d dir = c - anchor;
+              Point3d touchPt = c - dir.GetNormal() * radius;
+              string rej;
+              if (!placer.IsBalloonFree(box, anchor, touchPt, out rej, false, false))
+              {
+                int rejected;
+                rejBy.TryGetValue(rej, out rejected);
+                rejBy[rej] = rejected + 1;
+                continue;
+              }
 
-            freeCount++;
-            ballCenter = c; ballBox = box; bestAnchor = anchor; outwardLeft = false; placed = true;
-            placementTier = "rc9-p1-down";
-            placeDiag = "tier=rc9-p1-down dir=(0,-1) dist=" + this.FormatNumber(dir.Length)
-              + " clear=" + this.FormatNumber(clearance);
+              freeCount++;
+              ballCenter = c; ballBox = box; bestAnchor = anchor; outwardLeft = false; placed = true;
+              placementTier = "rc9-p1-down";
+              placeDiag = "tier=rc9-p1-down dir=(" + this.FormatNumber(outward) + ",-1) dist=" + this.FormatNumber(dir.Length)
+                + " clear=" + this.FormatNumber(clearance);
+            }
           }
 
           if (!placed)
           {
+            System.Text.StringBuilder rc9Rej = new System.Text.StringBuilder();
+            foreach (System.Collections.Generic.KeyValuePair<string, int> kv in rejBy)
+            { if (rc9Rej.Length > 0) rc9Rej.Append(","); rc9Rej.Append(kv.Key).Append("=").Append(kv.Value); }
             PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item
               + " reason=rc9-p1-down-no-space cand=" + candidateCount + " free=" + freeCount
-              + " maxClear=" + this.FormatNumber(maxClearance));
+              + " maxClear=" + this.FormatNumber(maxClearance) + " rejBy{" + rc9Rej.ToString() + "}");
             continue;
           }
         }
