@@ -1,20 +1,22 @@
 # REPORT — Codex → Claude
 
-- **cycle**: 106
+- **cycle**: 107
 - **status**: completed
 - **completed_at**: 2026-07-22
-- **title**: RC7 A/A1 분할 + RC5 F1·F2 앵커 교정 + RC9 P1 확장 배치
+- **title**: RC5 F2 기둥 배치 + RC7 분할 반전·F2 대각재 + RC9 P1 리더교차 폴백
 
-## 변경 요약
+## 항목별 결과
 
-- RC7의 `params(A+A1)` 분할은 파이프 중심 전용 최소 간격 가드를 우회한다. A=800/A1=150처럼 짧은 A1도 분할 치수로 작도한다.
-- RC5의 F1 앵커를 `PPorts[0]`(하단 가로재 위 기준점), F2 앵커를 `PPorts[1]`(S2 세로 기둥 자유단)으로 교정했다. `Support/RC5/RC5.py`에서 포트 생성 순서가 datum(PPorts[0]) → F1 끝점(PPorts[1]) → F2 상단(PPorts[2])임을 확인했고, PPorts[0]은 하단 가로재 내부 점이므로 F1에 선택했다.
-- RC9을 포함한 다중 플레이트의 P1 밸룬만 `PFS_NOTAB_P1_EXT_STEPS`(기본 24, 범위 1~48)까지 확장 탐색한다. 기존 F 계열·기타 밸룬 탐색 범위는 유지한다.
+1. **RC5 F2**: 세로재 `member-end` 후보에만 `support` 상자 겹침 면제를 명시 적용했다. 치수·BOM·기존 콜아웃 상자 및 리더 검사는 유지한다. support는 여유 점수에서도 제외해 기둥 인접 후보가 실제 여유로 비교된다.
+2. **RC7**:
+   - **2a**: `TryGetNotabRcHorizontalParams`는 변경하지 않고 소비부에서만 `paramLeft`/`paramRight`를 교환했다. RC7 분할은 좌 150 / 우 800으로 작도된다.
+   - **2b**: RC7 `F2`만 가로재 끝단 배치를 우회하고 `RS2()`의 `PPorts[2]` 원본 앵커를 기준으로 일반 후보 탐색한다. 단, 다른 부재보다 먼저 배치되는 순서는 유지한다.
+3. **RC9 P1**: P1 정상 탐색의 자유 후보가 0일 때, 확장 탐색에서만 기존 콜아웃 상자/리더와의 리더 교차를 허용한다. 밸룬 상자 겹침·support·치수 충돌은 계속 금지한다. 로그 tier는 `p1-leader-fallback`이다.
 
 ## 변경 파일
 
 - `PlantFlow_Support/Core/Commands.cs`
-- `PlantFlow_Support/Ortho/StandardSupport.cs`
+- `PlantFlow_Support/Core/NotabCalloutPlacer.cs`
 
 ## 검증
 
@@ -23,11 +25,11 @@
 
 ## 라이브 검증 필요
 
-- RC7: `PFSNOTABDETAIL dim append` 로그의 `split=(800,150)` 및 치수 표시 확인.
-- RC5: `balloon-anchor`/`balloon-draw` 로그에서 F2 `p0`이 S2와 일치하고, F1 `p0`이 하단 가로재 위인지 확인.
-- RC9: `P1_0`·`P1_1` 두 항목 모두 `balloon-draw`, `balloon-skip key=P1_* reason=no-space` 0건 확인.
-- RC1~RC3·GD 등 기존 밸룬 회귀 없음 확인.
+- RC5 F2 `balloon-draw`가 기둥 축 근처로 배치되고 F1은 하단 가로재인지 확인.
+- RC7 `split=(150,800)` 및 F2가 대각 브레이스를 가리키는지 확인.
+- RC9 P1 두 항목이 모두 작도되고, 폴백 사용 시 `tier=p1-leader-fallback`인지 확인.
+- RC1~3·GD·RC4/6/8 회귀 없음 확인.
 
 ## 커밋
 
-- 코드: `f9b14f5` (`fix: correct RC5 RC7 RC9 notab annotations`)
+- 코드: `c5fa9c0` (`fix: refine RC notab balloon placement`)
