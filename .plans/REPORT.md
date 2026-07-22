@@ -30,4 +30,4 @@
 
 ## 커밋
 
-- 코드: 아래 커밋 해시 참조.
+- 코드: `3b2d778` (`feat: add manual pipe callout position env`)
