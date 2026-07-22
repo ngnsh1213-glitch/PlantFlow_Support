@@ -4106,12 +4106,12 @@ namespace PlantFlow_Support
     private void AppendNotabDirectCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer, string designation, Point3d anchor, double viewportCenterX, NotabCalloutPlacer.RequiredSide requiredSide, string sideSource, double gap, double minDx, string label)
     {
       this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, designation, anchor, viewportCenterX, requiredSide, sideSource, gap, minDx, label,
-        false, new Extents3d(Point3d.Origin, Point3d.Origin));
+        false, new Extents3d(Point3d.Origin, Point3d.Origin), false, Point3d.Origin, new Extents3d(Point3d.Origin, Point3d.Origin));
     }
 
     // anchorBox를 주면 화살표를 대상 중심이 아니라 그 외곽(원형이면 quadrant)에 닿게 한다.
     private void AppendNotabDirectCallout(Transaction tr, BlockTableRecord layoutBtr, Database db, ObjectId textStyleId, ObjectId layerId, Extents3d supportPaperExt, double txt, NotabCalloutPlacer placer, string designation, Point3d anchor, double viewportCenterX, NotabCalloutPlacer.RequiredSide requiredSide, string sideSource, double gap, double minDx, string label,
-      bool hasAnchorBox, Extents3d anchorBox)
+      bool hasAnchorBox, Extents3d anchorBox, bool hasManualTextEdge, Point3d manualTextEdge, Extents3d manualBounds)
     {
       MText mt = new MText();
       try
@@ -4150,7 +4150,35 @@ namespace PlantFlow_Support
           // 라인넘버(파이프)만 꺾임 1회. 유볼트·부재는 직선 1개를 유지한다(사용자 확정).
           tailLength = isPipeCallout ? this.GetEnvDouble("PFS_NOTAB_PIPE_LEADER_TAIL", txt * 2.0, 0.0, 200.0) : 0.0;
           // 부재 콜아웃은 하단 선호(치수가 항상 상단·좌측에 놓인다). 라인넘버는 상하 자유.
-          smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, tailLength, out near, out p1, out p2, out left, out diagnostic);
+          if (hasManualTextEdge)
+          {
+            left = requiredSide == NotabCalloutPlacer.RequiredSide.Left;
+            double boxLeft = left ? manualTextEdge.X - actualWidth : manualTextEdge.X;
+            Extents3d manualBox = new Extents3d(
+              new Point3d(boxLeft, manualTextEdge.Y - actualHeight / 2.0, 0.0),
+              new Point3d(boxLeft + actualWidth, manualTextEdge.Y + actualHeight / 2.0, 0.0));
+            bool manualOutOfBounds = manualBox.MinPoint.X < manualBounds.MinPoint.X
+              || manualBox.MaxPoint.X > manualBounds.MaxPoint.X
+              || manualBox.MinPoint.Y < manualBounds.MinPoint.Y
+              || manualBox.MaxPoint.Y > manualBounds.MaxPoint.Y;
+            if (manualOutOfBounds)
+            {
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL callout-skip reason=env-pos-oob designation=" + designation
+                + " end=" + this.FormatPoint(manualTextEdge) + " box=" + this.FormatExtents(manualBox));
+            }
+            else
+            {
+              near = manualTextEdge;
+              p2 = manualTextEdge;
+              p1 = tailLength > 1e-9
+                ? new Point3d(left ? p2.X + tailLength : p2.X - tailLength, p2.Y, 0.0)
+                : p2;
+              diagnostic = "manual=env";
+              smartPlaced = true;
+            }
+          }
+          if (!smartPlaced)
+            smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, tailLength, out near, out p1, out p2, out left, out diagnostic);
         }
         if (!smartPlaced)
         {
@@ -4510,7 +4538,8 @@ namespace PlantFlow_Support
           else
             PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-box 없음 tag=" + snapshot.Tag
               + " oversizeRejected=" + rejectedOversize + " anchor=" + this.FormatPoint(anchor));
-          this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, snapshot.Tag, anchor, viewportCenterX, requiredSide, sideSource, gap, minDx, "ubolt callout", hasBox, uboltBox);
+          this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, snapshot.Tag, anchor, viewportCenterX, requiredSide, sideSource, gap, minDx, "ubolt callout", hasBox, uboltBox,
+            false, Point3d.Origin, new Extents3d(Point3d.Origin, Point3d.Origin));
         }
       }
       catch (System.Exception ex)
@@ -4565,6 +4594,14 @@ namespace PlantFlow_Support
           if (lines[i].Length > longestLine) longestLine = lines[i].Length;
         string sideSource;
         NotabCalloutPlacer.RequiredSide requiredSide = this.ResolveNotabRequiredSide("PFS_NOTAB_DIR_" + this.GetSupportTypePrefix(s_isoSupportTag) + "_PIPE", anchor.X, (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0, out sideSource);
+        double manualDx, manualDy;
+        bool hasManualPosition = this.TryGetNotabPipePosition(standardName, out manualDx, out manualDy);
+        Point3d manualTextEdge = hasManualPosition ? new Point3d(anchor.X + manualDx, anchor.Y + manualDy, 0.0) : Point3d.Origin;
+        if (hasManualPosition)
+        {
+          requiredSide = manualDx < 0.0 ? NotabCalloutPlacer.RequiredSide.Left : NotabCalloutPlacer.RequiredSide.Right;
+          sideSource = "env";
+        }
 
         // cycle83: MLeader 경로는 접속점을 확정할 수 없어 직접 MText+Leader 작도로 교체했다.
         #if false
@@ -4664,7 +4701,8 @@ namespace PlantFlow_Support
         if (smartPlaced)
           placer.Commit(anchor, elbow, textPoint, textWidth, textHeight);
         #endif
-        this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, contents, anchor, (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0, requiredSide, sideSource, gap, minDx, "pipe callout");
+        this.AppendNotabDirectCallout(tr, layoutBtr, db, textStyleId, layerId, supportPaperExt, txt, placer, contents, anchor, (viewportPaperExt.MinPoint.X + viewportPaperExt.MaxPoint.X) / 2.0, requiredSide, sideSource, gap, minDx, "pipe callout",
+          false, new Extents3d(Point3d.Origin, Point3d.Origin), hasManualPosition, manualTextEdge, viewportPaperExt);
       }
       catch (System.Exception ex)
       {
@@ -4953,6 +4991,37 @@ namespace PlantFlow_Support
       }
 
       return fallback;
+    }
+
+    // 형식: dx,dy. 파이프 앵커 기준 paper 단위이며, 유효하지 않으면 자동배치로 폴백한다.
+    private bool TryGetNotabPipePosition(string standardName, out double dx, out double dy)
+    {
+      dx = 0.0;
+      dy = 0.0;
+      string type = string.IsNullOrWhiteSpace(standardName) ? string.Empty : standardName.Trim().ToUpperInvariant();
+      if (string.IsNullOrEmpty(type))
+        return false;
+      string name = "PFS_NOTAB_PIPE_POS_" + type;
+      try
+      {
+        string raw = System.Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(raw))
+          return false;
+        string[] parts = raw.Split(',');
+        if (parts.Length == 2
+          && double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out dx)
+          && double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out dy)
+          && dx >= -2000.0 && dx <= 2000.0 && dy >= -2000.0 && dy <= 2000.0)
+          return true;
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL env 무시 " + name + "=" + raw + " format=dx,dy range=-2000~2000");
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL env 읽기 예외 " + name + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+      dx = 0.0;
+      dy = 0.0;
+      return false;
     }
 
     private bool TryApplyHiddenVisualStyle(Database db, Transaction tr, Viewport vp)
