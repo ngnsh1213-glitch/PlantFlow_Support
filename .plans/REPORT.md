@@ -28,4 +28,4 @@
 
 ## 커밋
 
-- 완료 후 해시를 아래에 기록.
+- 코드: `7b03e64` `fix: correct notab RC vertical dimensions`
