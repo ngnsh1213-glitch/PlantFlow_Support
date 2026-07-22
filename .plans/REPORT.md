@@ -30,4 +30,4 @@
 
 ## 커밋
 
-- 코드: 아래 Git 커밋 결과로 갱신.
+- 코드: `f9b14f5` (`fix: correct RC5 RC7 RC9 notab annotations`)
