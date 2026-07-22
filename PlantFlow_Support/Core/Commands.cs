@@ -3828,15 +3828,68 @@ namespace PlantFlow_Support
           + " ext=" + this.FormatExtents(viewportBoundsOk ? viewportPaperExt : supportPaperExt));
         // 소유자 태그를 달아 밸룬 배치 때 리더 검사만 면제할 수 있게 한다.
         calloutPlacer.AddObstacle(supportPaperExt, "support");
-        // 병합 솔리드는 기둥 폭을 대표하지 못한다. S2+F2로 재구성한 포트 기반 상자만
-        // 파이프 콜아웃의 장애물로 등록한다. 세로재 없는 타입은 기존 경로를 그대로 둔다.
+        // 병합 솔리드는 기둥 폭을 대표하지 못한다. 포트 기반 상자만 파이프 콜아웃의
+        // 장애물로 등록한다. RC5의 F2는 S3(PPorts[2])이므로 치수 S2 축을 재사용하지 않는다.
+        // 세로재 없는 타입은 기존 경로를 그대로 둔다.
         if (hasVerticalPortAnchor)
         {
-          double verticalHalfWidth = System.Math.Max(txt, this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0)) / 2.0;
-          Extents3d verticalMemberBox = new Extents3d(
-            new Point3d(verticalAnchorX - verticalHalfWidth, verticalAnchorBaseY, 0.0),
-            new Point3d(verticalAnchorX + verticalHalfWidth, verticalAnchorTopY, 0.0));
-          calloutPlacer.AddObstacle(verticalMemberBox, "vertical-member");
+          double verticalMemberX = verticalAnchorX;
+          double verticalMemberBaseY = verticalAnchorBaseY;
+          double verticalMemberTopY = verticalAnchorTopY;
+          string verticalMemberSource = "dim-port";
+          bool verticalMemberBoxAvailable = true;
+          if (string.Equals(standardName, "RC5", System.StringComparison.OrdinalIgnoreCase))
+          {
+            NotabSupportPortSnapshot f2Port = null;
+            for (int i = 0; i < s_isoSupportPorts.Count; i++)
+            {
+              if (this.IsNotabVerticalMemberPort(s_isoSupportPorts[i].Wcs))
+              {
+                f2Port = s_isoSupportPorts[i];
+                break;
+              }
+            }
+            if (f2Port != null)
+            {
+              Point3d f2Paper = this.NotabProjectWcsToPaper(vp, f2Port.Wcs);
+              double span = verticalAnchorTopY - verticalAnchorBaseY;
+              double spanUp = f2Paper.Y + span;
+              double spanDown = f2Paper.Y - span;
+              double other = double.NaN;
+              if (spanUp <= supportPaperExt.MaxPoint.Y + 1e-6 && spanUp >= supportPaperExt.MinPoint.Y - 1e-6)
+                other = spanUp;
+              else if (spanDown <= supportPaperExt.MaxPoint.Y + 1e-6 && spanDown >= supportPaperExt.MinPoint.Y - 1e-6)
+                other = spanDown;
+              if (!double.IsNaN(other))
+              {
+                verticalMemberX = f2Paper.X;
+                verticalMemberBaseY = System.Math.Min(f2Paper.Y, other);
+                verticalMemberTopY = System.Math.Max(f2Paper.Y, other);
+                verticalMemberSource = "RC5-F2-port=" + f2Port.Name;
+              }
+              else
+              {
+                verticalMemberBoxAvailable = false;
+                PlantOrthoView.FileDiag("PFSNOTABDETAIL vertical-member RC5 skip: F2 span outside support extents");
+              }
+            }
+            else
+            {
+              verticalMemberBoxAvailable = false;
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL vertical-member RC5 skip: F2 port missing");
+            }
+          }
+          if (verticalMemberBoxAvailable)
+          {
+            double verticalHalfWidth = System.Math.Max(txt, this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0)) / 2.0;
+            Extents3d verticalMemberBox = new Extents3d(
+              new Point3d(verticalMemberX - verticalHalfWidth, verticalMemberBaseY, 0.0),
+              new Point3d(verticalMemberX + verticalHalfWidth, verticalMemberTopY, 0.0));
+            calloutPlacer.AddObstacle(verticalMemberBox, "vertical-member");
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL vertical-member source=" + verticalMemberSource
+              + " x=" + this.FormatNumber(verticalMemberX) + " spanY=" + this.FormatNumber(verticalMemberBaseY)
+              + "~" + this.FormatNumber(verticalMemberTopY));
+          }
         }
         this.AddNotabDimensionObstacles(tr, layoutBtr, calloutPlacer, txt);
         this.AddNotabPipeObstacle(calloutPlacer, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius);
@@ -6460,11 +6513,9 @@ namespace PlantFlow_Support
           double memberSteps = this.GetEnvDouble("PFS_NOTAB_MEMBER_BALLOON_MAX_STEPS", 12.0, 0.0, 32.0);
           for (int k = 0; k <= (int)memberSteps && !placed; k++)
           {
-            // 세로재는 화살촉(Dimasz) 뒤에 짧은 선분을 남겨야 리더가 끊겨 보이지 않는다.
-            // 화살표 앵커는 그대로 두고 밸룬 중심만 바깥으로 이동한다.
-            double arrowSize = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
-            double visibleLeaderMargin = System.Math.Max(txt * 0.5, 2.0);
-            double outDist = radius + (isVerticalMember ? arrowSize + visibleLeaderMargin : gap) + step * k;
+            // 밸룬 위치는 기존 gap 기반으로 유지한다. 세로재 리더의 가시성은 아래 작도 시
+            // 이 리더 전용 화살표를 축소해 확보하며, 중심을 더 멀리 밀지 않는다.
+            double outDist = radius + gap + step * k;
             // 좌 끝단(바깥=왼쪽) / 우 끝단(바깥=오른쪽) 두 후보를 같은 단계에서 모두 평가한다.
             // 한쪽을 먼저 찾았다고 즉시 채택하면 "여유 큰 쪽" 규칙이 깨진다.
             for (int e = 0; e < 2; e++)
@@ -6710,7 +6761,13 @@ namespace PlantFlow_Support
           leader.AppendVertex(anchor);
           leader.AppendVertex(touch);
           leader.HasArrowHead = true;
-          leader.Dimasz = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
+          double leaderArrowSize = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
+          if (isVerticalMember)
+          {
+            // 밸룬 중심은 유지하고, 화살촉이 원~기둥축 리더를 덮지 않게 노출 길이의 절반 미만으로 제한한다.
+            leaderArrowSize = System.Math.Min(leaderArrowSize, System.Math.Max(0.5, anchor.DistanceTo(touch) * 0.45));
+          }
+          leader.Dimasz = leaderArrowSize;
           if (layerId != ObjectId.Null) leader.LayerId = layerId;
           leader.Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex((Autodesk.AutoCAD.Colors.ColorMethod)195, (short)1);
           layoutBtr.AppendEntity(leader);
@@ -6722,6 +6779,7 @@ namespace PlantFlow_Support
             + " sub='" + subLabel + "' adjust=" + anchorAdjust
             + " rawAnchor=" + this.FormatPoint(rawAnchor) + " anchor=" + this.FormatPoint(anchor) + " center=" + this.FormatPoint(ballCenter)
             + " r=" + this.FormatNumber(radius)
+            + " leaderArrow=" + this.FormatNumber(leaderArrowSize)
           + " box=" + this.FormatExtents(ballBox)
             + " side=" + (left ? "left" : "right") + " cand=" + candidateCount
             + " free=" + freeCount + " maxClear=" + this.FormatNumber(maxClearance) + " tier=" + placementTier + " extended=" + (placementTier == "extended" ? "true" : "false") + " " + diag);
