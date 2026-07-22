@@ -14,7 +14,7 @@ namespace PlantFlow_Support
     {
         private bool _drawingBusy;
         private string _captureDocName; // MDI 가드: 서포트 캡처 시 활성 문서명.
-        private Database _captureDatabase;
+        private IntPtr _captureDbPtr = IntPtr.Zero; // Database 관리 래퍼는 재생성될 수 있어 네이티브 포인터로 비교.
 
         private sealed class NotabSelectionItem
         {
@@ -142,7 +142,7 @@ namespace PlantFlow_Support
                 SupportSelection.Clear();
                 lvSupportName.Items.Clear();
                 _captureDocName = null;
-                _captureDatabase = null;
+                _captureDbPtr = IntPtr.Zero;
                 return DrawingBridge.Ok(env.Id, BuildDrawingState());
             }
             catch (Exception ex)
@@ -201,7 +201,7 @@ namespace PlantFlow_Support
                     lvSupportName.Items.Add(new ListViewItem(new[] { item.Tag, item.Status ?? "" }));
                 }
                 _captureDocName = doc.Name;
-                _captureDatabase = doc.Database;
+                _captureDbPtr = doc.Database.UnmanagedObject;
                 int addedCount = selected.Count - duplicates;
                 PlantOrthoView.FileDiag("addBatchFromSelection done added=" + addedCount + " duplicates=" + duplicates);
                 return DrawingBridge.Ok(env.Id, new { added = new { count = addedCount, duplicates, unnamed = 0, invalid = 0 }, state = BuildDrawingState() });
@@ -232,7 +232,7 @@ namespace PlantFlow_Support
                 if (!string.IsNullOrEmpty(_captureDocName) &&
                     !string.Equals(doc.Name, _captureDocName, StringComparison.OrdinalIgnoreCase))
                     return DrawingBridge.Fail(env.Id, "ER_DOCMISMATCH", "서포트를 캡처한 도면과 현재 도면이 다릅니다. 목록을 지우고 다시 선택하세요.");
-                if (_captureDatabase != null && !object.ReferenceEquals(doc.Database, _captureDatabase))
+                if (_captureDbPtr != IntPtr.Zero && doc.Database.UnmanagedObject != _captureDbPtr)
                     return DrawingBridge.Fail(env.Id, "ER_DOCMISMATCH", "서포트를 캡처한 데이터베이스와 현재 도면이 다릅니다. 목록을 지우고 다시 선택하세요.");
 
                 var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
