@@ -249,6 +249,15 @@
 - **교훈**: 심미적 배치 목표는 비용함수 원격 튜닝으로 예측 불가(렌더 미가시·비용함수 예측 반복 실패). 진단형 문제(perspective·치수·RC7/8/9)와 달리 effort로 해결 안 됨 — **접근 전환이 답**.
 - **cycle 114 = 결정론 전환**: `PFS_NOTAB_PIPE_POS_<TYPE>` 수동 위치 노브(탐색 우회, dev_test.bat 숫자 조정만으로 수렴). cycle113 개선분(리더검사 제외)은 유지.
 
+## ★ cycle 114 라이브 확정 + 일반화 계획 (2026-07-22, §9 Codex)
+- **`PFS_NOTAB_PIPE_POS_RC5=100,20`로 목표 위치 확보**(사용자 이미지 일치, F1~F2 틈 우측·파이프 높이대). = 측정된 정답.
+- §9 Codex 자문 결론(cycle 115 근거):
+  1. 파이프 cost 식 = 외곽초과합 + r×0.01 + |fan|×angleW(0) + preferDown항(0). **Y-편차 항 부재가 상향 도주 원인.**
+  2. **`PFS_NOTAB_PIPE_DY_W` 신설**(파이프 전용, TryPlace Free() 통과 후 `+|y-anchorY|×dyW`). 기본 **0.25**(gap 이점 28.6), 부족 시 0.5. 1.0은 수평 과고집 위험. `angleW` 재활용 기각(±각 무차별).
+  3. **후보 격자 통과 확인**: fan 0/±15/±30·r 2.5스텝 → r≈102·fan+15 = anchor+(98.6,26.4) 생성됨(수동 100,20 근접). Free() 통과 여부만 라이브 확인, 막히면 파이프 전용 ±10° fan 보강.
+  4. 회귀: `PipeCalloutSide`는 #if false 죽은 경로(충돌 없음). 좌우는 ResolveNotabRequiredSide+DIR env. 의도적 고Y 타입 없음 → pipe 전용 dyW 안전.
+  5. **출하 승격 = `NotabTypeConfig`에 `PipeCalloutDx/Dy/HasPipeCalloutPosition`**(RC5=100,20). 우선순위 env→config→자동. 배포 config 파일은 기반 부재로 기각.
+
 ## cycle 106 발행 범위
 1. RC7 split 우회(확실). 2. RC5 F2→PPorts[1] + F1 하단 가로재 포트 특정(Codex 조사, balloon-anchor 로그로 검증). 3. RC9 P1_1 배치 완화. StandardSupport.cs는 오쏘 공용 → RC5 분기만 국소 수정.
 
