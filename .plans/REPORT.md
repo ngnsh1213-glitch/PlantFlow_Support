@@ -1,20 +1,21 @@
 # REPORT — Codex → Claude
 
-- **cycle**: 115
+- **cycle**: 116
 - **status**: completed
 - **completed_at**: 2026-07-23
-- **title**: 파이프 콜아웃 높이밴드 규칙(dyW) + RC5 출하 기본위치 config 승격
+- **title**: 세로재 밸룬 리더 관통 연장(기본 20) — RC5 F2 마무리
 
 ## 결과
 
-- 파이프 콜아웃 자동배치에만 `PFS_NOTAB_PIPE_DY_W`를 추가했다. `GetEnvDouble(..., 0.25, 0.0, 10.0)`으로 읽으며, Free 통과 후보 비용에 `abs(candY-anchorY) * dyW`를 더한다. 유볼트·부재 콜아웃·밸룬은 0 가중치로 기존 비용식을 유지한다.
-- 자동배치 진단은 `dy=`, `dyW=`, `baseCost=`, `cost=`를 기록한다.
-- `NotabTypeConfig`에 `PipeCalloutDx`, `PipeCalloutDy`, `HasPipeCalloutPosition`을 추가하고 RC5에 `(100,20)` 출하 기본값을 등록했다.
-- 파이프 위치 우선순위는 `env PFS_NOTAB_PIPE_POS_<TYPE>` → config 기본값 → 자동탐색이다. 수동 위치 경로는 cycle114의 탐색 우회·뷰포트 밖 폴백을 재사용하고 `sideSrc=env|config|auto`로 구분한다.
+- 세로재 member-end 밸룬만 화살표 끝점을 밸룬 반대방향으로 기둥 축 너머 연장했다.
+  - side=right: `rawAnchor.X - ext`
+  - side=left: `rawAnchor.X + ext`
+- `PFS_NOTAB_VLEADER_EXT`는 `GetEnvDouble(..., 20.0, 0.0, 200.0)`으로 읽는다. `0`이면 종전처럼 축에서 끝난다.
+- 밸룬 중심, 후보 탐색 및 충돌 판정은 포트 축을 유지해 변경하지 않았다. `balloon-draw` 로그에 `leaderExt=`를 추가했다.
+- 화살촉 축소 규칙은 유지돼 연장된 실제 리더 길이에 비례한다.
 
 ## 변경 파일
 
-- `PlantFlow_Support/Core/NotabCalloutPlacer.cs`
 - `PlantFlow_Support/Core/Commands.cs`
 
 ## 검증
@@ -24,9 +25,9 @@
 
 ## 라이브 검증 필요
 
-- RC5 env 미설정에서 `sideSrc=config`와 앵커+(100,20) 위치를 확인.
-- config/env을 임시로 비활성화한 실험에서 자동배치 로그의 `dy=`와 선택 위치를 확인.
+- RC5 F2가 기둥 축을 지나 좌측 20까지 연장되는지 확인.
+- RC1~3 F2의 동일 규칙을 확인하고, 필요 시 `PFS_NOTAB_VLEADER_EXT=0`으로 즉시 원복 가능.
 
 ## 커밋
 
-- 코드: `b901935` (`feat: tune pipe callout height and defaults`)
+- 대기 중

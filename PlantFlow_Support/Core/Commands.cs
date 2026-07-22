@@ -6802,6 +6802,14 @@ namespace PlantFlow_Support
         anchor = bestAnchor;
 
         bool left = outwardLeft;
+        double leaderExt = 0.0;
+        if (isVerticalMember)
+        {
+          // 세로재 화살표는 기둥 축을 지나 반대편까지 연장해 얇은 부재와의 연결감을 확보한다.
+          // 밸룬 위치와 후보 충돌 검사는 포트 축 기준을 그대로 유지한다.
+          leaderExt = this.GetEnvDouble("PFS_NOTAB_VLEADER_EXT", 20.0, 0.0, 200.0);
+          anchor = new Point3d(anchor.X + (left ? leaderExt : -leaderExt), anchor.Y, anchor.Z);
+        }
         string diag = placeDiag;
         // 화살표는 보정된 앵커에 고정하고, 리더는 꺾지 않고 원주까지 직선 1개.
         Vector3d toCenter = ballCenter - anchor;
@@ -6867,6 +6875,7 @@ namespace PlantFlow_Support
             + " rawAnchor=" + this.FormatPoint(rawAnchor) + " anchor=" + this.FormatPoint(anchor) + " center=" + this.FormatPoint(ballCenter)
             + " r=" + this.FormatNumber(radius)
             + " leaderArrow=" + this.FormatNumber(leaderArrowSize)
+            + " leaderExt=" + this.FormatNumber(leaderExt)
           + " box=" + this.FormatExtents(ballBox)
             + " side=" + (left ? "left" : "right") + " cand=" + candidateCount
             + " free=" + freeCount + " maxClear=" + this.FormatNumber(maxClearance) + " tier=" + placementTier + " extended=" + (placementTier == "extended" ? "true" : "false") + " " + diag);
