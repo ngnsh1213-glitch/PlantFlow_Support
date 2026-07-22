@@ -3566,6 +3566,14 @@ namespace PlantFlow_Support
         string dimHFallback = "not-rc";
         if (rcMemberGeometry && this.TryGetNotabRcHorizontalParams(out paramTotal, out paramLeft, out paramRight))
         {
+          // RC7은 공통 파라미터 산출(A/A1)을 그대로 쓰되, 도면 투영 좌우가 규격 좌우와 반대다.
+          // 소비부에서만 교환해 다른 RC 타입과 파라미터 원본을 보존한다.
+          if (string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase))
+          {
+            double rc7Left = paramLeft;
+            paramLeft = paramRight;
+            paramRight = rc7Left;
+          }
           double paperPerModel = paperW / realW;
           if (paperPerModel > 1e-9 && memberBoxes != null && memberBoxes.Count > 0)
           {
@@ -6302,6 +6310,7 @@ namespace PlantFlow_Support
       placer.SetLeaderExemptOwner("support");
       try
       {
+      string standardName = this.GetNotabStandardName();
       double radius = this.GetEnvDouble("PFS_NOTAB_BALLOON_R", txt * 1.2, 1.0, 100.0);
       double gap = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
       // 밸룬은 작은 기호라 텍스트 콜아웃과 같은 이격(40)을 요구하면 멀리 밀려난다.
@@ -6340,11 +6349,16 @@ namespace PlantFlow_Support
         string anchorAdjust = "port";
         bool isVerticalMember = hasVerticalAnchor && this.IsNotabVerticalMemberPort(anchorInfo.WcsP0);
         bool isPlateItem = string.Equals(bomItem, "P1", System.StringComparison.OrdinalIgnoreCase);
+        // RC7 F2는 RS2()의 PPorts[2]가 가리키는 대각 브레이스다. 가로재 끝단 규칙을 적용하지 않는다.
+        bool isRc7DiagonalMember = string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase)
+          && string.Equals(item, "F2", System.StringComparison.OrdinalIgnoreCase);
         // 부재 밸룬 = 세로재 또는 F 계열. P1(플레이트)은 포트가 곧 접속점이라 제외한다.
         bool isMemberItem = !isPlateItem
+          && !isRc7DiagonalMember
           && (isVerticalMember || item.StartsWith("F", System.StringComparison.OrdinalIgnoreCase));
+        bool isMemberPassItem = isMemberItem || isRc7DiagonalMember;
         // 부재 밸룬은 콜아웃보다 먼저 배치한다. 두 pass로 나뉘어 호출되므로 해당 없는 건 건너뛴다.
-        if (isMemberItem != memberPass)
+        if (isMemberPassItem != memberPass)
           continue;
         // 밸룬 옆 부재 코드(ANGLE A6 → A6). 표를 보지 않아도 규격을 알 수 있다.
         string subLabel = this.GetNotabBalloonSubLabel(bomDesc);
@@ -6448,7 +6462,7 @@ namespace PlantFlow_Support
               double half = System.Math.Max(radius, txt / 2.0);
               Extents3d box = new Extents3d(new Point3d(bMinX, endY - half, 0.0), new Point3d(bMaxX, endY + half, 0.0));
               candidateCount++;
-              double clearance = placer.ClearanceTo(box);
+              double clearance = placer.ClearanceTo(box, isVerticalMember);
               maxClearance = System.Math.Max(maxClearance, clearance);
               if (!placer.WithinBounds(box))
               {
@@ -6459,7 +6473,8 @@ namespace PlantFlow_Support
               }
               Point3d touchPt = new Point3d(toLeftEnd ? cx + radius : cx - radius, endY, 0.0);
               string rejEnd;
-              if (!placer.IsBalloonFree(box, endAnchor, touchPt, out rejEnd))
+              // 세로재만 기둥 내부 쪽 여백을 쓸 수 있다. support 외 모든 상자 충돌은 그대로 금지한다.
+              if (!placer.IsBalloonFree(box, endAnchor, touchPt, out rejEnd, isVerticalMember))
               {
                 int rejected;
                 rejBy.TryGetValue(rejEnd, out rejected);
@@ -6528,7 +6543,10 @@ namespace PlantFlow_Support
               if (dir.Length < 1e-9) continue;
               Point3d touchPt = c - dir.GetNormal() * radius;
               string rej;
-              if (!placer.IsBalloonFree(box, anchor, touchPt, out rej))
+              // RC9의 두 번째 P1만 정상 탐색이 완전히 막힌 뒤 기존 콜아웃 리더 교차를 허용한다.
+              // 밸룬 상자·support·치수 상자 충돌은 이 경로에서도 계속 금지한다.
+              bool p1LeaderFallback = isPlateItem && tier == 1 && freeCount == 0;
+              if (!placer.IsBalloonFree(box, anchor, touchPt, out rej, false, p1LeaderFallback))
               {
                 int rejected;
                 rejBy.TryGetValue(rej, out rejected);
@@ -6542,7 +6560,7 @@ namespace PlantFlow_Support
               if (score > bestScore)
               {
                 bestScore = score; ballCenter = c; ballBox = box; bestAnchor = anchor; outwardLeft = toLeft; placed = true;
-                placementTier = tier == 0 ? "normal" : "extended";
+                placementTier = p1LeaderFallback ? "p1-leader-fallback" : (tier == 0 ? "normal" : "extended");
                 placeDiag = "tier=" + placementTier + " dir=" + d + " dist=" + this.FormatNumber(dir.Length)
                   + " clear=" + this.FormatNumber(clearance)
                   + " score=" + this.FormatNumber(score);

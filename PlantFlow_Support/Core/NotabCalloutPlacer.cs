@@ -172,21 +172,25 @@ namespace PlantFlow_Support
 
     // 상자 겹침은 모든 장애물·기존 콜아웃에 대해 금지한다.
     // 리더 교차는 기존 콜아웃(문자·리더)만 본다 — 밸룬 리더가 서포트·치수 위를 지나는 것은 정상이다.
-    public bool IsBalloonFree(Extents3d box, Point3d leaderFrom, Point3d leaderTo, out string reject)
+    // 면제는 호출부가 명시할 때만 적용한다. 기본 경로는 기존의 모든 충돌 검사를 보존한다.
+    public bool IsBalloonFree(Extents3d box, Point3d leaderFrom, Point3d leaderTo, out string reject,
+      bool exemptSupportBox = false, bool allowCalloutLeaderCrossing = false)
     {
       foreach (Obstacle obstacle in _obstacles)
       {
+        if (exemptSupportBox && string.Equals(obstacle.Owner ?? string.Empty, "support", System.StringComparison.Ordinal))
+          continue;
         if (BoxOverlap(box, obstacle.Box))
         { reject = "box:" + (string.IsNullOrEmpty(obstacle.Owner) ? "unnamed" : obstacle.Owner); return false; }
       }
       foreach (Extents3d placed in _placedBoxes)
       {
         if (BoxOverlap(box, placed)) { reject = "box:callout"; return false; }
-        if (SegIntersectsBox(leaderFrom, leaderTo, placed)) { reject = "leader:calloutBox"; return false; }
+        if (!allowCalloutLeaderCrossing && SegIntersectsBox(leaderFrom, leaderTo, placed)) { reject = "leader:calloutBox"; return false; }
       }
       foreach (Point3d[] leader in _placedLeaders)
       {
-        if (SegIntersectsBox(leader[0], leader[1], box) || SegsIntersect(leaderFrom, leaderTo, leader[0], leader[1]))
+        if (!allowCalloutLeaderCrossing && (SegIntersectsBox(leader[0], leader[1], box) || SegsIntersect(leaderFrom, leaderTo, leader[0], leader[1])))
         { reject = "leader:calloutLeader"; return false; }
       }
       reject = string.Empty;
@@ -195,11 +199,15 @@ namespace PlantFlow_Support
 
     // "한적한 자리"를 수치로 바꾼다 = 이 상자에서 가장 가까운 장애물·기존 콜아웃까지의 여유.
     // 겹치면 0. 클수록 한적하다.
-    public double ClearanceTo(Extents3d box)
+    public double ClearanceTo(Extents3d box, bool exemptSupportBox = false)
     {
       double best = double.MaxValue;
       foreach (Obstacle obstacle in _obstacles)
+      {
+        if (exemptSupportBox && string.Equals(obstacle.Owner ?? string.Empty, "support", System.StringComparison.Ordinal))
+          continue;
         best = System.Math.Min(best, BoxGap(box, obstacle.Box));
+      }
       foreach (Extents3d placed in _placedBoxes)
         best = System.Math.Min(best, BoxGap(box, placed));
       return best == double.MaxValue ? 1000.0 : best;
