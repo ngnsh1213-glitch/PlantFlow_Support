@@ -1,6 +1,13 @@
 ﻿# SESSION — 현재 작업 상태
 
-## ★★★ 진행 중 트랙 — 무탭 RC4~9 타입 회귀 검증 (cycle 105~107, 2026-07-22)
+## ★ 무탭 RC4~9 타입 회귀 검증 — **전 타입 종결** (cycle 105~116, 2026-07-23)
+
+**GD1~3 + RC1~9 전 타입 통과**(사용자 "rc5 이상 없음, 통과"). 12사이클. 상세=`.plans/notab_rc5_9_review_20260722.md`(전 과정)·CHANGELOG(요약).
+- cycle 105~106(치수: config 행+rcMemberGeometry+RC7 분할) → 107~113(밸룬·콜아웃 시행착오) → 114(수동 노브 전환) → 115(dyW 규칙+config 승격) → 116(리더 연장).
+- **다음 후보 트랙**: ①cycle 104 무탭 UI 라이브 검증(팔레트 일괄선택·무탭 추출·오버레이 — 미검증) ②RC4 눈확인 1회 ③TODO 아이디어 풀(세트/생성탭/일괄추출 계열).
+- 아래는 트랙 진행 당시 기록(이력 보존).
+
+## (이력) 무탭 RC4~9 타입 회귀 검증 (cycle 105~107 시점 기록)
 
 전 서포트 타입 3D 모델(각 `<TYPE>-001`)을 `dev_test.bat`로 추출해 타입별 결함을 라이브로 잡는 트랙.
 진단 원장 = `.plans/notab_rc5_9_review_20260722.md`(전 과정·로그·자문 기록). 코드 = `Core/Commands.cs`·`Core/NotabCalloutPlacer.cs`·`Ortho/StandardSupport.cs`.

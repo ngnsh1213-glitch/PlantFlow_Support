@@ -9,6 +9,16 @@
 - cycle93: HANTEC 클래스·파일·호출을 StandardSupport로 개명하고, PFS STANDARD/기존 HANTEC을 인식하는 단일 DesignStd 판정과 로그를 추가했다. 오쏘 주석 생성 전에 BOM을 초기화해 StandardName 누락을 해소했으며, 무탭 BOM은 실제 모델 DesignStd와 빈 값 폴백을 사용한다. — 2026-07-20
 
 ### Fixed
+- 무탭 RC4~9 타입 회귀 검증 트랙 종결(cycle105~116, `1ee2287`~`7de446d`): 全타입 테스트 모델(TYPE-001) 기준 GD1~3+RC1~9 전 타입 통과(2026-07-23).
+  **치수**: ①`GetNotabTypeConfig`에 RC4/5(param/F2/vertical)·RC7/8(`none`=세로 미작도 신설) 행 추가, `rcMemberGeometry`에 RC4/5/7 확장 —
+  세로가 부재 단면 F(50/75/100)를 뽑던 폴백 해소(RC4 600·RC5 600), 가로 A+A1 교정(RC5 700→650) ②RC7 A/A1 분할: `paramsHorizontal`이면
+  splitGuard 우회 + RC7만 paramLeft/Right 교환(150/800). **밸룬**: ③RC5 F1/F2 포트 재지정 — 디컴파일 포트 의미를 원본 `RC5.py`로 확정
+  (S2=가로재 F1끝, S3=세로재 F2 자유단), `IsNotabVerticalMemberPort` RC5만 index2 ④RC9 P1_1=콜아웃 **리더 교차만** 허용 하향 배치
+  (box·부재는 차단, cycle107 box허용→F3관통 반려의 정정) ⑤세로재 리더 관통 연장 `PFS_NOTAB_VLEADER_EXT`(기본 20)+화살촉 축소(리더길이×0.45).
+  **파이프 콜아웃**: ⑥vertical-member 장애물 box-only(리더의 기둥 가로지름은 사용자 승인) ⑦**높이밴드 규칙** `PFS_NOTAB_PIPE_DY_W`(기본 0.25,
+  파이프 전용 |Y-편차| 페널티 — 상향 도주 근인이 Y비용 0) ⑧수동 위치 노브 `PFS_NOTAB_PIPE_POS_<TYPE>` + RC5 출하값 config 승격
+  (`PipeCalloutDx/Dy`=100,20, 우선순위 env→config→auto). **교훈**: 심미적 배치는 원격 비용함수 튜닝으로 비수렴(9사이클) —
+  수동 캘리브레이션으로 정답 측정 후 규칙 번역이 정도 — 2026-07-23
 - PERSPECTIVE 가드 발원 기반 재설계(cycle103, `83d0a3e`): 무탭 추출 직후 원본 뷰가 Parallel→Perspective로 뒤집히던
   간헐 재현을 해소. 원인은 추출 종료 +3~5초에 AutoCAD 내장 리본 WPF 바인딩(`RibbonListButton.set_Current → SETVAR`)이
   `PERSPECTIVE=1`을 역기입하는 것이며, 구 가드의 8초 창 마진 부족(+2초)이 간헐 재현의 정체였다.
