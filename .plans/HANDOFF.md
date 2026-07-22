@@ -3,52 +3,55 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 109
+- **cycle**: 110
 - **status**: ready
 - **issued_at**: 2026-07-22
-- **title**: RC5 F2 리더 기둥까지 연장 + RC9 P1_1 down-out 배치(+rejBy 계측)
-- **작업 경로**: `Core/Commands.cs`(AppendNotabBalloons member-end·P1 down 경로)
+- **title**: RC5 F2 리더 가시화 + 파이프콜아웃 기둥회피 + RC9 P1_1 리더교차만 허용
+- **작업 경로**: `Core/Commands.cs`, `Core/NotabCalloutPlacer.cs`
 - **진단 원장**: `.plans/notab_rc5_9_review_20260722.md`
-- **기준 커밋**: `60ca015`
-- **자문**: §9 Codex. RC5=화살표 끝점 축으로, RC9=down-out+계측.
+- **기준 커밋**: `7715755`
+- **자문**: §9 Codex. F2 리더=gap 없음(화살촉 과대), 기둥=장애물 미등록, RC9=leader:calloutLeader=20 확정.
 
 ## ⚠ 검증 필수
-`dotnet build` 오류 0(경고 14 초과 금지). 미실행 시 커밋 금지·`status: blocked`. Claude가 REPORT 수령 후 직접 빌드 재확인.
+`dotnet build` 오류 0(경고 14 초과 금지). 미실행 시 커밋 금지·`status: blocked`. Claude가 REPORT 수령 후 직접 빌드 재확인. 항목별 독립(불확실 건만 partial).
 
-## 배경 (라이브 5차 + 자문)
-RC4·RC6·RC7·RC8 종결. RC5 F1/F2 **위치 정상**(cycle108) — 잔여는 F2 리더가 기둥에 안 닿음. RC9 P1_1은 cycle107(F3관통)↔108(누락) 진동.
+## 배경 (라이브 6차 + 자문)
+RC4·RC6·RC7·RC8 종결. RC5 F1/F2 위치·치수 정상. 잔여 = RC5 F2 리더 가시성·파이프콜아웃 기둥간섭, RC9 P1_1.
 
 ## 집도 지시
 
-### 1) RC5 F2 리더를 기둥까지 연장 (Commands.cs ≈6420, member-end 세로 분기)
-- 근인: 세로재 화살표 끝점 `endMinX/endMaxX = rawAnchor.X ± halfThick`. `halfThick`(가독성 하한 4.8)이 실제 기둥 반폭보다 커 화살표가 기둥 우측 허공에 뜸.
-- 수정: **세로재(isVerticalMember) 화살표 끝점을 `rawAnchor.X`(기둥 축)로** 둔다(endMinX=endMaxX=rawAnchor.X). rawAnchor.X가 기둥 중심축이라 화살표가 실제 부재를 관통해 닿는다.
-- `halfThick`은 밸룬 원·문자 간격 등 **다른 용도엔 그대로 유지**(제거하면 원·문자 규칙 영향). 화살표 끝점 산출에서만 빼는 국소 변경.
-- `memberBoxes`로 실제 폭 산출은 **금지**(기둥·가로재·플레이트 병합 솔리드라 폭 특정 불가). F2=600은 세로 길이지 폭 아님.
-- 검증: F2 balloon-draw 화살표 X가 기둥 축(≈402.5)에 닿는지.
+### 1) RC5-A: F2 리더 가시화 (Commands.cs ≈6453, 세로재 outDist)
+- 근인(자문): 리더 끝점은 이미 기둥축(402.5)에 정확히 닿음(gap 없음). 노출 리더 길이 10인데 화살표 크기 `Dimasz`≈10이라 **화살촉이 선분을 다 덮어 "끊긴 듯"** 보임.
+- 수정: **세로재(isVerticalMember)에 한해** `outDist`를 `원 반경 + 화살표 크기 + 짧은 가시 여유`로 늘린다. anchor(화살표 끝점)는 그대로. `Dimasz` 자체 변경 금지(치수 영향).
+- 검증: F2 리더에 화살촉 뒤 선분이 보이는지.
 
-### 2) RC9 P1_1 down-out 배치 + rejBy 계측 (Commands.cs ≈6521, rc9-p1-down 경로)
-- 근인: cycle108 순수 하향(dir=(0,-1)) 5후보 전부 차단. `maxClear=38.8·free=0` → **리더 교차** 탈락 유력(F3가 부재 pass서 먼저 배치·등록). 거리 확대만으론 같은 교차 반복 가능.
-- 수정: rc9-p1-down 경로에서 **순수 하향을 첫 후보로 유지**, 실패 시 **소량 외측 하향 `(+ε, -1)` 후보 추가**(우측 플레이트 외측=+X 방향, ε는 작게 단계 확대). 검사는 **표준 `IsBalloonFree(..., exemptSupportBox:false, allowCalloutLeaderCrossing:false)`** 유지(F3/치수/support/기존상자 계속 차단).
-- 첫 자유 후보 채택. 없으면 `balloon-skip reason=rc9-p1-down-no-space`로 종료(일반 탐색·p1-leader-fallback 미복귀 유지).
-- **계측 추가(필수)**: rc9-p1-down skip 로그에 **`rejBy{...}` 집계**(box:support/box:callout/leader:calloutLeader/leader:calloutBox 등)를 포함. 다음 라이브에서 box 충돌인지 리더 교차인지 확정 위함.
-- **`balloon-draw key=F3`의 anchor/center/box도 로그에 남는지 확인**(F3 좌표 확보). 이미 남으면 추가 불필요.
-- RC9/P1_1 조건 국소 → P1_0·F3·RC1~3 무회귀.
+### 2) RC5-B: 파이프 콜아웃이 세로 기둥 회피 (Commands.cs ≈3830 + NotabCalloutPlacer.cs)
+- 근인(자문): 세로 기둥이 **장애물 미등록**(obst=7에 supportPaperExt·치수·pipe·BOM뿐). 콜아웃 텍스트 좌단(407.77)·tail이 기둥(axisX402.5, 우변~407.5) 관통.
+- 수정:
+  - Commands.cs:3830 직후(파이프 콜아웃 호출 전) **포트 기반 세로 상자**를 장애물로 등록. 형상 원천=이미 계산된 `verticalAnchorX/baseY/topY`(3799). **`memberBoxes` 사용 금지**(병합 솔리드).
+  - 상자만 등록하면 tier1/2에서 리더가 외부장애물 완화로 재관통 → `NotabCalloutPlacer.TryPlace/Free`에 **"vertical-member" hard 장애물 옵션**(모든 tier에서 리더 교차 유지) 국소 추가하고 이 기둥 상자에만 적용.
+- **R1 좌우 규칙 불변**(TryPlace 우측 X부호 고정, fan/반경 탐색). 상하·거리로 회피.
+- 회귀 주의: 세로 기둥 장애물은 **세로재 있는 타입(rcMemberGeometry vertical)에서만** 등록. 없는 타입 불변.
+
+### 3) RC9 P1_1 리더교차만 허용 (Commands.cs rc9-p1-down 경로)
+- 근인(계측 확정): P1_1 하향 20후보 전부 `rejBy{leader:calloutLeader=20}` — **콜아웃 리더 교차로만** 탈락(box·support·member 무겹침, maxClear=38.8). 즉 하향 위치는 F3 box를 안 건드리고 얇은 콜아웃 리더(파이프 B.O.P 유력)만 가로지름.
+- 수정: rc9-p1-down 후보 검사를 **`IsBalloonFree(..., exemptSupportBox:false, allowCalloutLeaderCrossing:TRUE)`** 로. **calloutLeader 교차만 허용**, calloutBox·support·치수·부재 겹침은 계속 차단. → P1_1이 플레이트 아래 하향 작도(F3 box 미관통).
+- cycle107 p1-leader-fallback(calloutBox까지 허용)과 다름 — **box는 계속 금지**. 순수 하향 우선 유지.
+- 라이브 확인점: 교차되는 리더가 파이프 콜아웃이면 OK. 만약 F3 리더면 사용자 재검토 → 그때 F3 리더만 hard로 승격. REPORT에 P1_1 draw 시 교차 대상 명시.
 
 ## 하지 말 것
-- RC5/RC7/RC8·RC1~3·GD 회귀 금지. 치수 변경 금지.
-- P1_1 선배치(순서 변경) 금지 — F3 회귀 위험(자문 비권고).
-- `IsBalloonFree` 면제 옵션을 RC9 하향에 켜지 말 것(F3 관통 재발).
-- `halfThick`의 밸룬 원·문자 간격 용도 변경 금지.
+- RC5/7/8·RC1~3·GD 회귀·치수 변경 금지. `Dimasz` 변경 금지.
+- 기둥 장애물을 세로재 없는 타입에 등록 금지. `IsBalloonFree` 기존 기본동작(옵션 off) 불변.
+- P1_1 선배치(순서변경) 금지.
 
 ## 제약
-- 빈 catch 금지. 신규 노브는 env. `#nullable disable`면 null 가드.
+- 빈 catch 금지. 신규 노브 env. `#nullable disable`면 null 가드.
 
 ## 검증 (Codex, 필수)
 1. `dotnet build` 오류 0, 경고 14 초과 금지.
-2. `REPORT.md`에 항목별 결과·RC5 화살표 X·RC9 rejBy 계측 추가 여부·빌드 결과. 라이브는 사용자.
+2. `REPORT.md`에 항목별 결과·RC9 P1_1 교차대상·빌드 결과. 라이브는 사용자.
 
 ## 성공 기준 (다음 라이브)
-- RC5 F2 리더가 기둥에 닿음(끊김 없음).
-- RC9 P1_1이 우측 플레이트 아래(하향, F3 미관통) 작도. 실패 시 skip 로그에 rejBy로 원인 노출.
+- RC5 F2 리더 선분 보임(끊김 해소), 파이프 콜아웃이 기둥 미관통.
+- RC9 P1_1 우측 플레이트 아래 하향 작도(F3 미관통).
 - RC1~3·RC4~8·GD 회귀 0.
