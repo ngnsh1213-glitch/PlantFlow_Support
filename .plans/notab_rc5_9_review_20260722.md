@@ -197,6 +197,17 @@
 - **B. RC5 F1/F2 포트 역전**(StandardSupport.cs ≈982-995): RC1/2/3=F1:PPorts[2]/F2:PPorts[1](S2). RC5=F1:PPorts[1]/F2:PPorts[2](역전). **F2→PPorts[1]**(S2=기둥)로 교정. **F1은 PPorts[2]=상단플레이트라 단순 스왑 불가** — 하단 가로재 포트 별도 특정(PPorts[0] 등 미사용 포트 검증 필요).
 - **C. RC9 P1_1 배치 실패**: P1_0 먼저 배치→상자/리더 등록, P1_1은 `IsBalloonFree` 충돌(support38/box24/leader41/dim1)로 자유 후보 0. BOM 매칭·중복 아님. 배치 완화(P1 여유 확대/우선 배치) 필요.
 
+## ★ cycle 106 라이브 결과 (3-스트라이크 발동, 측정 동결 2026-07-22 12:31 로그)
+- **RC7 분할 PASS**(800/150 렌더) — 단 사용자: **좌우 반대**(값 맞음). split tick는 pipeCenter(368)=A경계와 일치. leftReal=A=800/rightReal=A1=150. F2 밸룬은 대각재여야(현 horizontal-span).
+- **RC5 F2 앵커 교정 성공**: `balloon-draw F2 adjust=vertical-end geom=vertical-port axisX=274.5 spanY=281~401`(=S2 기둥). **그러나 배치가 side=left center=221.3 dist=48.4 clear=2.8**(기둥 좌측 허공). F1=horizontal-span 우측 center=425.1. 사용자: F1·F2 여전히 상이. → 앵커는 맞으나 **배치 side 선택** 문제 의심. F1(PPorts[0] datum)이 실제 가로재인지 재확인 필요.
+- **RC9 P1_1**: `balloon-skip reason=no-space cand=200 free=0`(확장탐색 무효), 차단 `calloutLeader=78/support=47/calloutBox=31`. 완전 포화 → 확장 스텝(cycle106)로 못 뚫음. **둘레탐색 대신 포트 직접 배치/리더 면제** 필요.
+- ★이미지-로그 방향 해석 불일치 시작 → 추측 중단, §9 코드 자문으로 전환.
+
+### §9 Codex 자문 확정 (cycle 107 근거)
+1. **RC5 F2**: 우측(기둥 내부)이 `supportPaperExt` support 장애물에 막힘. `IsBalloonFree`는 리더 support 교차만 면제, **밸룬 상자 겹침 미면제** → 기둥에 못 붙음. 수정=세로 F2 우측 후보에 한해 support **상자** 충돌 면제(치수/BOM/콜아웃 유지). `AppendNotabBalloons` member-end 분기. F1=PPorts[0] 정상(가로 span 우측끝 작도), PPorts[2]로 바꾸지 말 것.
+2. **RC7**: `TryGetNotabRcHorizontalParams`(≈3471)는 공통 규칙 left=A/right=A1. **RC7만 소비부(3623 전후)에서 paramLeft/paramRight 교환** → tick·값 좌우 반전. RC5 불변. RC7 F2 밸룬=RS2() 재사용 PPorts[2](StandardSupport:365/175)인데 Commands가 F*·비세로면 가로 span 끝단 강제 → **RC7 F2를 대각재 앵커로 별도 분류**(PPorts[2] raw anchor 그대로, 가로 member-end 미적용).
+3. **RC9 P1**: `SetLeaderExemptOwner("support")` 무효(IsBalloonFree 미참조). 차단 다수가 상자 무겹침·리더만 교차. **P1 정상탐색 free=0일 때만 2차 폴백: 콜아웃 상자/리더와의 리더 교차 허용(상자 겹침·support·치수는 계속 금지)**. P1+free=0 한정, RC1~3 무회귀. 순서 선배치는 차선.
+
 ## cycle 106 발행 범위
 1. RC7 split 우회(확실). 2. RC5 F2→PPorts[1] + F1 하단 가로재 포트 특정(Codex 조사, balloon-anchor 로그로 검증). 3. RC9 P1_1 배치 완화. StandardSupport.cs는 오쏘 공용 → RC5 분기만 국소 수정.
 
