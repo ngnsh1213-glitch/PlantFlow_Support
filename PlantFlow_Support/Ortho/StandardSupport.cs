@@ -979,14 +979,16 @@ label_72:
       double num2 = ((IEnumerable<double>) source).Min();
       Point3d point3d2 = new Point3d(x2, num2, 0.0);
       this.Extents3D.Set(point3d2, point3d1);
-      Point3d point1 = this.ConvertPortToPoint(this.PPorts[1]);
+      // PPorts[0]은 RC5 하단 가로재 위 기준점이다. PPorts[2]는 상단 플레이트이므로 F1에 쓰지 않는다.
+      Point3d point1 = this.ConvertPortToPoint(this.PPorts[0]);
       Point3d point3d3 = new Point3d(point1.X + 50.0, point1.Y + 50.0, 0.0);
       this.TaggingPoints.Add("F1", new Point3d[2]
       {
         point1,
         point3d3
       });
-      Point3d point2 = this.ConvertPortToPoint(this.PPorts[2]);
+      // PPorts[1]은 S2(세로 기둥 자유단)와 일치한다.
+      Point3d point2 = this.ConvertPortToPoint(this.PPorts[1]);
       Point3d point3d4 = new Point3d(point2.X + 50.0, point2.Y + 50.0, 0.0);
       this.TaggingPoints.Add("F2", new Point3d[2]
       {

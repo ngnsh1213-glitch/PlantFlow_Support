@@ -3630,7 +3630,9 @@ namespace PlantFlow_Support
           rightReal = paramsHorizontal ? paramRight : realW - leftReal;
           double leftPaper = pipeCenterXPaper - minX;
           double rightPaper = maxX - pipeCenterXPaper;
-          splitGuard = leftPaper < splitGuardLimit || rightPaper < splitGuardLimit;
+          // A/A1은 파이프 중심이 아니라 규격 파라미터 경계다. 작은 A1도 유효한 분할이므로
+          // 파이프 중심용 최소 간격 가드를 적용하지 않는다.
+          splitGuard = !paramsHorizontal && (leftPaper < splitGuardLimit || rightPaper < splitGuardLimit);
           if (!splitGuard)
           {
             RotatedDimension dimLeft = PSUtil.CreateHorizontalDimension(new Point3d(minX, horizontalBaseY, 0.0), new Point3d(pipeCenterXPaper, horizontalBaseY, 0.0), new Point3d(minX, splitY, 0.0), Matrix3d.Identity, dimStyleId);
@@ -6367,6 +6369,10 @@ namespace PlantFlow_Support
         double leaderW = this.GetEnvDouble("PFS_NOTAB_BALLOON_LEADER_W", 2.0, 0.0, 10.0);
         double maxSteps = this.GetEnvDouble("PFS_NOTAB_BALLOON_MAX_STEPS", 4.0, 1.0, 16.0);
         double extSteps = this.GetEnvDouble("PFS_NOTAB_BALLOON_EXT_STEPS", 12.0, 1.0, 32.0);
+        // 플레이트가 두 개인 RC9에서는 첫 P1 밸룬이 등록된 뒤 두 번째 P1이 기존 확장 범위를
+        // 모두 소진한다. P1에만 탐색 반경을 넓혀 다른 품목의 확정 배치를 보존한다.
+        if (isPlateItem)
+          extSteps = this.GetEnvDouble("PFS_NOTAB_P1_EXT_STEPS", 24.0, 1.0, 48.0);
         extSteps = System.Math.Max(maxSteps, extSteps);
         int candidateCount = 0, freeCount = 0;
         double maxClearance = double.MinValue;
