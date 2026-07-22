@@ -48,7 +48,8 @@ namespace PlantFlow_Support
     // tailLength > 0 이면 꺾임 1회 리더(경사 + 수평 꼬리)로 배치한다.
     // p1=꺾임점(elbow), p2=문자 접속점. 0이면 p1=p2=문자 접속점인 직선 1개다.
     public bool TryPlace(Point3d leaderFrom, RequiredSide requiredSide, double width, double height, double gap, double minDx,
-      string ownerTag, bool preferDown, double tailLength, out Point3d textCenter, out Point3d p1, out Point3d p2, out bool textLeftOfAnchor, out string diagnostic)
+      string ownerTag, bool preferDown, double tailLength, out Point3d textCenter, out Point3d p1, out Point3d p2, out bool textLeftOfAnchor, out string diagnostic,
+      bool preserveVerticalMemberLeaderClearance = false)
     {
       double startRadius = System.Math.Max(15.0, System.Math.Max(width, height) / 2.0 + gap);
       double maxRadius = System.Math.Max(startRadius, System.Math.Sqrt(System.Math.Pow(System.Math.Max(leaderFrom.X - _minX, _maxX - leaderFrom.X), 2.0) + System.Math.Pow(System.Math.Max(leaderFrom.Y - _minY, _maxY - leaderFrom.Y), 2.0)) + width + height);
@@ -85,7 +86,7 @@ namespace PlantFlow_Support
               ? new Point3d(textLeft ? candTextEdge.X + tailLength : candTextEdge.X - tailLength, y, 0.0)
               : candTextEdge;
             string reject;
-            if (!Free(box, leaderFrom, candElbow, candTextEdge, leaderScope, ownerTag, out reject))
+            if (!Free(box, leaderFrom, candElbow, candTextEdge, leaderScope, ownerTag, out reject, preserveVerticalMemberLeaderClearance))
             {
               if (reject == "box") rejectBox++;
               else if (reject.StartsWith("extLeader", System.StringComparison.Ordinal))
@@ -230,7 +231,8 @@ namespace PlantFlow_Support
     private bool OutOfBounds(Extents3d box)
     { return box.MinPoint.X < _minX || box.MaxPoint.X > _maxX || box.MinPoint.Y < _minY || box.MaxPoint.Y > _maxY; }
 
-    private bool Free(Extents3d box, Point3d anchor, Point3d p1, Point3d p2, LeaderCheckScope leaderScope, string ownerTag, out string reject)
+    private bool Free(Extents3d box, Point3d anchor, Point3d p1, Point3d p2, LeaderCheckScope leaderScope, string ownerTag, out string reject,
+      bool preserveVerticalMemberLeaderClearance)
     {
       foreach (Obstacle obstacle in _obstacles)
       {
@@ -242,7 +244,10 @@ namespace PlantFlow_Support
         if (!string.IsNullOrEmpty(_leaderExemptOwner)
           && string.Equals(obstacle.Owner ?? string.Empty, _leaderExemptOwner, System.StringComparison.Ordinal)) continue;
         // 어느 장애물이 리더를 막는지 소유자를 함께 돌려준다(무명 장애물은 dim/기타).
-        if (leaderScope == LeaderCheckScope.All && (SegIntersectsBox(anchor, p1, obstacle.Box) || SegIntersectsBox(p1, p2, obstacle.Box)))
+        bool hardVerticalMember = preserveVerticalMemberLeaderClearance
+          && string.Equals(obstacle.Owner ?? string.Empty, "vertical-member", System.StringComparison.Ordinal);
+        if ((leaderScope == LeaderCheckScope.All || hardVerticalMember)
+          && (SegIntersectsBox(anchor, p1, obstacle.Box) || SegIntersectsBox(p1, p2, obstacle.Box)))
         { reject = "extLeader|" + (string.IsNullOrEmpty(obstacle.Owner) ? "unnamed" : obstacle.Owner); return false; }
       }
       // 콜아웃끼리는 겹치지만 않으면 되는 게 아니라 읽을 여백이 필요하다.

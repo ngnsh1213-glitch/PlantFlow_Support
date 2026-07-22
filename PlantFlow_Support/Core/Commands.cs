@@ -3828,6 +3828,16 @@ namespace PlantFlow_Support
           + " ext=" + this.FormatExtents(viewportBoundsOk ? viewportPaperExt : supportPaperExt));
         // 소유자 태그를 달아 밸룬 배치 때 리더 검사만 면제할 수 있게 한다.
         calloutPlacer.AddObstacle(supportPaperExt, "support");
+        // 병합 솔리드는 기둥 폭을 대표하지 못한다. S2+F2로 재구성한 포트 기반 상자만
+        // 파이프 콜아웃의 장애물로 등록한다. 세로재 없는 타입은 기존 경로를 그대로 둔다.
+        if (hasVerticalPortAnchor)
+        {
+          double verticalHalfWidth = System.Math.Max(txt, this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0)) / 2.0;
+          Extents3d verticalMemberBox = new Extents3d(
+            new Point3d(verticalAnchorX - verticalHalfWidth, verticalAnchorBaseY, 0.0),
+            new Point3d(verticalAnchorX + verticalHalfWidth, verticalAnchorTopY, 0.0));
+          calloutPlacer.AddObstacle(verticalMemberBox, "vertical-member");
+        }
         this.AddNotabDimensionObstacles(tr, layoutBtr, calloutPlacer, txt);
         this.AddNotabPipeObstacle(calloutPlacer, pipeCenterXPaper, pipeCenterYPaper, pipePaperRadius);
         // 표를 먼저 그리고 장애물로 등록해야 이후 콜아웃·밸룬이 표를 피한다.
@@ -4087,7 +4097,7 @@ namespace PlantFlow_Support
           // 라인넘버(파이프)만 꺾임 1회. 유볼트·부재는 직선 1개를 유지한다(사용자 확정).
           tailLength = isPipeCallout ? this.GetEnvDouble("PFS_NOTAB_PIPE_LEADER_TAIL", txt * 2.0, 0.0, 200.0) : 0.0;
           // 부재 콜아웃은 하단 선호(치수가 항상 상단·좌측에 놓인다). 라인넘버는 상하 자유.
-          smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, tailLength, out near, out p1, out p2, out left, out diagnostic);
+          smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, tailLength, out near, out p1, out p2, out left, out diagnostic, isPipeCallout);
         }
         if (!smartPlaced)
         {
@@ -6450,7 +6460,11 @@ namespace PlantFlow_Support
           double memberSteps = this.GetEnvDouble("PFS_NOTAB_MEMBER_BALLOON_MAX_STEPS", 12.0, 0.0, 32.0);
           for (int k = 0; k <= (int)memberSteps && !placed; k++)
           {
-            double outDist = gap + radius + step * k;
+            // 세로재는 화살촉(Dimasz) 뒤에 짧은 선분을 남겨야 리더가 끊겨 보이지 않는다.
+            // 화살표 앵커는 그대로 두고 밸룬 중심만 바깥으로 이동한다.
+            double arrowSize = this.GetEnvDouble("PFS_NOTAB_DIM_ARR", 10.0, 0.5, 50.0);
+            double visibleLeaderMargin = System.Math.Max(txt * 0.5, 2.0);
+            double outDist = radius + (isVerticalMember ? arrowSize + visibleLeaderMargin : gap) + step * k;
             // 좌 끝단(바깥=왼쪽) / 우 끝단(바깥=오른쪽) 두 후보를 같은 단계에서 모두 평가한다.
             // 한쪽을 먼저 찾았다고 즉시 채택하면 "여유 큰 쪽" 규칙이 깨진다.
             for (int e = 0; e < 2; e++)
@@ -6549,7 +6563,7 @@ namespace PlantFlow_Support
               Vector3d dir = c - anchor;
               Point3d touchPt = c - dir.GetNormal() * radius;
               string rej;
-              if (!placer.IsBalloonFree(box, anchor, touchPt, out rej, false, false))
+              if (!placer.IsBalloonFree(box, anchor, touchPt, out rej, false, true))
               {
                 int rejected;
                 rejBy.TryGetValue(rej, out rejected);
