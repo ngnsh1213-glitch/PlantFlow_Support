@@ -34,4 +34,4 @@
 
 ## 커밋
 
-- 코드: 기록 예정
+- 코드: `fa6f987` (`fix: correct RC5 callout obstacle and F2 leader`)
