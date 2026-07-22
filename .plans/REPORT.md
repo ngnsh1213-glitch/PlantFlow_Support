@@ -1,25 +1,26 @@
 # REPORT — Codex → Claude
 
-- **cycle**: 109
+- **cycle**: 110
 - **status**: completed
 - **completed_at**: 2026-07-22
-- **title**: RC5 F2 리더 기둥 축 연장 + RC9 P1_1 down-out 배치 및 거부 계측
+- **title**: RC5 F2 리더 가시화 + 파이프 콜아웃 기둥회피 + RC9 P1_1 리더교차만 허용
 
 ## 항목별 결과
 
-1. **RC5 F2 리더**
-   - 세로 부재의 `endMinX/endMaxX`를 `rawAnchor.X`로 통일했다. 따라서 F2 화살표 끝점은 기둥 중심축에 닿는다.
-   - `halfThick`은 진단 및 기존 밸룬/문자 여백 계산에 유지했으며, 끝점 산출에서만 제외했다.
-2. **RC9 P1_1 down-out**
-   - 순수 하향 `(0,-1)`을 첫 후보로 유지하고, 실패 시 우측으로 `step × 0.25/0.5/0.75`만큼 이동한 하향 후보를 순서대로 검사한다.
-   - 모든 후보에서 `IsBalloonFree(..., false, false)`를 유지하여 support·기존 상자·콜아웃 리더 교차를 면제하지 않는다.
-   - 자유 후보가 없으면 `rc9-p1-down-no-space` 로그에 `rejBy{...}` 거부 원인 집계를 기록한다.
-3. **F3 계측**
-   - 기존 `balloon-draw` 로그가 모든 키에 `rawAnchor`, `anchor`, `center`, `box`를 이미 기록하므로 F3 좌표 계측을 추가하지 않았다.
+1. **RC5 F2 리더 가시화**
+   - 세로재만 밸룬 중심 거리를 `반경 + Dimasz + 가시 여유`로 확장했다. 화살표 앵커와 `Dimasz` 값은 변경하지 않았다.
+2. **RC5 파이프 콜아웃 기둥회피**
+   - `verticalAnchorX/baseY/topY` 기반 세로 기둥 상자를 `vertical-member` 장애물로 등록했다. 세로재 없는 타입은 등록하지 않는다.
+   - 파이프 콜아웃만 모든 탐색 tier에서 해당 장애물의 리더 교차를 계속 차단한다. 문자 상자 충돌 및 기존 좌우·fan·반경 탐색은 유지했다.
+3. **RC9 P1_1 하향 배치**
+   - `rc9-p1-down` 검사에서 `allowCalloutLeaderCrossing=true`을 적용했다.
+   - 콜아웃 상자·support·치수·부재 상자 충돌은 계속 차단된다.
+   - 허용된 교차 대상은 기존 콜아웃 리더(라이브 계측상 파이프 콜아웃 리더로 추정)이며, F3 리더인지 여부는 라이브에서 확인이 필요하다.
 
 ## 변경 파일
 
 - `PlantFlow_Support/Core/Commands.cs`
+- `PlantFlow_Support/Core/NotabCalloutPlacer.cs`
 
 ## 검증
 
@@ -28,10 +29,10 @@
 
 ## 라이브 검증 필요
 
-- RC5 F2 `balloon-draw`의 `anchor.X`가 기둥 축(예: 약 402.5)에 일치하는지 확인한다.
-- RC9 P1_1이 우측 플레이트 아래로 하향 작도되고 F3 리더를 관통하지 않는지 확인한다. 실패 시 `rejBy{...}`로 차단 원인을 확인한다.
-- RC1~3, RC4~8 및 GD 회귀가 없는지 확인한다.
+- RC5 F2 화살촉 뒤 리더 선분 노출과 파이프 콜아웃의 기둥 미관통을 확인한다.
+- RC9 P1_1이 우측 플레이트 아래에 작도되고, 허용 교차 대상이 파이프 콜아웃 리더인지 확인한다. F3 리더 교차면 재검토한다.
+- RC1~3, RC4~8 및 GD 회귀를 확인한다.
 
 ## 커밋
 
-- 코드: `3c054be` (`fix: extend RC5 leader and place RC9 P1 down-out`)
+- 코드: `6778daf` (`fix: improve RC5 and RC9 notab callouts`)
