@@ -1,22 +1,25 @@
 # REPORT — Codex → Claude
 
-- **cycle**: 107
+- **cycle**: 108
 - **status**: completed
 - **completed_at**: 2026-07-22
-- **title**: RC5 F2 기둥 배치 + RC7 분할 반전·F2 대각재 + RC9 P1 리더교차 폴백
+- **title**: RC5 F1/F2 포트 재지정 + RC9 P1_1 하향 배치
 
 ## 항목별 결과
 
-1. **RC5 F2**: 세로재 `member-end` 후보에만 `support` 상자 겹침 면제를 명시 적용했다. 치수·BOM·기존 콜아웃 상자 및 리더 검사는 유지한다. support는 여유 점수에서도 제외해 기둥 인접 후보가 실제 여유로 비교된다.
-2. **RC7**:
-   - **2a**: `TryGetNotabRcHorizontalParams`는 변경하지 않고 소비부에서만 `paramLeft`/`paramRight`를 교환했다. RC7 분할은 좌 150 / 우 800으로 작도된다.
-   - **2b**: RC7 `F2`만 가로재 끝단 배치를 우회하고 `RS2()`의 `PPorts[2]` 원본 앵커를 기준으로 일반 후보 탐색한다. 단, 다른 부재보다 먼저 배치되는 순서는 유지한다.
-3. **RC9 P1**: P1 정상 탐색의 자유 후보가 0일 때, 확장 탐색에서만 기존 콜아웃 상자/리더와의 리더 교차를 허용한다. 밸룬 상자 겹침·support·치수 충돌은 계속 금지한다. 로그 tier는 `p1-leader-fallback`이다.
+1. **RC5 F1/F2**
+   - `StandardSupport.RC5()`의 F1 앵커를 `PPorts[1]`(S2), F2 앵커를 `PPorts[2]`(S3)로 정정했다.
+   - `IsNotabVerticalMemberPort()`는 RC5에서만 index 2를 세로재로 판정하도록 분기했다. 다른 타입은 기존 index 1 판정을 유지한다.
+   - 세로 치수의 S2 앵커 경로는 변경하지 않았다.
+2. **RC9 P1_1**
+   - 일반 8방향 탐색 전에 `P1_1`만 `(0,-1)` 방향을 짧은 거리부터 탐색한다.
+   - 표준 충돌 검사(`exemptSupportBox=false`, `allowCalloutLeaderCrossing=false`)를 유지했다.
+   - 자유 후보가 없으면 `reason=rc9-p1-down-no-space`를 기록하고 일반 탐색 및 `p1-leader-fallback`으로 진행하지 않는다.
 
 ## 변경 파일
 
+- `PlantFlow_Support/Ortho/StandardSupport.cs`
 - `PlantFlow_Support/Core/Commands.cs`
-- `PlantFlow_Support/Core/NotabCalloutPlacer.cs`
 
 ## 검증
 
@@ -25,11 +28,10 @@
 
 ## 라이브 검증 필요
 
-- RC5 F2 `balloon-draw`가 기둥 축 근처로 배치되고 F1은 하단 가로재인지 확인.
-- RC7 `split=(150,800)` 및 F2가 대각 브레이스를 가리키는지 확인.
-- RC9 P1 두 항목이 모두 작도되고, 폴백 사용 시 `tier=p1-leader-fallback`인지 확인.
-- RC1~3·GD·RC4/6/8 회귀 없음 확인.
+- RC5 F1이 가로재, F2가 S3 세로재로 배치되는지와 F2 `balloon-draw`의 `adjust=vertical-end`, `geom=vertical-port`를 확인한다.
+- RC9 P1_1이 하향으로 작도되어 F3를 관통하지 않는지 확인한다. 공간이 없으면 `rc9-p1-down-no-space`만 허용된다.
+- RC1~3·RC6~8·GD 회귀가 없는지 확인한다.
 
 ## 커밋
 
-- 코드: `c5fa9c0` (`fix: refine RC notab balloon placement`)
+- 코드: 기록 예정

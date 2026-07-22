@@ -6249,13 +6249,15 @@ namespace PlantFlow_Support
       }
     }
 
-    // 세로재 판정. TaggingPoints의 F2는 타입별로 PPorts[1](=S2)를 쓰고, cycle92에서
-    // 그 포트가 기둥 자유단임이 검증됐다. 이름 규칙이 아니라 WCS 일치로 판정한다.
+    // 세로재 판정. 기본은 PPorts[1](=S2)이며, RC5의 F2만 PPorts[2](=S3) 자유단을 쓴다.
+    // 이름 규칙이 아니라 WCS 일치로 판정해 다른 타입의 기존 매핑은 보존한다.
     private bool IsNotabVerticalMemberPort(Point3d wcs)
     {
+      string standardName = this.GetNotabStandardName();
+      int verticalPortIndex = string.Equals(standardName, "RC5", System.StringComparison.OrdinalIgnoreCase) ? 2 : 1;
       for (int i = 0; i < s_isoSupportPorts.Count; i++)
       {
-        if (s_isoSupportPorts[i].Index != 1) continue;
+        if (s_isoSupportPorts[i].Index != verticalPortIndex) continue;
         Point3d p = s_isoSupportPorts[i].Wcs;
         return System.Math.Abs(p.X - wcs.X) < 1e-6
           && System.Math.Abs(p.Y - wcs.Y) < 1e-6
@@ -6393,6 +6395,8 @@ namespace PlantFlow_Support
         Point3d bestAnchor = anchor;
         System.Collections.Generic.Dictionary<string, int> rejBy = new System.Collections.Generic.Dictionary<string, int>();
         string placementTier = "normal";
+        bool isRc9P1DownOnly = string.Equals(standardName, "RC9", System.StringComparison.OrdinalIgnoreCase)
+          && string.Equals(item, "P1_1", System.StringComparison.OrdinalIgnoreCase);
 
         // ── 부재 밸룬 전용 배치 (cycle102) ───────────────────────────
         // 사용자 확정 규칙: 부재의 "여유 있는 쪽 끝단" 바로 바깥. 화살표는 그 끝단에 닿고
@@ -6512,10 +6516,60 @@ namespace PlantFlow_Support
           }
         }
 
+        // RC9 우측 P1은 F3·치수·기존 밸룬을 모두 피한 하향 배치만 허용한다.
+        // 자유 후보가 없더라도 일반 탐색이나 리더 교차 폴백으로 되돌아가지 않는다.
+        if (isRc9P1DownOnly)
+        {
+          for (double stepIndex = 0.0; stepIndex <= maxSteps && !placed; stepIndex++)
+          {
+            double dist = gap + radius + step * stepIndex;
+            Point3d c = new Point3d(anchor.X, anchor.Y - dist, 0.0);
+            double bMinX = c.X - radius - subGap - subW;
+            double bMaxX = c.X + radius;
+            double half = System.Math.Max(radius, txt / 2.0);
+            Extents3d box = new Extents3d(new Point3d(bMinX, c.Y - half, 0.0), new Point3d(bMaxX, c.Y + half, 0.0));
+            candidateCount++;
+            double clearance = placer.ClearanceTo(box);
+            maxClearance = System.Math.Max(maxClearance, clearance);
+            if (!placer.WithinBounds(box))
+            {
+              int oob;
+              rejBy.TryGetValue("oob", out oob);
+              rejBy["oob"] = oob + 1;
+              continue;
+            }
+
+            Vector3d dir = c - anchor;
+            Point3d touchPt = c - dir.GetNormal() * radius;
+            string rej;
+            if (!placer.IsBalloonFree(box, anchor, touchPt, out rej, false, false))
+            {
+              int rejected;
+              rejBy.TryGetValue(rej, out rejected);
+              rejBy[rej] = rejected + 1;
+              continue;
+            }
+
+            freeCount++;
+            ballCenter = c; ballBox = box; bestAnchor = anchor; outwardLeft = false; placed = true;
+            placementTier = "rc9-p1-down";
+            placeDiag = "tier=rc9-p1-down dir=(0,-1) dist=" + this.FormatNumber(dir.Length)
+              + " clear=" + this.FormatNumber(clearance);
+          }
+
+          if (!placed)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item
+              + " reason=rc9-p1-down-no-space cand=" + candidateCount + " free=" + freeCount
+              + " maxClear=" + this.FormatNumber(maxClearance));
+            continue;
+          }
+        }
+
         // 1단계는 기존 거리 범위를 모두 평가해 짧은 리더 선호를 보존한다.
         // 2단계는 1단계가 완전히 실패했을 때만 시작하고, 처음 자유 후보가 나온 거리 링만
         // 평가한다. 따라서 clearance 점수가 먼 거리를 과도하게 선호하지 않는다.
-        for (int tier = 0; tier < 2 && !placed; tier++)
+        for (int tier = 0; tier < 2 && !placed && !isRc9P1DownOnly; tier++)
         {
           double firstStep = tier == 0 ? 0.0 : maxSteps + 1.0;
           double lastStep = tier == 0 ? maxSteps : extSteps;
