@@ -28,4 +28,4 @@
 
 ## 커밋
 
-- 코드: (커밋 후 기입)
+- 코드: `79f7776` (`fix: exempt vertical member from callout leader checks`)
