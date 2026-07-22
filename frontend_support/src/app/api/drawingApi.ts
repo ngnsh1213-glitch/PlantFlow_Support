@@ -70,17 +70,19 @@ function request<T>(method: string, args: unknown[] = [], timeoutMs = DEFAULT_TI
   });
 }
 
-export interface DrawingSupport { name: string; view: string; }
-export interface DrawingState { supports: DrawingSupport[]; gridReady: boolean; captureDoc: string; }
+export interface DrawingSupport { name: string; status: string; }
+export interface DrawingState { supports: DrawingSupport[]; captureDoc: string; }
 export interface DrawingSettings { template: string; projectNo: string; revision: string; }
-export interface AddSummary { count: number; duplicates: number; unnamed: number; invalid: number; view: string; }
+export interface AddSummary { count: number; duplicates: number; unnamed: number; invalid: number; }
+export interface ExportSummary { ok: number; fail: number; failTags: string[]; }
 
 export const drawingApi = {
   getState: () => request<DrawingState>("getState"),
   getSettings: () => request<DrawingSettings>("getSettings"),
   setSetting: (key: string, val: string) => request<{ ok: boolean }>("setSetting", [key, val]),
-  addFromSelection: (views: string[]) => request<{ added: AddSummary; state: DrawingState }>("addFromSelection", [views], PICK_TIMEOUT),
+  addFromSelection: () => request<{ added: AddSummary; state: DrawingState }>("addFromSelection", [], PICK_TIMEOUT),
+  addBatchFromSelection: () => request<{ added: AddSummary; state: DrawingState }>("addBatchFromSelection", [], PICK_TIMEOUT),
   removeSupport: (name: string) => request<DrawingState>("removeSupport", [name]),
   clearSupports: () => request<DrawingState>("clearSupports"),
-  export2D: (names: string[]) => request<{ ok: boolean }>("export2D", [names], PICK_TIMEOUT),
+  export2D: (names: string[]) => request<ExportSummary>("export2D", [names], PICK_TIMEOUT),
 };

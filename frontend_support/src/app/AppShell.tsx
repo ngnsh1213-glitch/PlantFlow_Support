@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { FileOutput, Tags, Rows3, Package } from "lucide-react";
 import SupportCatalogView from "../catalog/views/SupportCatalogView";
 import DrawingView from "./views/DrawingView";
+import LoadingOverlay from "./LoadingOverlay";
+import { drawingApi, isDrawingBridgeAvailable } from "./api/drawingApi";
 
 type TabId = "Drawing" | "Tagging" | "Span" | "Catalog";
 const TABS: { id: TabId; label: string; icon: ReactNode }[] = [
@@ -25,9 +27,20 @@ function Placeholder({ label }: { label: string }) {
 
 export default function AppShell() {
   const [active, setActive] = useState<TabId>("Catalog");
+  const [booting, setBooting] = useState(true);
+  const [drawingBusy, setDrawingBusy] = useState(false);
+
+  useEffect(() => {
+    const onBusy = (event: Event) => setDrawingBusy(Boolean((event as CustomEvent<boolean>).detail));
+    window.addEventListener("pfs:drawing-busy", onBusy);
+    if (!isDrawingBridgeAvailable()) { setBooting(false); return () => window.removeEventListener("pfs:drawing-busy", onBusy); }
+    drawingApi.getState().then(() => setBooting(false)).catch(() => setBooting(false));
+    return () => window.removeEventListener("pfs:drawing-busy", onBusy);
+  }, []);
 
   return (
     <div className="flex h-screen w-screen flex-col bg-white">
+      <LoadingOverlay visible={booting || drawingBusy} />
       <nav className="flex shrink-0 gap-1 border-b border-slate-200 bg-slate-50 px-2 py-1">
         {TABS.map((t) => (
           <button

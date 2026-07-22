@@ -199,51 +199,85 @@ namespace PlantFlow_Support
         return;
       }
 
-      int okCount = 0;
-      int failCount = 0;
-      System.Collections.Generic.List<string> failTags = new System.Collections.Generic.List<string>();
-      for (int i = 0; i < supportIds.Count; i++)
+      int okCount;
+      int failCount;
+      System.Collections.Generic.List<string> failTags;
+      if (!this.RunNotabBatch(doc, supportIds, out okCount, out failCount, out failTags))
       {
-        ObjectId supportId = supportIds[i];
-        string tag = this.GetSupportNameForLog(doc.Database, supportId);
-        PlantOrthoView.FileDiag("PFSNOTABBATCH [" + (i + 1) + "/" + supportIds.Count + "] tag=" + tag + " 처리");
-        ed.WriteMessage("\nPFSNOTABBATCH [" + (i + 1) + "/" + supportIds.Count + "] " + tag);
-
-        bool ok = false;
-        try
-        {
-          ok = this.RunNotabDetailPipeline(doc, new ObjectId[] { supportId });
-        }
-        catch (System.Exception ex)
-        {
-          ok = false;
-          PlantOrthoView.FileDiag("PFSNOTABBATCH 반복 예외 tag=" + tag + " id=" + supportId + ": " + ex.GetType().Name + ": " + ex.Message);
-        }
-
-        if (ok)
-        {
-          okCount++;
-        }
-        else
-        {
-          failCount++;
-          failTags.Add(tag);
-        }
-      }
-
-      try
-      {
-        System.GC.Collect();
-        System.GC.WaitForPendingFinalizers();
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABBATCH GC 예외: " + ex.GetType().Name + ": " + ex.Message);
+        PlantOrthoView.FileDiag("PFSNOTABBATCH 실행 거부: 다른 무탭 배치가 진행 중입니다.");
+        ed.WriteMessage("\nPFSNOTABBATCH: 다른 무탭 배치가 진행 중입니다.");
+        return;
       }
 
       string failLog = failTags.Count == 0 ? string.Empty : string.Join(",", failTags.ToArray());
       PlantOrthoView.FileDiag("PFSNOTABBATCH done total=" + supportIds.Count + " ok=" + okCount + " fail=" + failCount + " fails=[" + failLog + "]");
       ed.WriteMessage("\nPFSNOTABBATCH done total=" + supportIds.Count + " ok=" + okCount + " fail=" + failCount + (failTags.Count == 0 ? string.Empty : " fails=[" + failLog + "]"));
+    }
+
+    private static readonly object NotabBatchGate = new object();
+    private static bool s_notabBatchRunning;
+
+    // 명령과 팔레트가 공유하는 무탭 배치 파사드. 정적 파이프라인 상태 때문에 동시 실행은 금지한다.
+    public bool RunNotabBatch(Document doc, System.Collections.Generic.IList<ObjectId> supportIds,
+      out int ok, out int fail, out System.Collections.Generic.List<string> failTags)
+    {
+      ok = 0;
+      fail = 0;
+      failTags = new System.Collections.Generic.List<string>();
+      if (doc == null || supportIds == null || supportIds.Count == 0)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABBATCH facade 입력 없음");
+        return true;
+      }
+
+      lock (NotabBatchGate)
+      {
+        if (s_notabBatchRunning)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABBATCH facade 재진입 거부");
+          return false;
+        }
+        s_notabBatchRunning = true;
+      }
+
+      try
+      {
+        for (int i = 0; i < supportIds.Count; i++)
+        {
+          ObjectId supportId = supportIds[i];
+          string tag = this.GetSupportNameForLog(doc.Database, supportId);
+          PlantOrthoView.FileDiag("PFSNOTABBATCH [" + (i + 1) + "/" + supportIds.Count + "] tag=" + tag + " 처리");
+          try { doc.Editor.WriteMessage("\nPFSNOTABBATCH [" + (i + 1) + "/" + supportIds.Count + "] " + tag); }
+          catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSNOTABBATCH 진행 메시지 예외 tag=" + tag + ": " + ex.GetType().Name + ": " + ex.Message); }
+
+          bool extracted = false;
+          try { extracted = this.RunNotabDetailPipeline(doc, new ObjectId[] { supportId }); }
+          catch (System.Exception ex)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABBATCH 반복 예외 tag=" + tag + " id=" + supportId + ": " + ex.GetType().Name + ": " + ex.Message);
+          }
+
+          if (extracted) ok++;
+          else { fail++; failTags.Add(tag); }
+        }
+      }
+      finally
+      {
+        try
+        {
+          System.GC.Collect();
+          System.GC.WaitForPendingFinalizers();
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABBATCH GC 예외: " + ex.GetType().Name + ": " + ex.Message);
+        }
+        finally
+        {
+          lock (NotabBatchGate) { s_notabBatchRunning = false; }
+        }
+      }
+      return true;
     }
 
     // 자동 테스트(dev 원클릭): SupportName 태그로 서포트를 찾아 선택 없이 추출한다.
@@ -428,6 +462,12 @@ namespace PlantFlow_Support
         + " duplicateName{" + dupSummary.ToString() + "}");
 
       return supportIds;
+    }
+
+    // 팔레트 선택 경로도 명령과 동일한 부속 제외 규칙을 사용한다.
+    public System.Collections.Generic.List<ObjectId> CollectSelectedSupportIdsForUi(Database db, ObjectId[] selectedIds)
+    {
+      return this.CollectSelectedSupportIds(db, selectedIds);
     }
 
     private string GetSupportNameForLog(Database db, ObjectId supportId)
