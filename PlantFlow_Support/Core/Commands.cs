@@ -4150,7 +4150,7 @@ namespace PlantFlow_Support
           // 라인넘버(파이프)만 꺾임 1회. 유볼트·부재는 직선 1개를 유지한다(사용자 확정).
           tailLength = isPipeCallout ? this.GetEnvDouble("PFS_NOTAB_PIPE_LEADER_TAIL", txt * 2.0, 0.0, 200.0) : 0.0;
           // 부재 콜아웃은 하단 선호(치수가 항상 상단·좌측에 놓인다). 라인넘버는 상하 자유.
-          smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, tailLength, out near, out p1, out p2, out left, out diagnostic, isPipeCallout);
+          smartPlaced = placer.TryPlace(leaderFrom, requiredSide, actualWidth, actualHeight, gap, effectiveMinDx, isPipeCallout ? "pipe" : string.Empty, !isPipeCallout, tailLength, out near, out p1, out p2, out left, out diagnostic);
         }
         if (!smartPlaced)
         {
@@ -6532,7 +6532,7 @@ namespace PlantFlow_Support
               double half = System.Math.Max(radius, txt / 2.0);
               Extents3d box = new Extents3d(new Point3d(bMinX, endY - half, 0.0), new Point3d(bMaxX, endY + half, 0.0));
               candidateCount++;
-              double clearance = placer.ClearanceTo(box, isVerticalMember);
+              double clearance = placer.ClearanceTo(box, isVerticalMember, isVerticalMember);
               maxClearance = System.Math.Max(maxClearance, clearance);
               if (!placer.WithinBounds(box))
               {
@@ -6543,8 +6543,8 @@ namespace PlantFlow_Support
               }
               Point3d touchPt = new Point3d(toLeftEnd ? cx + radius : cx - radius, endY, 0.0);
               string rejEnd;
-              // 세로재만 기둥 내부 쪽 여백을 쓸 수 있다. support 외 모든 상자 충돌은 그대로 금지한다.
-              if (!placer.IsBalloonFree(box, endAnchor, touchPt, out rejEnd, isVerticalMember))
+              // 세로재 밸룬만 자신의 기둥 상자를 제외한다. support 외 상자·기존 콜아웃 충돌은 계속 금지한다.
+              if (!placer.IsBalloonFree(box, endAnchor, touchPt, out rejEnd, isVerticalMember, false, isVerticalMember))
               {
                 int rejected;
                 rejBy.TryGetValue(rejEnd, out rejected);
