@@ -245,7 +245,9 @@ namespace PlantFlow_Support
         // 이 장애물의 리더 검사만 면제한다(문자 상자 겹침 검사는 유지).
         if (!string.IsNullOrEmpty(_leaderExemptOwner)
           && string.Equals(obstacle.Owner ?? string.Empty, _leaderExemptOwner, System.StringComparison.Ordinal)) continue;
-        // 장애물 리더 검사는 tier 규칙을 따른다. 기둥은 문자 상자만 계속 차단한다.
+        // 세로 부재는 문자 상자만 계속 차단한다. 리더의 기둥 관통은 모든 tier에서 허용한다.
+        if (string.Equals(obstacle.Owner ?? string.Empty, "vertical-member", System.StringComparison.Ordinal)) continue;
+        // 나머지 장애물 리더 검사는 tier 규칙을 따른다.
         if (leaderScope == LeaderCheckScope.All
           && (SegIntersectsBox(anchor, p1, obstacle.Box) || SegIntersectsBox(p1, p2, obstacle.Box)))
         { reject = "extLeader|" + (string.IsNullOrEmpty(obstacle.Owner) ? "unnamed" : obstacle.Owner); return false; }
