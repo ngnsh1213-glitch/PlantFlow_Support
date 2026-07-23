@@ -5115,13 +5115,13 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "RC5", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", PipeCalloutDx = 100.0, PipeCalloutDy = 20.0, HasPipeCalloutPosition = true, HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "RC6", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", HasVLeaderExt = true, VLeaderExt = 0.0 };
       if (string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RC8", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RC9", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", HasVLeaderExt = true, VLeaderExt = 0.0 };
       if (string.Equals(standardName, "RS1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS2", System.StringComparison.OrdinalIgnoreCase))
