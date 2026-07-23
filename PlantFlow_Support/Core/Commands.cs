@@ -4888,6 +4888,9 @@ namespace PlantFlow_Support
       public bool HasPipeCalloutPosition;
       public double MemberBalloonDx;
       public double MemberBalloonDy;
+      // 세로재 리더 축관통 연장. RC5(두꺼운 기둥)=20이 확정값이나 얇은 부재는 화살촉이 허공에 뜬다(cycle118 RS3/4).
+      public bool HasVLeaderExt;
+      public double VLeaderExt;
       public string HorizontalSide;
       // 가로 부재가 도면 위아래 어디에 있는가. "bottom"(GD 계열, 기본) | "top"(RC 계열).
       // 부재 콜아웃 앵커의 상하 기준면을 결정한다.
@@ -4947,9 +4950,9 @@ namespace PlantFlow_Support
         // RS2 F2는 대각재 포트 앵커 경로(isRc7DiagonalMember)로 배치 — member-end 오프셋 미적용이라 값 제거.
         return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS3", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", MemberBalloonDx = 30.0, MemberBalloonDy = 0.0 };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", MemberBalloonDx = 30.0, MemberBalloonDy = 0.0, HasVLeaderExt = true, VLeaderExt = 0.0 };
       if (string.Equals(standardName, "RS4", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", MemberBalloonDx = 36.0, MemberBalloonDy = 0.0 };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", MemberBalloonDx = 36.0, MemberBalloonDy = 0.0, HasVLeaderExt = true, VLeaderExt = 0.0 };
       if (string.Equals(standardName, "RS5", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "Ha", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
@@ -6911,9 +6914,17 @@ namespace PlantFlow_Support
         double leaderExt = 0.0;
         if (isVerticalMember)
         {
-          // 세로재 화살표는 기둥 축을 지나 반대편까지 연장해 얇은 부재와의 연결감을 확보한다.
+          // 세로재 화살표는 기둥 축을 지나 반대편까지 연장해 두꺼운 부재와의 연결감을 확보한다.
           // 밸룬 위치와 후보 충돌 검사는 포트 축 기준을 그대로 유지한다.
-          leaderExt = this.GetEnvDouble("PFS_NOTAB_VLEADER_EXT", 20.0, 0.0, 200.0);
+          // 우선순위 = env(명시 설정 시) → 타입 config → 기본 20. 얇은 부재(RS3/4)는 config 0으로 축에 정착.
+          string extRaw = System.Environment.GetEnvironmentVariable("PFS_NOTAB_VLEADER_EXT");
+          NotabTypeConfig extCfg = this.GetNotabTypeConfig(standardName);
+          if (!string.IsNullOrWhiteSpace(extRaw))
+            leaderExt = this.GetEnvDouble("PFS_NOTAB_VLEADER_EXT", 20.0, 0.0, 200.0);
+          else if (extCfg.HasVLeaderExt)
+            leaderExt = extCfg.VLeaderExt;
+          else
+            leaderExt = 20.0;
           anchor = new Point3d(anchor.X + (left ? leaderExt : -leaderExt), anchor.Y, anchor.Z);
         }
         string diag = placeDiag;
