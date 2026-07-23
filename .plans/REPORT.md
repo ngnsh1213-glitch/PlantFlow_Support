@@ -27,4 +27,4 @@
 
 ## 커밋
 
-- 대기 중
+- `e8b620e` (`fix: correct notab RS residual annotations`)
