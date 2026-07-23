@@ -567,6 +567,48 @@ namespace PlantFlow_Support
         + " designStd='" + (s_isoDesignStd ?? string.Empty) + "'");
 
       Editor ed = doc.Editor;
+
+      // [격리 cycle121] 부속(UB류) 단독 추출 거부 — 일괄추출(BATCH) 분류와 동일 목록(GetNotabAttachmentCodes).
+      // 선택에 본체 서포트가 하나도 없고 부속만 있으면 상세도를 만들지 않는다.
+      try
+      {
+        System.Collections.Generic.HashSet<string> guardCodes = this.GetNotabAttachmentCodes();
+        int mainCount = 0, attachCount = 0;
+        string attachSample = string.Empty;
+        foreach (ObjectId gid in selectedIds)
+        {
+          string gcls = gid.ObjectClass == null ? string.Empty : gid.ObjectClass.Name;
+          if (gcls.IndexOf("Support", System.StringComparison.OrdinalIgnoreCase) < 0)
+            continue;
+          string guardFail;
+          System.Collections.Generic.Dictionary<string, string> props = this.GetNotabBatchProbeProperties(gid, out guardFail);
+          string shortDesc;
+          props.TryGetValue("ShortDescription", out shortDesc);
+          if (!string.IsNullOrWhiteSpace(shortDesc) && guardCodes.Contains(shortDesc.Trim()))
+          {
+            attachCount++;
+            if (attachSample.Length == 0)
+            {
+              string supName;
+              props.TryGetValue("SupportName", out supName);
+              attachSample = string.IsNullOrWhiteSpace(supName) ? shortDesc : supName;
+            }
+          }
+          else
+            mainCount++; // 빈값/조회실패는 본체로 간주(BATCH 정책과 동일 — 무음 거부 방지)
+        }
+        if (mainCount == 0 && attachCount > 0)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL attachment-only 거부: attach=" + attachCount + " sample=" + attachSample);
+          ed.WriteMessage("\n[PFS] 부속(U볼트류)은 단독 상세도 대상이 아닙니다: " + attachSample + "\n");
+          return false;
+        }
+      }
+      catch (System.Exception gx)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL attachment-only 가드 예외(통과 진행): " + gx.GetType().Name + ": " + gx.Message);
+      }
+
       selectedIds = this.AutoIncludeRelatedParts(doc.Database, selectedIds);
       Vector3d pipeAxis;
       ObjectId pipeId;
