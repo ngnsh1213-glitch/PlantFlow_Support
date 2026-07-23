@@ -3493,8 +3493,9 @@ namespace PlantFlow_Support
     private bool TryGetNotabHorizontalParamsFor(string standardName, out double total, out double left, out double right, out string source)
     {
       source = "params(A+A1)";
-      // RS12A: 가로재 실장=F2 단일(A/A1은 세로 스파인 분할값). memberRight 소비라 left/right는 미사용(NaN 유지).
-      if (string.Equals(standardName, "RS12A", System.StringComparison.OrdinalIgnoreCase))
+      // RS12A/D: 가로재 실장=F2 단일(RS12A의 A/A1=스파인 분할, RS12D의 공식값=세로). memberRight 소비라 left/right 미사용.
+      if (string.Equals(standardName, "RS12A", System.StringComparison.OrdinalIgnoreCase)
+        || string.Equals(standardName, "RS12D", System.StringComparison.OrdinalIgnoreCase))
       {
         total = left = right = double.NaN;
         string f2Raw;
@@ -3508,39 +3509,38 @@ namespace PlantFlow_Support
         source = "params(F2)";
         return total > 1e-6;
       }
-      if (string.Equals(standardName, "RS12D", System.StringComparison.OrdinalIgnoreCase))
+      return this.TryGetNotabRcHorizontalParams(out total, out left, out right);
+    }
+
+    // A + PipeSize(Dn)/2 + 100 공식값(BOMs label_66과 동일). RS12D 세로 스파인 실장(444.55).
+    private bool TryGetNotabFormulaAValue(out double total)
+    {
+      total = double.NaN;
+      try
       {
-        total = left = right = double.NaN;
-        try
+        string aRaw, dnRaw;
+        double a;
+        int dn;
+        if (s_isoSupportParams == null
+          || !s_isoSupportParams.TryGetValue("A", out aRaw)
+          || !double.TryParse(aRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out a)
+          || !s_isoSupportParams.TryGetValue("Dn", out dnRaw)
+          || !int.TryParse(dnRaw.Trim(), out dn))
+          return false;
+        double pipe = PSUtil.PipeSize(dn);
+        if (double.IsNaN(pipe) || pipe <= 1e-6)
         {
-          string aRaw, dnRaw;
-          double a;
-          int dn;
-          if (s_isoSupportParams == null
-            || !s_isoSupportParams.TryGetValue("A", out aRaw)
-            || !double.TryParse(aRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out a)
-            || !s_isoSupportParams.TryGetValue("Dn", out dnRaw)
-            || !int.TryParse(dnRaw.Trim(), out dn))
-            return false;
-          double pipe = PSUtil.PipeSize(dn);
-          if (double.IsNaN(pipe) || pipe <= 1e-6)
-          {
-            PlantOrthoView.FileDiag("PFSNOTABDETAIL dimH formula skip: PipeSize invalid Dn=" + dn);
-            return false;
-          }
-          left = a;
-          right = pipe / 2.0 + 100.0;
-          total = left + right;
-          source = "formula(A+Dn/2+100)";
-          return total > 1e-6 && left > 1e-6;
-        }
-        catch (System.Exception ex)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABDETAIL dimH formula 예외 std=" + standardName + ": " + ex.GetType().Name + ": " + ex.Message);
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL formulaA skip: PipeSize invalid Dn=" + dn);
           return false;
         }
+        total = a + pipe / 2.0 + 100.0;
+        return total > 1e-6;
       }
-      return this.TryGetNotabRcHorizontalParams(out total, out left, out right);
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL formulaA 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
     }
 
     private bool TryGetNotabVerticalMemberBox(System.Collections.Generic.List<NotabMemberBox> boxes, out NotabMemberBox vertical, out string reason)
@@ -3813,7 +3813,15 @@ namespace PlantFlow_Support
           string paramKey = this.GetNotabVerticalParamKey(standardName);
           string paramValue = string.Empty;
           double paramRealH = double.NaN;
-          bool hasParam = this.TryGetNotabParamExpression(paramKey, out paramRealH, out paramValue);
+          bool hasParam;
+          if (string.Equals(paramKey, "@formulaA", System.StringComparison.OrdinalIgnoreCase))
+          {
+            // RS12D 세로 스파인 = A+파이프/2+100 (BOM label_66 공식과 동일)
+            hasParam = this.TryGetNotabFormulaAValue(out paramRealH);
+            paramValue = "A+Dn/2+100";
+          }
+          else
+            hasParam = this.TryGetNotabParamExpression(paramKey, out paramRealH, out paramValue);
 
           NotabTypeConfig paramConfig = this.GetNotabTypeConfig(standardName);
           if (hasParam && paramConfig.VerticalAddProfileWidth)
@@ -3847,7 +3855,7 @@ namespace PlantFlow_Support
             dimVTopY = minY + paramRealH * vScale;
             dimVBarSpan = true;
             dimVParamRealH = paramRealH;
-            dimVText = this.FormatNumber(paramRealH);
+            dimVText = this.FormatDimNumber(paramRealH);
             PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV param key=" + paramKey + " raw=" + paramValue + " real=" + this.FormatNumber(paramRealH) + " topY=" + this.FormatNumber(dimVTopY) + " minY=" + this.FormatNumber(minY) + " maxY=" + this.FormatNumber(maxY) + " realH=" + this.FormatNumber(realH));
           }
           else if (hasParam && paramRealH > realH + 1e-6 && vScale > 1e-9)
@@ -3856,7 +3864,7 @@ namespace PlantFlow_Support
             // (평면화 실측 보존 철학과 동일). 스팬 클램프는 하지 않는다.
             dimVBarSpan = true;
             dimVParamRealH = paramRealH;
-            dimVText = this.FormatNumber(paramRealH);
+            dimVText = this.FormatDimNumber(paramRealH);
             PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV param text-override(foreshortened): key=" + paramKey + " raw=" + paramValue + " real=" + this.FormatNumber(paramRealH) + " realH=" + this.FormatNumber(realH));
           }
           else
@@ -3951,9 +3959,9 @@ namespace PlantFlow_Support
               + " lower=" + this.FormatNumber(lowerReal) + " upper=" + this.FormatNumber(upperReal)
               + " splitLineX=" + this.FormatNumber(splitLineX) + " totalLineX=" + this.FormatNumber(verticalX));
             RotatedDimension dimVLo = PSUtil.CreateVerticalDimension(new Point3d(verticalAnchorX, verticalAnchorBaseY, 0.0), new Point3d(verticalAnchorX, pipeCenterYPaper, 0.0), new Point3d(splitLineX, verticalAnchorBaseY, 0.0), Matrix3d.Identity, dimStyleId);
-            this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimVLo, dimStyleId, layerId, lowerReal, txt, "dimVSb", this.FormatNumber(lowerReal));
+            this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimVLo, dimStyleId, layerId, lowerReal, txt, "dimVSb", this.FormatDimNumber(lowerReal));
             RotatedDimension dimVUp = PSUtil.CreateVerticalDimension(new Point3d(verticalAnchorX, pipeCenterYPaper, 0.0), new Point3d(verticalAnchorX, verticalAnchorTopY, 0.0), new Point3d(splitLineX, pipeCenterYPaper, 0.0), Matrix3d.Identity, dimStyleId);
-            this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimVUp, dimStyleId, layerId, upperReal, txt, "dimVSt", this.FormatNumber(upperReal));
+            this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimVUp, dimStyleId, layerId, upperReal, txt, "dimVSt", this.FormatDimNumber(upperReal));
           }
           PlantOrthoView.FileDiag("PFSNOTABDETAIL dimH src=" + dimReferenceSource + " x=(" + this.FormatNumber(minX) + "," + this.FormatNumber(maxX) + ")"
             + " | dimVL src=" + verticalAnchorSource + " x=" + this.FormatNumber(verticalAnchorX) + " baseY=" + this.FormatNumber(verticalAnchorBaseY) + " topY=" + this.FormatNumber(verticalAnchorTopY) + " lineX=" + this.FormatNumber(verticalX)
@@ -3977,7 +3985,7 @@ namespace PlantFlow_Support
             PlantOrthoView.FileDiag("PFSNOTABDETAIL dimVR src=param-fallback key=" + paramKey2 + " raw=" + paramValue2 + " real=" + this.FormatNumber(paramRealH2)
               + " x=" + this.FormatNumber(maxX) + " baseY=" + this.FormatNumber(rightBaseY) + " topY=" + this.FormatNumber(rightTopY) + " lineX=" + this.FormatNumber(rightLineX));
             RotatedDimension dimVR = PSUtil.CreateVerticalDimension(new Point3d(maxX, rightBaseY, 0.0), new Point3d(maxX, rightTopY, 0.0), new Point3d(rightLineX, rightBaseY, 0.0), Matrix3d.Identity, dimStyleId);
-            this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimVR, dimStyleId, layerId, paramRealH2, txt, "dimVR", this.FormatNumber(paramRealH2));
+            this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimVR, dimStyleId, layerId, paramRealH2, txt, "dimVR", this.FormatDimNumber(paramRealH2));
           }
           else if (!string.IsNullOrWhiteSpace(paramKey2))
           {
@@ -5152,7 +5160,7 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "RS12C", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS12D", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight", VerticalSplitAtPipe = true };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "@formulaA", PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight", VerticalSplitAtPipe = true };
       if (string.Equals(standardName, "RS13", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", VerticalParamKey2 = "F3", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS14", System.StringComparison.OrdinalIgnoreCase))
