@@ -2104,47 +2104,20 @@ namespace PlantFlow_Support
 
     private bool CreateNotabFlattenTempDrawing(Database detailDb, string path)
     {
-      Database tempDb = null;
       try
       {
-        ObjectIdCollection sourceIds = new ObjectIdCollection();
-        using (Transaction tr = detailDb.TransactionManager.StartTransaction())
-        {
-          ObjectId msId = this.GetModelSpaceId(detailDb, tr);
-          BlockTableRecord ms = msId == ObjectId.Null ? null : tr.GetObject(msId, OpenMode.ForRead, false) as BlockTableRecord;
-          if (ms != null)
-            foreach (ObjectId id in ms)
-              if (tr.GetObject(id, OpenMode.ForRead, false) is Solid3d)
-                sourceIds.Add(id);
-          tr.Commit();
-        }
-        if (sourceIds.Count == 0)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABFLATTEN temp create skip: model Solid3d 없음");
-          return false;
-        }
-
-        // 지정 솔리드만 담은 새 Database를 통째로 반환받는다(Wblock). 수동 WblockCloneObjects는
-        // 대상 트랜잭션이 열린 채 교차-DB 클론 시 eInvalidInput(cycle122 실측). Wblock은 자체 관리.
-        tempDb = detailDb.Wblock(sourceIds, Point3d.Origin);
-        if (tempDb == null)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABFLATTEN temp create 실패: Wblock null");
-          return false;
-        }
-        tempDb.SaveAs(path, DwgVersion.Current);
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN temp created solids=" + sourceIds.Count + " path=" + path);
+        // 클론(Wblock/WblockCloneObjects)은 no-document side DB에서 eInvalidInput 2회(cycle122 실측).
+        // detailDb를 검증된 SaveAs로 통째로 임시 파일에 저장한다 — 모델공간엔 대상 Solid3d,
+        // 레이아웃/주석은 페이퍼공간. 임시 문서는 TILEMODE=1(모델공간)에서 FLATSHOT하므로
+        // 페이퍼 콘텐츠는 무시되고 모델공간 3D 솔리드만 평면화된다.
+        detailDb.SaveAs(path, DwgVersion.Current);
+        PlantOrthoView.FileDiag("PFSNOTABFLATTEN temp created via SaveAs path=" + path);
         return true;
       }
       catch (System.Exception ex)
       {
         PlantOrthoView.FileDiag("PFSNOTABFLATTEN temp create 예외: " + ex.GetType().Name + ": " + ex.Message);
         return false;
-      }
-      finally
-      {
-        if (tempDb != null)
-          tempDb.Dispose();
       }
     }
 
