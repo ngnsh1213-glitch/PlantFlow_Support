@@ -9,6 +9,9 @@
 - cycle93: HANTEC 클래스·파일·호출을 StandardSupport로 개명하고, PFS STANDARD/기존 HANTEC을 인식하는 단일 DesignStd 판정과 로그를 추가했다. 오쏘 주석 생성 전에 BOM을 초기화해 StandardName 누락을 해소했으며, 무탭 BOM은 실제 모델 DesignStd와 빈 값 폴백을 사용한다. — 2026-07-20
 
 ### Fixed
+- 무탭 격리 결함+부속 가드 종결(cycle121, `57e0d20`~`f6c3c4a`): ①인접 본체 서포트 혼입 차단 — 수집 시 부속(UB류)만
+  자동 포함(코드 목록 단일 원천화, 빈값=포함+WARN) ②부속 단독 추출 거부 가드 ③세로재 리더 관통 타입별 0
+  확산(RC1/2/3/6/9 — 20 유지는 RC4·RC5만). RC1 혼입 소멸·UB 단독 거부·무간섭 전건 라이브 통과. — 2026-07-23
 - 무탭 RS11~15 타입 검증 종결(cycle120, `6c33cd8`~`b3f269c`) — **RS 패밀리 15종(변형 18종) 완주**:
   ①standardName 태그접두 해상도(RS12B/C/D config 매칭) ②합성 키 "A+A1"·@formulaA 세로 키 ③측면부착 3형제
   HorizontalAnchor=memberRight(파이프 실좌표 보존·분할 생략) ④★V-SPLIT 세로 파이프분할(상/하+총고 스택)
