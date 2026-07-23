@@ -1,5 +1,18 @@
 ﻿# SESSION — 현재 작업 상태
 
+## ★ 무탭 RS11~15 검증 — **종결** (cycle 120, 2026-07-23) → **RS 패밀리 전체 완주**
+
+원장 = `.plans/notab_rs_review_20260723.md`. RS11~15(+RS12A~D 변형) 전건 사용자 통과, RS12A/B 회귀 없음.
+- **cycle 120**(`6c33cd8`~`b3f269c`, Claude 직접 집도+Codex 자문 2회): ①standardName 태그접두 해상도(RS12 변형이
+  "RS12"로 뭉개져 config 미매칭) ②합성 키 "A+A1" 파서(RS11=550, RS12A/B 스파인) ③@formulaA 세로 키(RS12D=444.6)
+  ④HorizontalAnchor=memberRight(측면부착 3형제 — 파이프중심 앵커 불성립·분할 생략·파이프 실좌표 보존)
+  ⑤★V-SPLIT: 세로치수 파이프 분할(상/하 투영 실값+총고 스택, RS12A 450/150·RS12B 250/250·RS12D 300/144.6)
+  ⑥VerticalBalloonKeys: 스파인(F1) 밸룬 vertical-end 옵트인(RS12A/B — horizontal-end 스냅 허공 해소)
+  ⑦치수 오버라이드 0.1 자리(144.55→144.6) ⑧RS12D 가로=F2(500)/세로=공식(444.6) 배정 교정.
+- **교훈 재발**: 헬퍼 추가 전 기존 검색 생략으로 CS0111 중복 정의 2회째(FormatSignedNumber→FormatDimNumber). 추가 전 grep 필수.
+- **잔여**: ①격리 결함(인접 서포트 혼입 — 별도 사이클, 사용자 분리 확정) ②TR/TRS·FS·SHOE 검수 ③push 대기.
+
+
 ## ★ 무탭 RS6~10 검증 — **종결** (cycle 119, 2026-07-23)
 
 원장 = `.plans/notab_rs_review_20260723.md`. RS5~10 전건 사용자 통과.

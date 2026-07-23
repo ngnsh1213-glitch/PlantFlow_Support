@@ -9,6 +9,11 @@
 - cycle93: HANTEC 클래스·파일·호출을 StandardSupport로 개명하고, PFS STANDARD/기존 HANTEC을 인식하는 단일 DesignStd 판정과 로그를 추가했다. 오쏘 주석 생성 전에 BOM을 초기화해 StandardName 누락을 해소했으며, 무탭 BOM은 실제 모델 DesignStd와 빈 값 폴백을 사용한다. — 2026-07-20
 
 ### Fixed
+- 무탭 RS11~15 타입 검증 종결(cycle120, `6c33cd8`~`b3f269c`) — **RS 패밀리 15종(변형 18종) 완주**:
+  ①standardName 태그접두 해상도(RS12B/C/D config 매칭) ②합성 키 "A+A1"·@formulaA 세로 키 ③측면부착 3형제
+  HorizontalAnchor=memberRight(파이프 실좌표 보존·분할 생략) ④★V-SPLIT 세로 파이프분할(상/하+총고 스택)
+  ⑤스파인 밸룬 vertical-end 옵트인(VerticalBalloonKeys) ⑥투영<실장 시 값=실장 표기 ⑦파이프 하단 타입 세로치수
+  상단 기준(RS13 20mm 밀림) ⑧치수 오버라이드 0.1 자리. — 2026-07-23
 - 무탭 RS6~10 타입 검증 종결(cycle119, `49cde0f`+`ad3aead`): ①config RS6~10 행(세로 실장·F2 밸룬 포트앵커·VLeaderExt=0)
   ②★양쪽 세로치수 신설 — 다리 2개 타입(Ha/Hb)은 dimVL(좌)+dimVR(우) 표시(`VerticalParamKey2`) ③RS10 세로=F2+단면(575, BOM 규칙 준용)
   ④RS5/6 가로 params(800)+F1 밸룬 앵커 자동정합 ⑤가로 params 스팬 앵커를 부재상자 우측끝→파이프 중심으로 전환 —
