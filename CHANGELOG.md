@@ -9,6 +9,12 @@
 - cycle93: HANTEC 클래스·파일·호출을 StandardSupport로 개명하고, PFS STANDARD/기존 HANTEC을 인식하는 단일 DesignStd 판정과 로그를 추가했다. 오쏘 주석 생성 전에 BOM을 초기화해 StandardName 누락을 해소했으며, 무탭 BOM은 실제 모델 DesignStd와 빈 값 폴백을 사용한다. — 2026-07-20
 
 ### Fixed
+- 무탭 RS1~5 타입 검증 종결(cycle117~118+후속, `8bf878d`~`465fb74`): ①config RS1~5 행(RS1/2 세로 없음, RS3/4=F2, RS5=Ha)
+  ②RS1 BOM 645→500(A+파이프여유 공식이 RS1 기하와 불일치) ③RS5/6 BOM 전멸 해소 — 원인 2중: C#이 존재하지 않는 F2/F3 키 요구
+  (Ha/Hb 개명 전 잔재, 신규 분기+원자적실패) + .acat/.pspc ParamDefinition 구명 스냅샷(SQLite 직접 치환, 백업 .bak_20260723)
+  ④RS4 좌우 스왑(RC7식) — 분할·파이프콜아웃·치수중심 동시 교정 ⑤F2 밸룬 타입별 오프셋 config+support bbox 면제
+  ⑥RS2 F2=대각재 포트앵커(리더 붕괴 해소) ⑦세로재 리더 관통연장 타입별화(RS3/4=0) ⑧RS5 세로치수선 스팬=param 클램프.
+  실측 발견: Details DWG는 Fasoo DRM 암호화(외부 계측 불가), 카탈로그 에디터는 ParamDefinition을 재생성하지 않음. — 2026-07-23
 - cycle104 UI 라이브 검증 PASS + MDI 가드 결함 수정(`3a0d2ce`): 일괄 선택 추가 후 무탭 추출이 ER_DOCMISMATCH로 즉사 —
   `Document.Database` 관리 래퍼가 재생성되어 `ReferenceEquals`가 같은 도면에서도 false. 캡처 시점 `UnmanagedObject`(IntPtr)
   비교로 교체. 일괄선택 필터(42→17, UB 제외)·추출·오버레이 라이브 정상 확인. — 2026-07-23

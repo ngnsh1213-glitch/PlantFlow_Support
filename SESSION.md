@@ -1,12 +1,13 @@
 ﻿# SESSION — 현재 작업 상태
 
-## ★ 진행 중 — 무탭 RS 계열 타입 검증 착수 (2026-07-23)
+## ★ 무탭 RS1~5 검증 — **종결** (cycle 117~118+후속, 2026-07-23)
 
-- **직전 종결**: ①GD1~3+RC1~9 전 타입 통과(RC4 눈확인 포함, 잔여 0) ②cycle 104 무탭 UI 라이브 검증 **PASS**(일괄선택 42→17 필터·무탭 추출·오버레이 정상).
-- **UI 검증 중 결함 1건 수정**(`3a0d2ce`): MDI 가드 DB 비교가 `Document.Database` 래퍼 `ReferenceEquals`라 같은 도면에서도 false → 일괄 추가 후 추출이 ER_DOCMISMATCH 즉사. 캡처 시점 `UnmanagedObject`(IntPtr) 저장·비교로 교체. 라이브 재검증 "이상없음".
-- **현 트랙 = RS1~15 검증** (미검증 패밀리: B 캔틸레버 RS1·2·3·4·7·8·12·13 / C 門형 RS5·6 / D 걸침보 RS9·10·14 / A RS11·15, 이후 TR/TRS·FS·SHOE).
-- 테스트 모델 현황(08:48 probe 실측): RS는 **RS1-002 하나뿐** → 나머지 RS 타입 `<TYPE>-001` 배치가 선행.
-- 루프 = 타입별 4관찰(세로스팬/가로상하단/콜아웃/뷰충분성) + 수동 캘리브레이션 워크플로우(env 노브→확정→규칙 번역→config 승격).
+원장 = `.plans/notab_rs_review_20260723.md` (진단·자문·검수 전 과정). 사용자 최종 "RS3,4 통과"로 RS1~5 전 타입 종결.
+- **cycle 117**(`8bf878d`): config RS1~5 행(세로 none/param) / RS4 가로 params / RS1 BOM=A(645→500) / RS5·6 BOM Ha/Hb 신규 분기(label_71=RS12A 공유라 복제, 원자적 실패) / 무음예외 로그 보강.
+- **cycle 118**(`e8b620e`): RS4 좌우 스왑(RC7||RS4 — 분할·콜아웃·치수중심 3증상 1근인) / F2 밸룬 타입별 오프셋 config(RS3=+30·RS4=+36, env `PFS_NOTAB_F2_BALLOON_POS_<TYPE>`) / RS5 세로치수선 스팬=verticalAnchorTopY param-fallback 클램프.
+- **후속 3건(Claude 직접)**: `e7aa583`+`00fabc9` 오프셋 support bbox 면제+로그 부호(★e7aa583은 빌드오류 채 커밋 사고 — 빌드·커밋 체인 금지) / `59af654` RS2 F2=RC7식 대각재 포트앵커(끝단 스냅→리더 2.3mm 붕괴 해소) / `465fb74` VLeaderExt 타입별 config(RS3/4=0, 얇은 부재 화살촉 허공 해소, RC5=20 유지).
+- **데이터 트랙**: RS5/6 Ha/Hb 공백 근인 = .acat·.pspc `ContentGeometryParamDefinition`이 개명 전 F2/F3 스냅샷(카탈로그 에디터 저장은 이 문자열 재생성 안 함, 실측). SQLite 직접 UPDATE로 치환(acat 39행·pspc 38행, .bak_20260723, RS12A/RS13/RC9 보호). ★Details DWG는 Fasoo DRM 암호화 — 외부 계측 불가.
+- **잔여**: RS6~15·TR/TRS·FS·SHOE 검수(모델 배치돼 있음, RS12 계열 BOM rows 0 관찰 기록 있음). cycle 104 UI·MDI 가드(`3a0d2ce`)는 앞서 종결.
 
 ## (이력) 무탭 RC4~9 타입 회귀 검증 — **전 타입 종결** (cycle 105~116, 2026-07-23)
 
