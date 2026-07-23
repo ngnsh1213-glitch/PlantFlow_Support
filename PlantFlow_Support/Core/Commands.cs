@@ -3692,9 +3692,12 @@ namespace PlantFlow_Support
 
         // params(A+A1)·formula(A+Dn/2+100) 모두 해당 — 성공 시 dimHFallback이 비워진다.
         bool paramsHorizontal = string.IsNullOrEmpty(dimHFallback);
-        if (paramsHorizontal)
+        // memberRight 타입(RS12A/B/D)은 파이프가 부재 끝/측면 부착이라 A/A1이 파이프 분할이 아니다.
+        // 파이프중심 덮어쓰기 금지(실좌표 보존 — 콜아웃이 쓴다) + 가로 분할 생략(총폭만).
+        bool memberRightAnchorType = string.Equals(this.GetNotabTypeConfig(standardName).HorizontalAnchor, "memberRight", System.StringComparison.OrdinalIgnoreCase);
+        if (paramsHorizontal && !memberRightAnchorType)
           pipeCenterXPaper = minX + paperW * (paramLeft / paramTotal);
-        bool splitOk = !double.IsNaN(pipeCenterXPaper) && pipeCenterXPaper > minX + 1e-6 && pipeCenterXPaper < maxX - 1e-6;
+        bool splitOk = !memberRightAnchorType && !double.IsNaN(pipeCenterXPaper) && pipeCenterXPaper > minX + 1e-6 && pipeCenterXPaper < maxX - 1e-6;
         if (splitOk)
         {
           leftReal = paramsHorizontal ? paramLeft : realW * (pipeCenterXPaper - minX) / paperW;
