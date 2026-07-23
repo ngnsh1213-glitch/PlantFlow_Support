@@ -368,15 +368,7 @@ namespace PlantFlow_Support
       // 본체는 타입 코드 그대로(RC1/GD1/RS1/FS…)라 접두와 일치한다.
       // 유볼트 계열은 카탈로그에 UB / UB1 / UB2 / UBD 4종이 있다(Support 폴더 실재 확인).
       // 하드코딩 금지 — 카탈로그가 늘면 env로 추가한다.
-      System.Collections.Generic.HashSet<string> excludeCodes =
-        new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-      string excludeRaw = System.Environment.GetEnvironmentVariable("PFS_NOTAB_BATCH_EXCLUDE");
-      if (string.IsNullOrWhiteSpace(excludeRaw)) excludeRaw = "UB,UB1,UB2,UBD";
-      foreach (string part in excludeRaw.Split(','))
-      {
-        string code = (part ?? string.Empty).Trim();
-        if (code.Length > 0) excludeCodes.Add(code);
-      }
+      System.Collections.Generic.HashSet<string> excludeCodes = this.GetNotabAttachmentCodes();
 
       try
       {
@@ -458,7 +450,7 @@ namespace PlantFlow_Support
         + " supportClass=" + supportClassCount + " nonSupport=" + nonSupport
         + " excluded=" + excludedCount + " candidates=" + supportIds.Count
         + " probeFailed=" + probeFailed
-        + " excludeCodes=" + excludeRaw
+        + " excludeCodes=" + string.Join(",", System.Linq.Enumerable.ToArray(excludeCodes))
         + " duplicateName{" + dupSummary.ToString() + "}");
 
       return supportIds;
@@ -8445,6 +8437,7 @@ namespace PlantFlow_Support
           // 2) 모델공간 스캔: Pipe는 line tag + 축거리 접촉으로, Support는 anchor 접촉박스로만 포함한다.
           ObjectId msId = this.GetModelSpaceId(db, tr);
           BlockTableRecord ms = msId == ObjectId.Null ? null : tr.GetObject(msId, OpenMode.ForRead) as BlockTableRecord;
+          System.Collections.Generic.HashSet<string> attachmentCodes = this.GetNotabAttachmentCodes();
           int addedPipe = 0, addedSup = 0;
           int pipeCand = 0, pipeIncl = 0, pipeDropLine = 0, pipeDropDist = 0, pipeDropNoTag = 0, pipeFallback = 0;
           System.Collections.Generic.List<NotabPipeIncludeCandidate> pipeIncludes = new System.Collections.Generic.List<NotabPipeIncludeCandidate>();
@@ -8543,12 +8536,24 @@ namespace PlantFlow_Support
                   continue;
                 }
                 // class=RXClass 이름, type=DXF 이름. U-bolt 판별에 둘 다 필요하다.
+                string neighborShortDesc;
                 this.DumpNotabAutoIncludedSupportMetadata(ps, eid, cls,
-                  eid.ObjectClass == null ? string.Empty : eid.ObjectClass.DxfName, ex);
+                  eid.ObjectClass == null ? string.Empty : eid.ObjectClass.DxfName, ex, out neighborShortDesc);
+                // 격리 필터(cycle121): 접촉박스 안이라도 부속(UB류)만 포함한다. 본체 서포트는
+                // 인접 배치 시 혼입되는 결함의 근인(RC1·RS12D×RS13 실측). 빈값/조회실패는
+                // BATCH 정책과 동일하게 포함+경고(무음 누락 방지, Codex 자문 채택).
+                if (!string.IsNullOrWhiteSpace(neighborShortDesc) && !attachmentCodes.Contains(neighborShortDesc.Trim()))
+                {
+                  PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include support skip(main-support) id=" + eid
+                    + " shortDesc=" + neighborShortDesc + " ext=" + this.FormatExtents(ex));
+                  continue;
+                }
+                if (string.IsNullOrWhiteSpace(neighborShortDesc))
+                  PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include support WARN=shortDesc-empty id=" + eid + " (포함 유지)");
                 existing.Add(eid);
                 result.Add(eid);
                 addedSup++;
-                PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include support add id=" + eid + " ext=" + this.FormatExtents(ex) + " supTol=" + this.FormatNumber(supTol));
+                PlantOrthoView.FileDiag("PFSNOTABDETAIL auto-include support add id=" + eid + " shortDesc=" + (string.IsNullOrWhiteSpace(neighborShortDesc) ? "(empty)" : neighborShortDesc) + " ext=" + this.FormatExtents(ex) + " supTol=" + this.FormatNumber(supTol));
               }
               else
               {
@@ -8619,9 +8624,27 @@ namespace PlantFlow_Support
       return true;
     }
 
-    // 자동 포함된 원본 Support만 대상으로 한다. 상세도 복제본은 메타데이터가 제거되어 있다.
-    private void DumpNotabAutoIncludedSupportMetadata(PSUtil ps, ObjectId id, string className, string typeName, Extents3d extents)
+    // 부속(유볼트류) 코드 목록. BATCH 분류와 AutoIncludeRelatedParts 격리 필터의 단일 원천(cycle121).
+    // 하드코딩 금지 원칙 유지 — 기본 4종, 카탈로그가 늘면 env로 추가.
+    private System.Collections.Generic.HashSet<string> GetNotabAttachmentCodes()
     {
+      System.Collections.Generic.HashSet<string> codes =
+        new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+      string raw = System.Environment.GetEnvironmentVariable("PFS_NOTAB_BATCH_EXCLUDE");
+      if (string.IsNullOrWhiteSpace(raw)) raw = "UB,UB1,UB2,UBD";
+      foreach (string part in raw.Split(','))
+      {
+        string code = (part ?? string.Empty).Trim();
+        if (code.Length > 0) codes.Add(code);
+      }
+      return codes;
+    }
+
+    // 자동 포함된 원본 Support만 대상으로 한다. 상세도 복제본은 메타데이터가 제거되어 있다.
+    // shortDescription은 격리 필터(본체/부속 판별)용으로 반환한다. 조회 실패 시 빈값.
+    private void DumpNotabAutoIncludedSupportMetadata(PSUtil ps, ObjectId id, string className, string typeName, Extents3d extents, out string shortDescriptionOut)
+    {
+      shortDescriptionOut = string.Empty;
       PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-probe candidate id=" + id + " class=" + className + " type=" + typeName);
       if (ps == null)
       {
@@ -8660,6 +8683,7 @@ namespace PlantFlow_Support
         }
         PlantOrthoView.FileDiag("PFSNOTABDETAIL ubolt-probe datalinks id=" + id + " { " + dump.ToString() + "}");
         string shortDescription = values != null && values.Count > 1 ? values[1] : string.Empty;
+        shortDescriptionOut = shortDescription ?? string.Empty;
         string tag = values != null && values.Count > 3 ? values[3] : string.Empty;
         if (string.Equals(shortDescription, "UB", System.StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(tag))
         {
