@@ -6882,15 +6882,17 @@ namespace PlantFlow_Support
           if (!placer.WithinBounds(movedBox))
           {
             PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-offset skip reason=outside-bounds key=" + item
-              + " offset=(" + this.FormatNumber(balloonOffsetDx) + "," + this.FormatNumber(balloonOffsetDy) + ")");
+              + " offset=(" + this.FormatSignedNumber(balloonOffsetDx) + "," + this.FormatSignedNumber(balloonOffsetDy) + ")");
             balloonOffsetDx = 0.0;
             balloonOffsetDy = 0.0;
             balloonOffsetSource = "skip-bounds";
           }
-          else if (!placer.IsBalloonFree(movedBox, anchor, movedTouch, out offsetReject, isVerticalMember, false, isVerticalMember))
+          // 사용자 캘리브레이션 오프셋은 support 통짜 bbox보다 신뢰한다(cycle107 세로재 옵트인 전례).
+          // 콜아웃·치수 등 나머지 장애물 검사는 유지.
+          else if (!placer.IsBalloonFree(movedBox, anchor, movedTouch, out offsetReject, true, false, isVerticalMember))
           {
             PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-offset skip reason=" + offsetReject + " key=" + item
-              + " offset=(" + this.FormatNumber(balloonOffsetDx) + "," + this.FormatNumber(balloonOffsetDy) + ")");
+              + " offset=(" + this.FormatSignedNumber(balloonOffsetDx) + "," + this.FormatSignedNumber(balloonOffsetDy) + ")");
             balloonOffsetDx = 0.0;
             balloonOffsetDy = 0.0;
             balloonOffsetSource = "skip-" + offsetReject;
@@ -6977,7 +6979,7 @@ namespace PlantFlow_Support
             + " r=" + this.FormatNumber(radius)
             + " leaderArrow=" + this.FormatNumber(leaderArrowSize)
             + " leaderExt=" + this.FormatNumber(leaderExt)
-            + " offset=(" + this.FormatNumber(balloonOffsetDx) + "," + this.FormatNumber(balloonOffsetDy) + ") source=" + balloonOffsetSource
+            + " offset=(" + this.FormatSignedNumber(balloonOffsetDx) + "," + this.FormatSignedNumber(balloonOffsetDy) + ") source=" + balloonOffsetSource
             + " box=" + this.FormatExtents(ballBox)
             + " side=" + (left ? "left" : "right") + " cand=" + candidateCount
             + " free=" + freeCount + " maxClear=" + this.FormatNumber(maxClearance) + " tier=" + placementTier + " extended=" + (placementTier == "extended" ? "true" : "false") + " " + diag);
@@ -7551,6 +7553,12 @@ namespace PlantFlow_Support
     private string FormatNumber(double value)
     {
       return System.Math.Abs(value).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    // 오프셋 등 부호가 의미인 값 전용. FormatNumber는 Abs라 방향 진단이 불가하다(cycle118 RS2 판독 혼선 근거).
+    private string FormatSignedNumber(double value)
+    {
+      return value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private string FormatPoint(Point3d point)
