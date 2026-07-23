@@ -4944,7 +4944,8 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "RS1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS2", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBalloonDx = -31.5, MemberBalloonDy = 0.0 };
+        // RS2 F2는 대각재 포트 앵커 경로(isRc7DiagonalMember)로 배치 — member-end 오프셋 미적용이라 값 제거.
+        return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS3", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", MemberBalloonDx = 30.0, MemberBalloonDy = 0.0 };
       if (string.Equals(standardName, "RS4", System.StringComparison.OrdinalIgnoreCase))
@@ -6564,8 +6565,10 @@ namespace PlantFlow_Support
         string anchorAdjust = "port";
         bool isVerticalMember = hasVerticalAnchor && this.IsNotabVerticalMemberPort(anchorInfo.WcsP0);
         bool isPlateItem = string.Equals(bomItem, "P1", System.StringComparison.OrdinalIgnoreCase);
-        // RC7 F2는 RS2()의 PPorts[2]가 가리키는 대각 브레이스다. 가로재 끝단 규칙을 적용하지 않는다.
-        bool isRc7DiagonalMember = string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase)
+        // RC7·RS2의 F2는 대각 브레이스다. 가로재 끝단 스냅을 적용하면 앵커가 bbox 끝으로 밀려
+        // 리더가 붕괴하므로(cycle118 RS2 실측: 리더 2.3mm) 포트 앵커+일반 탐색 경로를 쓴다.
+        bool isRc7DiagonalMember = (string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase)
+            || string.Equals(standardName, "RS2", System.StringComparison.OrdinalIgnoreCase))
           && string.Equals(item, "F2", System.StringComparison.OrdinalIgnoreCase);
         // 부재 밸룬 = 세로재 또는 F 계열. P1(플레이트)은 포트가 곧 접속점이라 제외한다.
         bool isMemberItem = !isPlateItem
