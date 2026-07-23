@@ -9,6 +9,9 @@
 - cycle93: HANTEC 클래스·파일·호출을 StandardSupport로 개명하고, PFS STANDARD/기존 HANTEC을 인식하는 단일 DesignStd 판정과 로그를 추가했다. 오쏘 주석 생성 전에 BOM을 초기화해 StandardName 누락을 해소했으며, 무탭 BOM은 실제 모델 DesignStd와 빈 값 폴백을 사용한다. — 2026-07-20
 
 ### Fixed
+- cycle104 UI 라이브 검증 PASS + MDI 가드 결함 수정(`3a0d2ce`): 일괄 선택 추가 후 무탭 추출이 ER_DOCMISMATCH로 즉사 —
+  `Document.Database` 관리 래퍼가 재생성되어 `ReferenceEquals`가 같은 도면에서도 false. 캡처 시점 `UnmanagedObject`(IntPtr)
+  비교로 교체. 일괄선택 필터(42→17, UB 제외)·추출·오버레이 라이브 정상 확인. — 2026-07-23
 - 무탭 RC4~9 타입 회귀 검증 트랙 종결(cycle105~116, `1ee2287`~`7de446d`): 全타입 테스트 모델(TYPE-001) 기준 GD1~3+RC1~9 전 타입 통과(2026-07-23).
   **치수**: ①`GetNotabTypeConfig`에 RC4/5(param/F2/vertical)·RC7/8(`none`=세로 미작도 신설) 행 추가, `rcMemberGeometry`에 RC4/5/7 확장 —
   세로가 부재 단면 F(50/75/100)를 뽑던 폴백 해소(RC4 600·RC5 600), 가로 A+A1 교정(RC5 700→650) ②RC7 A/A1 분할: `paramsHorizontal`이면
