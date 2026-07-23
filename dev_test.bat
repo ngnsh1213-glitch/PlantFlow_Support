@@ -16,7 +16,7 @@ rem --- BOM spike (measurement only; logs BOMs rows, no output change). Set 0 to
 set "PFS_NOTAB_BOM_SPIKE=1"
 
 rem --- auto-extract tags (comma-separated). PFSNOTABTEST loops each. Edit to change types. ---
-set "PFS_NOTAB_TEST_TAG=RC5-001"
+set "PFS_NOTAB_TEST_TAG=RS12A-001,RS12B-001,RS12D-001"
 
 rem --- PFSNOTABBATCH dry-run (1 = classify + log only, no drawings) ---
 rem     PFSNOTABBATCH needs an interactive selection, so it is NOT auto-run by this script.
