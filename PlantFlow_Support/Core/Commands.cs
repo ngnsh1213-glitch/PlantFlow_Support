@@ -3488,6 +3488,46 @@ namespace PlantFlow_Support
         && !double.IsNaN(right) && !double.IsInfinity(right) && total > 1e-6 && left > 1e-6 && right > 1e-6;
     }
 
+    // 타입별 가로 파라미터 산출 래퍼. RS12D는 A1이 없어 A+파이프/2+100 공식(BOMs label_66과 동일)을 쓴다.
+    // 기존 TryGetNotabRcHorizontalParams(A/A1 필수 계약)는 불변(cycle120, Codex 자문 채택).
+    private bool TryGetNotabHorizontalParamsFor(string standardName, out double total, out double left, out double right, out string source)
+    {
+      source = "params(A+A1)";
+      if (string.Equals(standardName, "RS12D", System.StringComparison.OrdinalIgnoreCase))
+      {
+        total = left = right = double.NaN;
+        try
+        {
+          string aRaw, dnRaw;
+          double a;
+          int dn;
+          if (s_isoSupportParams == null
+            || !s_isoSupportParams.TryGetValue("A", out aRaw)
+            || !double.TryParse(aRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out a)
+            || !s_isoSupportParams.TryGetValue("Dn", out dnRaw)
+            || !int.TryParse(dnRaw.Trim(), out dn))
+            return false;
+          double pipe = PSUtil.PipeSize(dn);
+          if (double.IsNaN(pipe) || pipe <= 1e-6)
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL dimH formula skip: PipeSize invalid Dn=" + dn);
+            return false;
+          }
+          left = a;
+          right = pipe / 2.0 + 100.0;
+          total = left + right;
+          source = "formula(A+Dn/2+100)";
+          return total > 1e-6 && left > 1e-6;
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL dimH formula 예외 std=" + standardName + ": " + ex.GetType().Name + ": " + ex.Message);
+          return false;
+        }
+      }
+      return this.TryGetNotabRcHorizontalParams(out total, out left, out right);
+    }
+
     private bool TryGetNotabVerticalMemberBox(System.Collections.Generic.List<NotabMemberBox> boxes, out NotabMemberBox vertical, out string reason)
     {
       vertical = new NotabMemberBox();
@@ -3564,10 +3604,14 @@ namespace PlantFlow_Support
           || string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase)
           || string.Equals(standardName, "RS4", System.StringComparison.OrdinalIgnoreCase)
           || string.Equals(standardName, "RS5", System.StringComparison.OrdinalIgnoreCase)
-          || string.Equals(standardName, "RS6", System.StringComparison.OrdinalIgnoreCase);
+          || string.Equals(standardName, "RS6", System.StringComparison.OrdinalIgnoreCase)
+          || string.Equals(standardName, "RS12A", System.StringComparison.OrdinalIgnoreCase)
+          || string.Equals(standardName, "RS12B", System.StringComparison.OrdinalIgnoreCase)
+          || string.Equals(standardName, "RS12D", System.StringComparison.OrdinalIgnoreCase);
         string dimHSource = "fallback=legacy";
         string dimHFallback = "not-rc";
-        if (rcMemberGeometry && this.TryGetNotabRcHorizontalParams(out paramTotal, out paramLeft, out paramRight))
+        string dimHParamSource = "params(A+A1)";
+        if (rcMemberGeometry && this.TryGetNotabHorizontalParamsFor(standardName, out paramTotal, out paramLeft, out paramRight, out dimHParamSource))
         {
           // RC7은 공통 파라미터 산출(A/A1)을 그대로 쓰되, 도면 투영 좌우가 규격 좌우와 반대다.
           // 소비부에서만 교환해 다른 RC 타입과 파라미터 원본을 보존한다.
@@ -3594,7 +3638,10 @@ namespace PlantFlow_Support
             }
             if (horizontalIndex >= 0 && widest > 1e-6)
             {
-              if (!double.IsNaN(pipeCenterXPaper))
+              // 파이프가 부재 끝/측면에 부착되는 타입(RS12A/B/D)은 파이프중심 ± left/right가 성립하지
+              // 않으므로 config로 부재상자 우측끝 앵커를 강제한다(cycle120, Codex 자문 채택).
+              bool memberRightAnchor = string.Equals(this.GetNotabTypeConfig(standardName).HorizontalAnchor, "memberRight", System.StringComparison.OrdinalIgnoreCase);
+              if (!memberRightAnchor && !double.IsNaN(pipeCenterXPaper))
               {
                 // 앵커=파이프(U볼트) 중심 ± left/right. 부재 상자 우측 끝 앵커는 門형(RS6)처럼
                 // 다리가 가로재 밖으로 돌출하면 다리 폭만큼 밀린다(cycle119 실측 13paper=65real×0.2).
@@ -3608,7 +3655,7 @@ namespace PlantFlow_Support
                 minX = maxX - paramTotal * paperPerModel;
               }
               paperW = maxX - minX;
-              dimHSource = "params(A+A1)";
+              dimHSource = dimHParamSource;
               dimHFallback = string.Empty;
             }
             else
@@ -3643,7 +3690,8 @@ namespace PlantFlow_Support
         double splitGuardLimit = System.Math.Min(txt * 2.0, txt * 1.6 * 2.0);
         bool splitGuard = false;
 
-        bool paramsHorizontal = string.Equals(dimHSource, "params(A+A1)", System.StringComparison.Ordinal);
+        // params(A+A1)·formula(A+Dn/2+100) 모두 해당 — 성공 시 dimHFallback이 비워진다.
+        bool paramsHorizontal = string.IsNullOrEmpty(dimHFallback);
         if (paramsHorizontal)
           pipeCenterXPaper = minX + paperW * (paramLeft / paramTotal);
         bool splitOk = !double.IsNaN(pipeCenterXPaper) && pipeCenterXPaper > minX + 1e-6 && pipeCenterXPaper < maxX - 1e-6;
@@ -3747,12 +3795,7 @@ namespace PlantFlow_Support
           string paramKey = this.GetNotabVerticalParamKey(standardName);
           string paramValue = string.Empty;
           double paramRealH = double.NaN;
-          bool hasParam = !string.IsNullOrWhiteSpace(paramKey)
-            && s_isoSupportParams.TryGetValue(paramKey, out paramValue)
-            && double.TryParse(paramValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out paramRealH);
-          if (!hasParam && !string.IsNullOrWhiteSpace(paramKey))
-            hasParam = s_isoSupportParams.TryGetValue(paramKey, out paramValue)
-              && double.TryParse(paramValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out paramRealH);
+          bool hasParam = this.TryGetNotabParamExpression(paramKey, out paramRealH, out paramValue);
 
           NotabTypeConfig paramConfig = this.GetNotabTypeConfig(standardName);
           if (hasParam && paramConfig.VerticalAddProfileWidth)
@@ -3869,12 +3912,7 @@ namespace PlantFlow_Support
           string paramValue2 = string.Empty;
           double paramRealH2 = double.NaN;
           bool hasParam2 = string.Equals(verticalMode, "param", System.StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(paramKey2)
-            && s_isoSupportParams.TryGetValue(paramKey2, out paramValue2)
-            && double.TryParse(paramValue2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out paramRealH2);
-          if (!hasParam2 && !string.IsNullOrWhiteSpace(paramKey2))
-            hasParam2 = s_isoSupportParams.TryGetValue(paramKey2, out paramValue2)
-              && double.TryParse(paramValue2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out paramRealH2);
+            && this.TryGetNotabParamExpression(paramKey2, out paramRealH2, out paramValue2);
 
           if (hasParam2 && paramRealH2 > 1e-6 && paramRealH2 <= realH + 1e-6 && vScale > 1e-9)
           {
@@ -4951,6 +4989,8 @@ namespace PlantFlow_Support
       public string VerticalParamKey;
       public string VerticalParamKey2;
       public bool VerticalAddProfileWidth;
+      // 가로 params 스팬 앵커. 기본 파이프중심, "memberRight"=부재상자 우측끝(파이프가 부재 끝/측면 부착 타입).
+      public string HorizontalAnchor;
       public string PipeCalloutSide;
       public double PipeCalloutDx;
       public double PipeCalloutDy;
@@ -4981,7 +5021,16 @@ namespace PlantFlow_Support
           length++;
 
         string token = length > 0 ? trimmed.Substring(0, length) : trimmed;
-        return string.IsNullOrWhiteSpace(token) ? "unknown" : token;
+        if (string.IsNullOrWhiteSpace(token))
+          return "unknown";
+        // RS12 계열은 모델 ShortDescription이 "RS12"인데 태그는 "RS12B-001"처럼 변형까지 담는다.
+        // 태그 접두가 shortDesc를 확장하면 더 구체적인 태그 접두를 표준명으로 채택한다(cycle120).
+        string tagPrefix = this.GetSupportTypePrefix(s_isoSupportTag);
+        if (!string.IsNullOrWhiteSpace(tagPrefix)
+          && tagPrefix.Length > token.Length
+          && tagPrefix.StartsWith(token, System.StringComparison.OrdinalIgnoreCase))
+          return tagPrefix;
+        return token;
       }
       catch (System.Exception ex)
       {
@@ -5034,6 +5083,22 @@ namespace PlantFlow_Support
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", HasVLeaderExt = true, VLeaderExt = 0.0 };
       if (string.Equals(standardName, "RS10", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", VerticalAddProfileWidth = true, PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", HasVLeaderExt = true, VLeaderExt = 0.0 };
+      if (string.Equals(standardName, "RS11", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "A+A1", PipeCalloutSide = "top", HorizontalSide = "auto" };
+      if (string.Equals(standardName, "RS12A", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", VerticalAddProfileWidth = true, PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight" };
+      if (string.Equals(standardName, "RS12B", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight" };
+      if (string.Equals(standardName, "RS12C", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
+      if (string.Equals(standardName, "RS12D", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", VerticalAddProfileWidth = true, PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight" };
+      if (string.Equals(standardName, "RS13", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", VerticalParamKey2 = "F3", PipeCalloutSide = "top", HorizontalSide = "auto" };
+      if (string.Equals(standardName, "RS14", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
+      if (string.Equals(standardName, "RS15", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "pipecenter", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "16", "215" } };
       if (string.Equals(standardName, "GD3", System.StringComparison.OrdinalIgnoreCase))
@@ -5062,6 +5127,35 @@ namespace PlantFlow_Support
     private string GetNotabVerticalParamKey(string supportType)
     {
       return this.GetNotabTypeConfig(supportType).VerticalParamKey;
+    }
+
+    // 세로치수 param 키 표현식 조회. "A+A1"처럼 '+' 합성 지원(cycle120 RS11=A+A1).
+    // 토큰 하나라도 없거나 숫자 불량이면 실패(기존 fallback으로).
+    private bool TryGetNotabParamExpression(string keyExpression, out double value, out string raw)
+    {
+      value = double.NaN;
+      raw = string.Empty;
+      if (string.IsNullOrWhiteSpace(keyExpression) || s_isoSupportParams == null)
+        return false;
+      double sum = 0.0;
+      var rawParts = new System.Collections.Generic.List<string>();
+      string[] tokens = keyExpression.Split('+');
+      foreach (string token in tokens)
+      {
+        string key = token.Trim();
+        string part;
+        double parsed;
+        if (key.Length == 0 || !s_isoSupportParams.TryGetValue(key, out part))
+          return false;
+        if (!double.TryParse(part, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed)
+          && !double.TryParse(part, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out parsed))
+          return false;
+        sum += parsed;
+        rawParts.Add(part);
+      }
+      value = sum;
+      raw = string.Join("+", rawParts.ToArray());
+      return true;
     }
 
     private bool TryGetNotabF2BalloonOffset(string standardName, out double dx, out double dy, out string source)
