@@ -830,7 +830,8 @@ namespace PlantFlow_Support
               switch (standardName1)
               {
                 case "RS5":
-                  goto label_71;
+                  this.TryAddRs5OrRs6FrameBom();
+                  return;
                 case "RC5":
                   break;
                 default:
@@ -841,7 +842,8 @@ namespace PlantFlow_Support
               switch (standardName1)
               {
                 case "RS6":
-                  goto label_71;
+                  this.TryAddRs5OrRs6FrameBom();
+                  return;
                 case "RC6":
                   break;
                 default:
@@ -1462,9 +1464,11 @@ namespace PlantFlow_Support
 label_56:
       string str33 = StandardSupport.BeamProfile(this.SupportParams["BI"]);
       double num86 = Convert.ToDouble(this.SupportParams["A"]);
-      double num87 = PSUtil.PipeSize(Convert.ToInt32(this.SupportParams["Dn"])) / 2.0 + 100.0;
-      if (this.StandardName == "RS11")
+      double num87 = 0.0;
+      if (string.Equals(this.StandardName, "RS11", StringComparison.OrdinalIgnoreCase))
         num87 = Convert.ToDouble(this.SupportParams["A1"]);
+      else if (!string.Equals(this.StandardName, "RS1", StringComparison.OrdinalIgnoreCase))
+        num87 = PSUtil.PipeSize(Convert.ToInt32(this.SupportParams["Dn"])) / 2.0 + 100.0;
       double num88 = Math.Ceiling(num86 + num87);
       this.bom_contents.Add(new string[6]
       {
@@ -1595,6 +1599,38 @@ label_71:
       this.bom_contents.Add(strArray83);
       this.bom_contents.Add(strArray84);
       this.bom_contents.Add(strArray85);
+    }
+
+    // RS5/RS6은 F2/F3가 아니라 Ha/Hb가 실제 프레임 높이다. 하나라도 없으면 부분 BOM을 만들지 않는다.
+    private void TryAddRs5OrRs6FrameBom()
+    {
+      string[] requiredKeys = new string[] { "A", "A1", "Ha", "Hb", "BI" };
+      List<string> missing = new List<string>();
+      List<string> rawValues = new List<string>();
+      for (int i = 0; i < requiredKeys.Length; i++)
+      {
+        string key = requiredKeys[i];
+        string value = null;
+        bool found = this.SupportParams != null && this.SupportParams.TryGetValue(key, out value);
+        rawValues.Add(key + "=" + (found ? (value ?? "(null)") : "(missing)"));
+        if (!found || string.IsNullOrWhiteSpace(value))
+          missing.Add(key);
+      }
+
+      if (missing.Count > 0)
+      {
+        PlantOrthoView.FileDiag("BOM RS5/6 frame skip std=" + (this.StandardName ?? "unknown")
+          + " missing=" + string.Join(",", missing) + " raw={" + string.Join(" | ", rawValues) + "}");
+        return;
+      }
+
+      string profile = StandardSupport.BeamProfile(this.SupportParams["BI"]);
+      double f1 = Math.Ceiling(Convert.ToDouble(this.SupportParams["A"]) + Convert.ToDouble(this.SupportParams["A1"]));
+      double f2 = Math.Ceiling(Convert.ToDouble(this.SupportParams["Ha"]));
+      double f3 = Math.Ceiling(Convert.ToDouble(this.SupportParams["Hb"]));
+      this.bom_contents.Add(new string[6] { "F1", "FRAMEWORK", profile, this.frame_material, f1.ToString(), "" });
+      this.bom_contents.Add(new string[6] { "F2", "FRAMEWORK", profile, this.frame_material, f2.ToString(), "" });
+      this.bom_contents.Add(new string[6] { "F3", "FRAMEWORK", profile, this.frame_material, f3.ToString(), "" });
     }
 
     public void ExportMTO(string directory)

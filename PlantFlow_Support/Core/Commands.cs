@@ -3561,7 +3561,8 @@ namespace PlantFlow_Support
           || string.Equals(standardName, "RC3", System.StringComparison.OrdinalIgnoreCase)
           || string.Equals(standardName, "RC4", System.StringComparison.OrdinalIgnoreCase)
           || string.Equals(standardName, "RC5", System.StringComparison.OrdinalIgnoreCase)
-          || string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase);
+          || string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase)
+          || string.Equals(standardName, "RS4", System.StringComparison.OrdinalIgnoreCase);
         string dimHSource = "fallback=legacy";
         string dimHFallback = "not-rc";
         if (rcMemberGeometry && this.TryGetNotabRcHorizontalParams(out paramTotal, out paramLeft, out paramRight))
@@ -4930,6 +4931,16 @@ namespace PlantFlow_Support
         return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RC9", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+      if (string.Equals(standardName, "RS1", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
+      if (string.Equals(standardName, "RS2", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
+      if (string.Equals(standardName, "RS3", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+      if (string.Equals(standardName, "RS4", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+      if (string.Equals(standardName, "RS5", System.StringComparison.OrdinalIgnoreCase))
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "Ha", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "pipecenter", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBIs = new string[] { "16", "215" } };
       if (string.Equals(standardName, "GD3", System.StringComparison.OrdinalIgnoreCase))
@@ -6903,9 +6914,10 @@ namespace PlantFlow_Support
       }
 
       System.Collections.Generic.List<string> itemKeys = new System.Collections.Generic.List<string>();
+      BOMs bom = null;
       try
       {
-        BOMs bom = new BOMs(supportId, new System.Collections.Generic.List<AttachmentInfo>());
+        bom = new BOMs(supportId, new System.Collections.Generic.List<AttachmentInfo>());
         System.Collections.Generic.List<string[]> rows = bom.ContentsByDesignStd(this.GetNotabBomDesignStd());
         PlantOrthoView.FileDiag("MEASURE bom-source std=" + (bom.StandardName ?? "null")
           + " designStd=" + (string.IsNullOrWhiteSpace(s_isoDesignStd) ? "(empty)" : s_isoDesignStd)
@@ -6935,7 +6947,9 @@ namespace PlantFlow_Support
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("MEASURE bom-source 예외: " + ex.GetType().Name + ": " + ex.Message);
+        string missingKey = ex is System.Collections.Generic.KeyNotFoundException ? " key=" + ex.Message : string.Empty;
+        PlantOrthoView.FileDiag("MEASURE bom-source 예외 std=" + (bom == null || string.IsNullOrWhiteSpace(bom.StandardName) ? "unknown" : bom.StandardName)
+          + " supportId=" + supportId + " type=" + ex.GetType().Name + missingKey + ": " + ex.Message);
       }
 
       // M3: TaggingPoints(밸룬 앵커)를 원본 DB에서 생성해 WCS로 스냅샷한다.
