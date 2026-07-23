@@ -7555,12 +7555,6 @@ namespace PlantFlow_Support
       return System.Math.Abs(value).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    // 오프셋 등 부호가 의미인 값 전용. FormatNumber는 Abs라 방향 진단이 불가하다(cycle118 RS2 판독 혼선 근거).
-    private string FormatSignedNumber(double value)
-    {
-      return value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-    }
-
     private string FormatPoint(Point3d point)
     {
       System.Globalization.CultureInfo ic = System.Globalization.CultureInfo.InvariantCulture;
