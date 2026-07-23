@@ -3,31 +3,28 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 119
+- **cycle**: 122
 - **status**: ready
 - **issued_at**: 2026-07-23
-- **title**: 무탭 RS6~10 + RS5 재개방 (config 행·가로 params·RS10 단면 가산·★양쪽 세로치수 신설)
-- **작업 경로**: `PlantFlow_Support/Core/Commands.cs` (GetNotabTypeConfig ~4944 / rcMemberGeometry ~3559 / dimV 파싱·클램프 3734~3825 / 세로치수 작도 `if(!none)` 블록 ~3814+, 3903 이전)
-- **계획서**: `.plans/plan_notab_rs6_10_fix_20260723.md` (P1~P5, 자문 반영 최종본)
-- **진단 원장**: `.plans/notab_rs_review_20260723.md` "RS6~15 검수" 절
-- **기준 커밋**: `4198cf0`
-- **자문**: Codex(§9 단일채널). 채택 = ①P4는 P3로 자동 성립(밸룬 span=dimReference와 동일 원천 3913/3626) ②P5 함정 3건(우측에 S2 포트 게이트 재사용 금지→ext fallback 한정 / 우측 작도는 좌측 직후·3903 이전이면 장애물 등록 자동(4000~) / dimVL·dimVR 로그 분리) ③P2 가산 지점 양택 중 스팬 포함(3734~ 직후) 채택 — 사용자 의도="부재 실장 575", 과하면 표기만 가산으로 후퇴.
+- **title**: 무탭 2D 평면화 스파이크 (FLATSHOT B변형, 플래그 뒤 격리, 서포트 1개 측정)
+- **작업 경로**: `PlantFlow_Support/Core/Commands.cs` (RunNotabDetailPipeline 흐름 533~/1955~1962 saveAs 직전), 참조·이식 원본 `PlantFlow_Support/Ortho/PlantOrthoView.cs` (FLATSHOT 스파이크 1379~1671)
+- **계획서**: `.plans/plan_notab_flatten_spike_20260723.md`
+- **기준 커밋**: `b03642e` (백업 태그 `notab-viewport-v1` 존재)
+- **자문**: Codex(§9 단일채널). 채택 = B변형(격리 임시 클론 FLATSHOT→2D를 detailDb 페이퍼로 이식). 정정: FLATSHOT 출력=뷰 DCS 2D(WCS 아님)라 NotabProjectWcsToPaper 직접 투입 금지, 임시 뷰를 상세 vp와 동일 ViewDirection/TwistAngle/ViewTarget 설정 후 동일 아핀식으로 변환. A(활성 오픈)=범위 초과 기각, C(헤드리스 HLR API)=부재 기각.
 
 ## ⚠ 검증 필수
-`dotnet build` 오류 0 확인 없이 커밋 금지(빌드와 커밋 명령 분리 실행). 미실행 시 `status: blocked`. **push 금지**.
+`dotnet build` 오류 0 확인(빌드·커밋 분리 실행) 없이 커밋 금지. 미실행 시 `status: blocked`. **push 금지**.
+플래그 `PFS_NOTAB_FLATTEN` 기본 0 = 현행 완전 불변(회귀 0)이 최우선 안전조건.
 
-## 집도 항목
-1. **P1**: config 행 — RS6=`param/Ha`+`VerticalParamKey2:"Hb"` / RS7·8·9=`param/F2`+`MemberAnchorSide:"vertical"`+`HasVLeaderExt=true,VLeaderExt=0` / RS10=동일+`VerticalAddProfileWidth=true`. RS5에 `VerticalParamKey2:"Hb"` 추가.
-2. **P2**: `VerticalAddProfileWidth` — `paramRealH` 파싱 직후(3734~3743) `BI!="210"`이면 `StandardSupport.DetailProfile(BI)` 첫 토큰(x split) 가산. BOMs.cs:1539~1545와 동일 규칙.
-3. **P3**: `rcMemberGeometry` 목록에 RS5·RS6 추가(스왑 분기에는 추가 금지 — A/A1 대칭). RS1/2/3·캔틸레버 불변.
-4. **P4**: 집도 없음 — P3로 자동. 검증만(로그 대조).
-5. **P5**: `VerticalParamKey2` 신설 — 우측 세로치수 미러 작도. 좌측 param 파싱·클램프 흐름 재사용, `verticalAnchorX=maxX`·`lineX=maxX+offset+dimClear`, **S2 포트 게이트 미사용(양쪽 ext fallback)**, 기존 `if(!none)` 블록 내 좌측 직후(3903 이전) 작도. 로그 `dimVL=`/`dimVR=` 분리. key2 있는 타입은 좌측도 포트 게이트 비활성(RS5/6 현행이 이미 fallback이라 실변화 없음).
+## 집도 항목 (스파이크 — 측정 게이트 우선)
+1. **플래그**: `PFS_NOTAB_FLATTEN`(기본 0). 1일 때만 아래 동작. 위치 = saveAs 직전(1958~1962), 뷰포트·주석 다 그린 뒤.
+2. **격리 FLATSHOT**: 활성 원본 doc에서 대상 솔리드(선택 서포트+자동포함 파이프)만 격리 클론→임시 뷰 설정→`_.-FLATSHOT`→2D 블록 캡처→cleanup. PlantOrthoView.cs:1495~1671 로직 재사용/이식(원본 모델·뷰·TILEMODE 원복 필수, 클론·생성물 전부 cleanup).
+3. **임시 뷰 = 상세 vp 동일**: detailDb 뷰포트의 `ViewDirection`·`TwistAngle`·`ViewTarget`을 임시 클론 문서 현재 뷰에 그대로 설정.
+4. **1차 GO/NO-GO 측정(핵심 산출물)**: FLATSHOT 블록 2D bbox → 아핀 변환(`paperX=vp.CenterPoint.X+(dcsX-vp.ViewCenter.X)*scale`, scale=GetNotabViewportScale, NotabProjectWcsToPaper 3336~3339 동일 공식) → 같은 support/pipe corners의 `NotabProjectWcsToPaper` bbox와 오차. 로그 `PFSNOTABFLATTEN mech=B lines=<n> flatBbox=<..> projBbox=<..> alignErr=<..> gate=GO|NOGO`.
+5. **이식(게이트 GO일 때만)**: 2D 엔티티를 아핀 변환해 detailDb 페이퍼 공간(레이아웃)에 배치 → 뷰포트 삭제. NOGO면 이식·삭제 없이 현행 뷰포트 유지 폴백(플래그 무색).
+6. 빈 catch 금지, 실패 사유 FileDiag.
 
-## 검증 레시피 (dev_test.bat 태그 RS5~RS10 + 회귀 RS3,RS4,RC5)
-| 대상 | 기대 |
-|---|---|
-| RS6 | dimVL=Ha 500(좌)+dimVR=Hb 500(우) / dimH params 800(400/400) / F1 화살표=가로재 끝(span=extX 일치) |
-| RS5 | 동일 (가로 800·양쪽 세로·F1 앵커) |
-| RS7/8/9 | dimV param F2=500 / F2 밸룬 vertical-port + leaderExt=0 |
-| RS10 | 세로 575(F2 500+단면 75) span 포함 / F2 밸룬 vertical-port |
-| 회귀 | RS3/RS4(오프셋·VLeaderExt=0)·RC5(650·관통 20) 로그 diff 무변화 |
+## 검증 레시피 (dev_test)
+- `set PFS_NOTAB_FLATTEN=1` + 태그 1개(RC1-001). 로그: `PFSNOTABFLATTEN … gate=` + `alignErr` 수치. 눈확인: 2D 그림+주석 정렬, 뷰포트 소멸.
+- `set PFS_NOTAB_FLATTEN=0`(또는 미설정): RC1 등 현행과 로그·도면 완전 동일(회귀 0).
+- 게이트 NOGO여도 정상 종료(폴백)면 스파이크 성공 — alignErr 수치가 다음 판단 근거.
