@@ -3594,8 +3594,19 @@ namespace PlantFlow_Support
             }
             if (horizontalIndex >= 0 && widest > 1e-6)
             {
-              maxX = memberBoxes[horizontalIndex].PaperBox.MaxPoint.X;
-              minX = maxX - paramTotal * paperPerModel;
+              if (!double.IsNaN(pipeCenterXPaper))
+              {
+                // 앵커=파이프(U볼트) 중심 ± left/right. 부재 상자 우측 끝 앵커는 門형(RS6)처럼
+                // 다리가 가로재 밖으로 돌출하면 다리 폭만큼 밀린다(cycle119 실측 13paper=65real×0.2).
+                // RC5/RS4/RC7 기존 통과값과 수치 동치 확인 완료.
+                minX = pipeCenterXPaper - paramLeft * paperPerModel;
+                maxX = pipeCenterXPaper + paramRight * paperPerModel;
+              }
+              else
+              {
+                maxX = memberBoxes[horizontalIndex].PaperBox.MaxPoint.X;
+                minX = maxX - paramTotal * paperPerModel;
+              }
               paperW = maxX - minX;
               dimHSource = "params(A+A1)";
               dimHFallback = string.Empty;
