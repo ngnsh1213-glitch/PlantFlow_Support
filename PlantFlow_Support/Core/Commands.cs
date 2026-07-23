@@ -2124,14 +2124,13 @@ namespace PlantFlow_Support
           return false;
         }
 
-        tempDb = new Database(true, true);
-        using (Transaction tr = tempDb.TransactionManager.StartTransaction())
+        // 지정 솔리드만 담은 새 Database를 통째로 반환받는다(Wblock). 수동 WblockCloneObjects는
+        // 대상 트랜잭션이 열린 채 교차-DB 클론 시 eInvalidInput(cycle122 실측). Wblock은 자체 관리.
+        tempDb = detailDb.Wblock(sourceIds, Point3d.Origin);
+        if (tempDb == null)
         {
-          ObjectId tempMsId = this.GetModelSpaceId(tempDb, tr);
-          if (tempMsId == ObjectId.Null)
-            return false;
-          detailDb.WblockCloneObjects(sourceIds, tempMsId, new IdMapping(), DuplicateRecordCloning.Ignore, false);
-          tr.Commit();
+          PlantOrthoView.FileDiag("PFSNOTABFLATTEN temp create 실패: Wblock null");
+          return false;
         }
         tempDb.SaveAs(path, DwgVersion.Current);
         PlantOrthoView.FileDiag("PFSNOTABFLATTEN temp created solids=" + sourceIds.Count + " path=" + path);
