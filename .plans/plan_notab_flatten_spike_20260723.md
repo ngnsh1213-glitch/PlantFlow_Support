@@ -10,9 +10,10 @@
 - 주석 배치 = `NotabProjectWcsToPaper(vp, wcs)`(3318) — 뷰포트 DCS 변환+scale+center로 WCS→paper. **이 변환이 정렬의 단일 원천.**
 - **문제**: 기존 FLATSHOT 스파이크(PlantOrthoView.cs:1656)는 `doc.Editor.Command("_.-FLATSHOT"...)` — **활성 문서 editor 명령**. detailDb는 활성이 아니라 **헤드리스에서 FLATSHOT 명령 불가.**
 
-## 메커니즘 — **B 변형 채택** (Codex 자문)
-- 활성 문서(현행 원본, 명령 실행 가능)에서 **대상 솔리드만 격리 클론**(기존 스파이크 패턴 재사용: 클론→FLATSHOT→cleanup) →
-  임시 뷰를 **상세 뷰포트와 동일 `ViewDirection`·`TwistAngle`·`ViewTarget`**으로 설정 → FLATSHOT으로 2D 블록 생성 →
+## 메커니즘 — **B 변형 / 임시 전용 문서** (Codex 자문 + 집도자 안전지적 반영 2026-07-23)
+- ★**대상 솔리드만 담은 임시 전용 문서를 활성화**해 FLATSHOT(무선택 실행이 주변 형상 오염 → 전용 문서로 격리 보장).
+  원본 활성 도면 직접 실행은 기각. 임시 문서=대상 솔리드(선택 서포트+자동포함 파이프)만 클론 → 활성 → FLATSHOT → 2D 캡처 → 문서 닫기·원본 활성 복귀.
+- 임시 뷰를 **상세 뷰포트와 동일 `ViewDirection`·`TwistAngle`·`ViewTarget`**으로 설정 → FLATSHOT으로 2D 블록 생성 →
   2D 점을 **동일 아핀식**(`paperX = vpCenter.X + (dcsX - viewCenter.X)×scale`, NotabProjectWcsToPaper 3336~3339과 동일 공식)으로
   detailDb **페이퍼 공간**에 이식 → 뷰포트 삭제.
 - ★정정(자문): FLATSHOT 출력은 **WCS 아님 = 뷰 DCS 평면 2D**. `NotabProjectWcsToPaper`에 직접 투입 금지.
@@ -26,6 +27,8 @@
 - **1차 GO/NO-GO 게이트(자문 지정, 최저비용)**: 임시 클론 뷰=상세 vp의 ViewDirection/TwistAngle/ViewTarget →
   FLATSHOT 블록 2D bbox를 아핀 변환한 값 vs 같은 support/pipe corners의 `NotabProjectWcsToPaper` bbox → **오차 수치 로그**.
   DCS 원점·방향·twist 정합 증명이 관문.
+- **허용 오차 기준(확정)**: `alignErr` = 두 bbox의 **최대 코너 오차(페이퍼 mm)**. **GO if alignErr ≤ tol, else NO-GO.**
+  `tol = PFS_NOTAB_FLATTEN_TOL`(env, 기본 **2.0mm** = 텍스트 8mm의 1/4, 육안 무감지). 스파이크 중 재조정용 노브.
 - 게이트 PASS면: 2D를 detailDb 페이퍼로 이식 + 뷰포트 삭제(주석 잔존 확인). FAIL이면 이식 없이 현행 폴백.
 - 로그 `PFSNOTABFLATTEN mech=B lines=… flatBbox=… projBbox=… alignErr=… gate=GO|NOGO`.
 
