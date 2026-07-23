@@ -28,4 +28,4 @@
 
 ## 커밋
 
-- 커밋 대기
+- `49cde0f` (`fix: add notab RS6 through RS10 dimensions`)
