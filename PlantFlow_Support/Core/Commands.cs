@@ -5105,7 +5105,7 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "GD1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "bottom" };
       if (string.Equals(standardName, "RC1", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "bottom", MemberAnchorSide = "vertical" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "bottom", MemberAnchorSide = "vertical", HasVLeaderExt = true, VLeaderExt = 0.0 };
       if (string.Equals(standardName, "RC2", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
       if (string.Equals(standardName, "RC3", System.StringComparison.OrdinalIgnoreCase))
