@@ -3,34 +3,31 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 118
+- **cycle**: 119
 - **status**: ready
 - **issued_at**: 2026-07-23
-- **title**: 무탭 RS1~5 잔차 3계열 (RS4 좌우 스왑·F2 밸룬 타입별 오프셋·RS5 세로치수선 스팬)
-- **작업 경로**: `PlantFlow_Support/Core/Commands.cs` (RC7 스왑 소비부 ~3571 / dimV param 폴백 ~3686·3742 / AppendNotabBalloons member-end 확정부 6610~6883 / NotabTypeConfig·GetNotabTypeConfig ~4910)
-- **계획서**: `.plans/plan_notab_rs_residual_20260723.md` (R1·R2·R3 — 자문 반영 최종본)
-- **진단 원장**: `.plans/notab_rs_review_20260723.md` (cycle117 검수 절)
-- **기준 커밋**: `8bf878d`
-- **자문**: Codex(§9 단일채널). 채택 = ①R1 `RC7||RS4` 소비부 확장 ②R2 이동 묶음(ballCenter/ballBox 이동→touch 재계산→WithinBounds→IsBalloonFree(동일 면제 인자)→실패 시 원위치, 최종값만 CommitBalloonBox 등록, F2 전용 소형 파서) ③R3 근인=`verticalAnchorTopY` fallback 미갱신, 조건 `param && !hasVerticalPortAnchor && dimVBarSpan` 3중 게이트.
+- **title**: 무탭 RS6~10 + RS5 재개방 (config 행·가로 params·RS10 단면 가산·★양쪽 세로치수 신설)
+- **작업 경로**: `PlantFlow_Support/Core/Commands.cs` (GetNotabTypeConfig ~4944 / rcMemberGeometry ~3559 / dimV 파싱·클램프 3734~3825 / 세로치수 작도 `if(!none)` 블록 ~3814+, 3903 이전)
+- **계획서**: `.plans/plan_notab_rs6_10_fix_20260723.md` (P1~P5, 자문 반영 최종본)
+- **진단 원장**: `.plans/notab_rs_review_20260723.md` "RS6~15 검수" 절
+- **기준 커밋**: `4198cf0`
+- **자문**: Codex(§9 단일채널). 채택 = ①P4는 P3로 자동 성립(밸룬 span=dimReference와 동일 원천 3913/3626) ②P5 함정 3건(우측에 S2 포트 게이트 재사용 금지→ext fallback 한정 / 우측 작도는 좌측 직후·3903 이전이면 장애물 등록 자동(4000~) / dimVL·dimVR 로그 분리) ③P2 가산 지점 양택 중 스팬 포함(3734~ 직후) 채택 — 사용자 의도="부재 실장 575", 과하면 표기만 가산으로 후퇴.
 
 ## ⚠ 검증 필수
-`dotnet build` 오류 0 확인 없이 커밋 금지. 미실행 시 `status: blocked` 반려. **push 금지**(사용자 수행).
+`dotnet build` 오류 0 확인 없이 커밋 금지(빌드와 커밋 명령 분리 실행). 미실행 시 `status: blocked`. **push 금지**.
 
 ## 집도 항목
-1. **R1**: RC7 스왑 분기(~3571)를 `RC7 || RS4`로 확장. 파라미터 원본 보존(소비부만), 다른 타입 불변.
-   → RS4 split=(200,600)·pipeCenterX·파이프 콜아웃 앵커 동시 교정.
-2. **R2**: `NotabTypeConfig`에 `MemberBalloonDx/Dy`(기본 0) + RS2=(-31.5,0)·RS3=(+30,0)·RS4=(+36,0) 출하값.
-   env `PFS_NOTAB_F2_BALLOON_POS_<TYPE>`="dx[,dy]" 전용 파서(env→config→0). F2(member-end) 배치 확정 직후
-   계획서 R2의 5단계 이동 묶음 그대로. 실패 시 원위치+로그(`balloon-offset skip reason=`). 로그에 `offset=(dx,dy)` 표기.
-3. **R3**: param 처리 뒤 `verticalMode=param && !hasVerticalPortAnchor && dimVBarSpan`일 때
-   `verticalAnchorTopY = verticalAnchorBaseY + paramRealH*vScale`. 다른 소비자(dimVBarSpan/barRealH) 불변.
+1. **P1**: config 행 — RS6=`param/Ha`+`VerticalParamKey2:"Hb"` / RS7·8·9=`param/F2`+`MemberAnchorSide:"vertical"`+`HasVLeaderExt=true,VLeaderExt=0` / RS10=동일+`VerticalAddProfileWidth=true`. RS5에 `VerticalParamKey2:"Hb"` 추가.
+2. **P2**: `VerticalAddProfileWidth` — `paramRealH` 파싱 직후(3734~3743) `BI!="210"`이면 `StandardSupport.DetailProfile(BI)` 첫 토큰(x split) 가산. BOMs.cs:1539~1545와 동일 규칙.
+3. **P3**: `rcMemberGeometry` 목록에 RS5·RS6 추가(스왑 분기에는 추가 금지 — A/A1 대칭). RS1/2/3·캔틸레버 불변.
+4. **P4**: 집도 없음 — P3로 자동. 검증만(로그 대조).
+5. **P5**: `VerticalParamKey2` 신설 — 우측 세로치수 미러 작도. 좌측 param 파싱·클램프 흐름 재사용, `verticalAnchorX=maxX`·`lineX=maxX+offset+dimClear`, **S2 포트 게이트 미사용(양쪽 ext fallback)**, 기존 `if(!none)` 블록 내 좌측 직후(3903 이전) 작도. 로그 `dimVL=`/`dimVR=` 분리. key2 있는 타입은 좌측도 포트 게이트 비활성(RS5/6 현행이 이미 fallback이라 실변화 없음).
 
-## 검증 레시피 (dev_test.bat 태그 RS2,RS3,RS4,RS5 + RC5,RC7,GD1,RS12A)
+## 검증 레시피 (dev_test.bat 태그 RS5~RS10 + 회귀 RS3,RS4,RC5)
 | 대상 | 기대 |
 |---|---|
-| RS4 | split=(200,600) / 콜아웃·divider=U볼트 중심 / F2 밸룬 offset=(36,0) 로그 |
-| RS2 | F2 offset=(-31.5,0) / 세로치수 없음 유지 |
-| RS3 | F2 offset=(30,0) / 세로 500 불변 |
-| RS5 | 세로치수선 스팬=baseY~baseY+100paper(실500), 값 500 / BOM·밸룬 불변 |
-| RC7 | 분할 150/800 유지(스왑 공유부 회귀 확인) |
-| RC5·GD1·RS12A | 로그 diff 무변화 |
+| RS6 | dimVL=Ha 500(좌)+dimVR=Hb 500(우) / dimH params 800(400/400) / F1 화살표=가로재 끝(span=extX 일치) |
+| RS5 | 동일 (가로 800·양쪽 세로·F1 앵커) |
+| RS7/8/9 | dimV param F2=500 / F2 밸룬 vertical-port + leaderExt=0 |
+| RS10 | 세로 575(F2 500+단면 75) span 포함 / F2 밸룬 vertical-port |
+| 회귀 | RS3/RS4(오프셋·VLeaderExt=0)·RC5(650·관통 20) 로그 diff 무변화 |
