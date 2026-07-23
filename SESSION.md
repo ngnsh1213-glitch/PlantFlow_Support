@@ -1,6 +1,16 @@
 ﻿# SESSION — 현재 작업 상태
 
-## ★ 무탭 RS1~5 검증 — **종결** (cycle 117~118+후속, 2026-07-23)
+## ★ 무탭 RS6~10 검증 — **종결** (cycle 119, 2026-07-23)
+
+원장 = `.plans/notab_rs_review_20260723.md`. RS5~10 전건 사용자 통과.
+- **cycle 119**(`49cde0f`): config RS6~10 행 / RS10 세로=F2+단면(575, BOM 규칙 준용) / RS5·6 가로 params(800) /
+  ★신규 **양쪽 세로치수**(`VerticalParamKey2`, dimVL=Ha 좌+dimVR=Hb 우, ext fallback 앵커·포트게이트 미사용) / RS7~9 F2 밸룬 포트앵커+VLeaderExt=0.
+- **후속(Claude 직접, `ad3aead`)**: 가로 params 스팬 앵커를 부재상자 우측끝→**파이프 중심 ± left/right**로 전환 —
+  RS6 주석 전체 13paper mm(=다리 65×0.2) 어긋남 해소. RC5/RS4/RC7 수치 동치 확인(설계상 무회귀).
+- **미세잔여**: 다음 전량 추출 때 RC5/RC7 `extX` 로그 diff 눈확인 1회 (RS4는 회귀 없음 확인 완료).
+- **잔여 검수**: RS11~15·TR/TRS·FS·SHOE.
+
+## (이력) 무탭 RS1~5 검증 — **종결** (cycle 117~118+후속, 2026-07-23)
 
 원장 = `.plans/notab_rs_review_20260723.md` (진단·자문·검수 전 과정). 사용자 최종 "RS3,4 통과"로 RS1~5 전 타입 종결.
 - **cycle 117**(`8bf878d`): config RS1~5 행(세로 none/param) / RS4 가로 params / RS1 BOM=A(645→500) / RS5·6 BOM Ha/Hb 신규 분기(label_71=RS12A 공유라 복제, 원자적 실패) / 무음예외 로그 보강.

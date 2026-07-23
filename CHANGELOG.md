@@ -9,6 +9,10 @@
 - cycle93: HANTEC 클래스·파일·호출을 StandardSupport로 개명하고, PFS STANDARD/기존 HANTEC을 인식하는 단일 DesignStd 판정과 로그를 추가했다. 오쏘 주석 생성 전에 BOM을 초기화해 StandardName 누락을 해소했으며, 무탭 BOM은 실제 모델 DesignStd와 빈 값 폴백을 사용한다. — 2026-07-20
 
 ### Fixed
+- 무탭 RS6~10 타입 검증 종결(cycle119, `49cde0f`+`ad3aead`): ①config RS6~10 행(세로 실장·F2 밸룬 포트앵커·VLeaderExt=0)
+  ②★양쪽 세로치수 신설 — 다리 2개 타입(Ha/Hb)은 dimVL(좌)+dimVR(우) 표시(`VerticalParamKey2`) ③RS10 세로=F2+단면(575, BOM 규칙 준용)
+  ④RS5/6 가로 params(800)+F1 밸룬 앵커 자동정합 ⑤가로 params 스팬 앵커를 부재상자 우측끝→파이프 중심으로 전환 —
+  門형 다리 돌출로 주석 전체가 13paper mm 밀리던 결함 해소(RC5/RS4/RC7 수치 동치, RS4 회귀 없음 확인). — 2026-07-23
 - 무탭 RS1~5 타입 검증 종결(cycle117~118+후속, `8bf878d`~`465fb74`): ①config RS1~5 행(RS1/2 세로 없음, RS3/4=F2, RS5=Ha)
   ②RS1 BOM 645→500(A+파이프여유 공식이 RS1 기하와 불일치) ③RS5/6 BOM 전멸 해소 — 원인 2중: C#이 존재하지 않는 F2/F3 키 요구
   (Ha/Hb 개명 전 잔재, 신규 분기+원자적실패) + .acat/.pspc ParamDefinition 구명 스냅샷(SQLite 직접 치환, 백업 .bak_20260723)
