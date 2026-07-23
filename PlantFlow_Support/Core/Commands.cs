@@ -3569,11 +3569,12 @@ namespace PlantFlow_Support
         {
           // RC7은 공통 파라미터 산출(A/A1)을 그대로 쓰되, 도면 투영 좌우가 규격 좌우와 반대다.
           // 소비부에서만 교환해 다른 RC 타입과 파라미터 원본을 보존한다.
-          if (string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase))
+          if (string.Equals(standardName, "RC7", System.StringComparison.OrdinalIgnoreCase)
+            || string.Equals(standardName, "RS4", System.StringComparison.OrdinalIgnoreCase))
           {
-            double rc7Left = paramLeft;
+            double swappedLeft = paramLeft;
             paramLeft = paramRight;
-            paramRight = rc7Left;
+            paramRight = swappedLeft;
           }
           double paperPerModel = paperW / realW;
           if (paperPerModel > 1e-9 && memberBoxes != null && memberBoxes.Count > 0)
@@ -3805,6 +3806,13 @@ namespace PlantFlow_Support
               hasVerticalPortAnchor = true;
             }
           }
+        }
+        if (string.Equals(verticalMode, "param", System.StringComparison.OrdinalIgnoreCase)
+          && !hasVerticalPortAnchor && dimVBarSpan
+          && !double.IsNaN(dimVParamRealH) && dimVParamRealH > 1e-6 && vScale > 1e-9)
+        {
+          verticalAnchorTopY = verticalAnchorBaseY + dimVParamRealH * vScale;
+          verticalAnchorSource = "param-fallback";
         }
         if (!string.Equals(verticalMode, "none", System.StringComparison.OrdinalIgnoreCase))
         {
@@ -4878,6 +4886,8 @@ namespace PlantFlow_Support
       public double PipeCalloutDx;
       public double PipeCalloutDy;
       public bool HasPipeCalloutPosition;
+      public double MemberBalloonDx;
+      public double MemberBalloonDy;
       public string HorizontalSide;
       // 가로 부재가 도면 위아래 어디에 있는가. "bottom"(GD 계열, 기본) | "top"(RC 계열).
       // 부재 콜아웃 앵커의 상하 기준면을 결정한다.
@@ -4934,11 +4944,11 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "RS1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS2", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
+        return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto", MemberBalloonDx = -31.5, MemberBalloonDy = 0.0 };
       if (string.Equals(standardName, "RS3", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", MemberBalloonDx = 30.0, MemberBalloonDy = 0.0 };
       if (string.Equals(standardName, "RS4", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", MemberBalloonDx = 36.0, MemberBalloonDy = 0.0 };
       if (string.Equals(standardName, "RS5", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "Ha", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "GD2", System.StringComparison.OrdinalIgnoreCase))
@@ -4969,6 +4979,48 @@ namespace PlantFlow_Support
     private string GetNotabVerticalParamKey(string supportType)
     {
       return this.GetNotabTypeConfig(supportType).VerticalParamKey;
+    }
+
+    private bool TryGetNotabF2BalloonOffset(string standardName, out double dx, out double dy, out string source)
+    {
+      dx = 0.0;
+      dy = 0.0;
+      source = "none";
+      try
+      {
+        string key = "PFS_NOTAB_F2_BALLOON_POS_" + (standardName ?? string.Empty).Trim().ToUpperInvariant();
+        string raw = System.Environment.GetEnvironmentVariable(key);
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+          string[] parts = raw.Split(',');
+          double parsedDx;
+          double parsedDy = 0.0;
+          if ((parts.Length == 1 || parts.Length == 2)
+            && double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedDx)
+            && (parts.Length == 1 || double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedDy)))
+          {
+            dx = parsedDx;
+            dy = parsedDy;
+            source = "env";
+            return true;
+          }
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-offset env invalid key=" + key + " raw=" + raw);
+        }
+
+        NotabTypeConfig config = this.GetNotabTypeConfig(standardName);
+        dx = config.MemberBalloonDx;
+        dy = config.MemberBalloonDy;
+        if (System.Math.Abs(dx) > 1e-9 || System.Math.Abs(dy) > 1e-9)
+        {
+          source = "config";
+          return true;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-offset parse 예외 std=" + standardName + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+      return false;
     }
 
     private string GetNotabPipeCalloutSide(string supportType)
@@ -6812,6 +6864,44 @@ namespace PlantFlow_Support
 
         anchor = bestAnchor;
 
+        double balloonOffsetDx = 0.0;
+        double balloonOffsetDy = 0.0;
+        string balloonOffsetSource = "none";
+        if (isMemberItem && string.Equals(item, "F2", System.StringComparison.OrdinalIgnoreCase)
+          && string.Equals(placementTier, "member-end", System.StringComparison.OrdinalIgnoreCase)
+          && this.TryGetNotabF2BalloonOffset(standardName, out balloonOffsetDx, out balloonOffsetDy, out balloonOffsetSource))
+        {
+          Vector3d offset = new Vector3d(balloonOffsetDx, balloonOffsetDy, 0.0);
+          Point3d movedCenter = ballCenter + offset;
+          Extents3d movedBox = new Extents3d(ballBox.MinPoint + offset, ballBox.MaxPoint + offset);
+          Vector3d movedToCenter = movedCenter - anchor;
+          Point3d movedTouch = movedToCenter.Length < 1e-9
+            ? movedCenter - Vector3d.XAxis * radius
+            : movedCenter - movedToCenter.GetNormal() * radius;
+          string offsetReject;
+          if (!placer.WithinBounds(movedBox))
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-offset skip reason=outside-bounds key=" + item
+              + " offset=(" + this.FormatNumber(balloonOffsetDx) + "," + this.FormatNumber(balloonOffsetDy) + ")");
+            balloonOffsetDx = 0.0;
+            balloonOffsetDy = 0.0;
+            balloonOffsetSource = "skip-bounds";
+          }
+          else if (!placer.IsBalloonFree(movedBox, anchor, movedTouch, out offsetReject, isVerticalMember, false, isVerticalMember))
+          {
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-offset skip reason=" + offsetReject + " key=" + item
+              + " offset=(" + this.FormatNumber(balloonOffsetDx) + "," + this.FormatNumber(balloonOffsetDy) + ")");
+            balloonOffsetDx = 0.0;
+            balloonOffsetDy = 0.0;
+            balloonOffsetSource = "skip-" + offsetReject;
+          }
+          else
+          {
+            ballCenter = movedCenter;
+            ballBox = movedBox;
+          }
+        }
+
         bool left = outwardLeft;
         double leaderExt = 0.0;
         if (isVerticalMember)
@@ -6887,7 +6977,8 @@ namespace PlantFlow_Support
             + " r=" + this.FormatNumber(radius)
             + " leaderArrow=" + this.FormatNumber(leaderArrowSize)
             + " leaderExt=" + this.FormatNumber(leaderExt)
-          + " box=" + this.FormatExtents(ballBox)
+            + " offset=(" + this.FormatNumber(balloonOffsetDx) + "," + this.FormatNumber(balloonOffsetDy) + ") source=" + balloonOffsetSource
+            + " box=" + this.FormatExtents(ballBox)
             + " side=" + (left ? "left" : "right") + " cand=" + candidateCount
             + " free=" + freeCount + " maxClear=" + this.FormatNumber(maxClearance) + " tier=" + placementTier + " extended=" + (placementTier == "extended" ? "true" : "false") + " " + diag);
         }
