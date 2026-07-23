@@ -3493,6 +3493,21 @@ namespace PlantFlow_Support
     private bool TryGetNotabHorizontalParamsFor(string standardName, out double total, out double left, out double right, out string source)
     {
       source = "params(A+A1)";
+      // RS12A: 가로재 실장=F2 단일(A/A1은 세로 스파인 분할값). memberRight 소비라 left/right는 미사용(NaN 유지).
+      if (string.Equals(standardName, "RS12A", System.StringComparison.OrdinalIgnoreCase))
+      {
+        total = left = right = double.NaN;
+        string f2Raw;
+        double f2;
+        if (s_isoSupportParams == null
+          || !s_isoSupportParams.TryGetValue("F2", out f2Raw)
+          || !(double.TryParse(f2Raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out f2)
+            || double.TryParse(f2Raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out f2)))
+          return false;
+        total = f2;
+        source = "params(F2)";
+        return total > 1e-6;
+      }
       if (string.Equals(standardName, "RS12D", System.StringComparison.OrdinalIgnoreCase))
       {
         total = left = right = double.NaN;
@@ -3922,6 +3937,24 @@ namespace PlantFlow_Support
         if (!string.Equals(verticalMode, "none", System.StringComparison.OrdinalIgnoreCase))
         {
           double verticalX = verticalAnchorX - offset - dimClear;
+          // V-SPLIT(cycle120): 파이프가 세로 스파인에 측면 부착(RS12A/B/D)이면 세로치수를 파이프 중심에서
+          // 분할해 상/하 실값 + 총고를 스택 표기(가로 legacy 분할의 세로 미러). 값=투영 기하 결정론.
+          bool vSplit = cfgV.VerticalSplitAtPipe && vScale > 1e-9 && !double.IsNaN(pipeCenterYPaper)
+            && pipeCenterYPaper > verticalAnchorBaseY + 1e-6 && pipeCenterYPaper < verticalAnchorTopY - 1e-6;
+          if (vSplit)
+          {
+            double splitLineX = verticalX;   // 분할=부재 쪽(안쪽)
+            verticalX -= stack;              // 총고=바깥쪽
+            double lowerReal = (pipeCenterYPaper - verticalAnchorBaseY) / vScale;
+            double upperReal = (verticalAnchorTopY - pipeCenterYPaper) / vScale;
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL dimVSplit pipeY=" + this.FormatNumber(pipeCenterYPaper)
+              + " lower=" + this.FormatNumber(lowerReal) + " upper=" + this.FormatNumber(upperReal)
+              + " splitLineX=" + this.FormatNumber(splitLineX) + " totalLineX=" + this.FormatNumber(verticalX));
+            RotatedDimension dimVLo = PSUtil.CreateVerticalDimension(new Point3d(verticalAnchorX, verticalAnchorBaseY, 0.0), new Point3d(verticalAnchorX, pipeCenterYPaper, 0.0), new Point3d(splitLineX, verticalAnchorBaseY, 0.0), Matrix3d.Identity, dimStyleId);
+            this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimVLo, dimStyleId, layerId, lowerReal, txt, "dimVSb", this.FormatNumber(lowerReal));
+            RotatedDimension dimVUp = PSUtil.CreateVerticalDimension(new Point3d(verticalAnchorX, pipeCenterYPaper, 0.0), new Point3d(verticalAnchorX, verticalAnchorTopY, 0.0), new Point3d(splitLineX, pipeCenterYPaper, 0.0), Matrix3d.Identity, dimStyleId);
+            this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimVUp, dimStyleId, layerId, upperReal, txt, "dimVSt", this.FormatNumber(upperReal));
+          }
           PlantOrthoView.FileDiag("PFSNOTABDETAIL dimH src=" + dimReferenceSource + " x=(" + this.FormatNumber(minX) + "," + this.FormatNumber(maxX) + ")"
             + " | dimVL src=" + verticalAnchorSource + " x=" + this.FormatNumber(verticalAnchorX) + " baseY=" + this.FormatNumber(verticalAnchorBaseY) + " topY=" + this.FormatNumber(verticalAnchorTopY) + " lineX=" + this.FormatNumber(verticalX)
             + " | fallback=" + (string.IsNullOrEmpty(verticalFallback) ? "none" : verticalFallback));
@@ -5014,6 +5047,10 @@ namespace PlantFlow_Support
       public bool VerticalAddProfileWidth;
       // 가로 params 스팬 앵커. 기본 파이프중심, "memberRight"=부재상자 우측끝(파이프가 부재 끝/측면 부착 타입).
       public string HorizontalAnchor;
+      // 세로치수를 파이프 중심에서 분할(상/하+총고 스택). 측면부착 3형제(RS12A/B/D).
+      public bool VerticalSplitAtPipe;
+      // vertical-end 배치를 강제할 밸룬 키(쉼표 목록). 스파인이 세로재인데 포트 판정이 못 잡는 타입용.
+      public string VerticalBalloonKeys;
       public string PipeCalloutSide;
       public double PipeCalloutDx;
       public double PipeCalloutDy;
@@ -5109,13 +5146,13 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "RS11", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "A+A1", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS12A", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", VerticalAddProfileWidth = true, PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "A+A1", PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight", VerticalSplitAtPipe = true, VerticalBalloonKeys = "F1" };
       if (string.Equals(standardName, "RS12B", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "A+A1", PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight", VerticalSplitAtPipe = true, VerticalBalloonKeys = "F1" };
       if (string.Equals(standardName, "RS12C", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS12D", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight", VerticalSplitAtPipe = true };
       if (string.Equals(standardName, "RS13", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", VerticalParamKey2 = "F3", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS14", System.StringComparison.OrdinalIgnoreCase))
@@ -6763,6 +6800,18 @@ namespace PlantFlow_Support
         Point3d anchor = rawAnchor;
         string anchorAdjust = "port";
         bool isVerticalMember = hasVerticalAnchor && this.IsNotabVerticalMemberPort(anchorInfo.WcsP0);
+        // config 옵트인(cycle120): 스파인이 세로재인데 포트 판정이 못 잡는 타입(RS12A/B F1)용.
+        // 배치 형상만 vertical-end로 바꾸고, 장애물 면제·리더 연장 등은 기존 isVerticalMember 규칙 유지.
+        bool verticalBalloonOptIn = false;
+        string vbKeys = this.GetNotabTypeConfig(standardName).VerticalBalloonKeys;
+        if (!string.IsNullOrWhiteSpace(vbKeys))
+        {
+          foreach (string vbKey in vbKeys.Split(','))
+          {
+            if (string.Equals(vbKey.Trim(), item, System.StringComparison.OrdinalIgnoreCase)) { verticalBalloonOptIn = true; break; }
+          }
+        }
+        bool useVerticalEnd = isVerticalMember || verticalBalloonOptIn;
         bool isPlateItem = string.Equals(bomItem, "P1", System.StringComparison.OrdinalIgnoreCase);
         // RC7·RS2의 F2는 대각 브레이스다. 가로재 끝단 스냅을 적용하면 앵커가 bbox 끝으로 밀려
         // 리더가 붕괴하므로(cycle118 RS2 실측: 리더 2.3mm) 포트 앵커+일반 탐색 경로를 쓴다.
@@ -6820,16 +6869,23 @@ namespace PlantFlow_Support
         {
           double endMinX, endMaxX, endY;
           string geomSource;
-          if (isVerticalMember)
+          if (useVerticalEnd)
           {
             // 세로 기둥은 독립 솔리드가 아니다(cycle102 실측: 7A가 기둥+가로재+플레이트 병합).
             // 따라서 솔리드 상자를 쓰면 서포트 전체 외곽을 찍어 허공이 된다. 포트 기반으로 잡는다.
             // rawAnchor = S2 포트(기둥 자유단) 투영값이라 기둥 축 X를 대표한다.
             // verticalBaseY/TopY = S2 + F2 파라미터×vScale로 재구성한 기둥 상하단이다.
-            if (!hasVerticalAnchor)
+            // 옵트인(RS12A/B F1)은 hasVerticalAnchor가 없어도 param fallback 스팬으로 배치한다.
+            if (!hasVerticalAnchor && !verticalBalloonOptIn)
             {
               PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item
                 + " reason=member-geometry-unavailable detail=no-vertical-port");
+              continue;
+            }
+            if (verticalBalloonOptIn && !(verticalTopY > verticalBaseY + 1e-6))
+            {
+              PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-skip key=" + item
+                + " reason=member-geometry-unavailable detail=optin-span-invalid baseY=" + this.FormatNumber(verticalBaseY) + " topY=" + this.FormatNumber(verticalTopY));
               continue;
             }
             // 실제 단면폭이 아니라 "얇은 기둥 위에 화살표가 닿게" 하는 가독성 하한이다.
@@ -6918,7 +6974,7 @@ namespace PlantFlow_Support
             }
           }
           placeDiag = endDiag;
-          anchorAdjust = isVerticalMember ? "vertical-end" : "horizontal-end";
+          anchorAdjust = useVerticalEnd ? (verticalBalloonOptIn && !isVerticalMember ? "vertical-end-optin" : "vertical-end") : "horizontal-end";
 
           if (!placed)
           {
