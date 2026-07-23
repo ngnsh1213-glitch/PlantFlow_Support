@@ -3835,6 +3835,15 @@ namespace PlantFlow_Support
             dimVText = this.FormatNumber(paramRealH);
             PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV param key=" + paramKey + " raw=" + paramValue + " real=" + this.FormatNumber(paramRealH) + " topY=" + this.FormatNumber(dimVTopY) + " minY=" + this.FormatNumber(minY) + " maxY=" + this.FormatNumber(maxY) + " realH=" + this.FormatNumber(realH));
           }
+          else if (hasParam && paramRealH > realH + 1e-6 && vScale > 1e-9)
+          {
+            // 투영이 부재 실장보다 짧은 뷰(RS12D 444.55<500). 선은 투영 스팬 그대로, 값만 실장으로 표기
+            // (평면화 실측 보존 철학과 동일). 스팬 클램프는 하지 않는다.
+            dimVBarSpan = true;
+            dimVParamRealH = paramRealH;
+            dimVText = this.FormatNumber(paramRealH);
+            PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV param text-override(foreshortened): key=" + paramKey + " raw=" + paramValue + " real=" + this.FormatNumber(paramRealH) + " realH=" + this.FormatNumber(realH));
+          }
           else
           {
             PlantOrthoView.FileDiag("PFSNOTABDETAIL dimV param fallback full: key=" + (string.IsNullOrWhiteSpace(paramKey) ? "empty" : paramKey) + " raw=" + (string.IsNullOrWhiteSpace(paramValue) ? "empty" : paramValue) + " parsed=" + this.FormatNumber(paramRealH) + " realH=" + this.FormatNumber(realH) + " minY=" + this.FormatNumber(minY) + " maxY=" + this.FormatNumber(maxY) + " vScale=" + this.FormatNumber(vScale));
@@ -3896,9 +3905,18 @@ namespace PlantFlow_Support
         }
         if (string.Equals(verticalMode, "param", System.StringComparison.OrdinalIgnoreCase)
           && !hasVerticalPortAnchor && dimVBarSpan
-          && !double.IsNaN(dimVParamRealH) && dimVParamRealH > 1e-6 && vScale > 1e-9)
+          && !double.IsNaN(dimVParamRealH) && dimVParamRealH > 1e-6 && vScale > 1e-9
+          && dimVParamRealH * vScale <= (maxY - minY) + 1e-6)
         {
-          verticalAnchorTopY = verticalAnchorBaseY + dimVParamRealH * vScale;
+          // 파이프가 하단이면 부재(다리)는 상향 — 스팬을 상단(maxY) 기준으로 내린다.
+          // RS13 실측: minY 기준이면 U볼트 돌출분(20)만큼 치수가 아래로 밀린다(cycle120).
+          if (horizontalBottom)
+          {
+            verticalAnchorTopY = maxY;
+            verticalAnchorBaseY = maxY - dimVParamRealH * vScale;
+          }
+          else
+            verticalAnchorTopY = verticalAnchorBaseY + dimVParamRealH * vScale;
           verticalAnchorSource = "param-fallback";
         }
         if (!string.Equals(verticalMode, "none", System.StringComparison.OrdinalIgnoreCase))
@@ -3919,11 +3937,13 @@ namespace PlantFlow_Support
 
           if (hasParam2 && paramRealH2 > 1e-6 && paramRealH2 <= realH + 1e-6 && vScale > 1e-9)
           {
-            double rightTopY = minY + paramRealH2 * vScale;
+            // 좌측과 동일한 방향 인식(파이프 하단=상단 기준). RS13 20mm 밀림 교정.
+            double rightBaseY = horizontalBottom ? maxY - paramRealH2 * vScale : minY;
+            double rightTopY = horizontalBottom ? maxY : minY + paramRealH2 * vScale;
             double rightLineX = maxX + offset + dimClear;
             PlantOrthoView.FileDiag("PFSNOTABDETAIL dimVR src=param-fallback key=" + paramKey2 + " raw=" + paramValue2 + " real=" + this.FormatNumber(paramRealH2)
-              + " x=" + this.FormatNumber(maxX) + " baseY=" + this.FormatNumber(minY) + " topY=" + this.FormatNumber(rightTopY) + " lineX=" + this.FormatNumber(rightLineX));
-            RotatedDimension dimVR = PSUtil.CreateVerticalDimension(new Point3d(maxX, minY, 0.0), new Point3d(maxX, rightTopY, 0.0), new Point3d(rightLineX, minY, 0.0), Matrix3d.Identity, dimStyleId);
+              + " x=" + this.FormatNumber(maxX) + " baseY=" + this.FormatNumber(rightBaseY) + " topY=" + this.FormatNumber(rightTopY) + " lineX=" + this.FormatNumber(rightLineX));
+            RotatedDimension dimVR = PSUtil.CreateVerticalDimension(new Point3d(maxX, rightBaseY, 0.0), new Point3d(maxX, rightTopY, 0.0), new Point3d(rightLineX, rightBaseY, 0.0), Matrix3d.Identity, dimStyleId);
             this.AppendNotabPaperDimensionEntity(tr, layoutBtr, dimVR, dimStyleId, layerId, paramRealH2, txt, "dimVR", this.FormatNumber(paramRealH2));
           }
           else if (!string.IsNullOrWhiteSpace(paramKey2))
@@ -5095,7 +5115,7 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "RS12C", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "none", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS12D", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", VerticalAddProfileWidth = true, PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight" };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", HorizontalAnchor = "memberRight" };
       if (string.Equals(standardName, "RS13", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", VerticalParamKey2 = "F3", PipeCalloutSide = "top", HorizontalSide = "auto" };
       if (string.Equals(standardName, "RS14", System.StringComparison.OrdinalIgnoreCase))
