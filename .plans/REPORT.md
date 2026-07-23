@@ -1,22 +1,22 @@
 # REPORT — Codex → Claude
 
-- **cycle**: 116
+- **cycle**: 117
 - **status**: completed
 - **completed_at**: 2026-07-23
-- **title**: 세로재 밸룬 리더 관통 연장(기본 20) — RC5 F2 마무리
+- **title**: 무탭 RS1~5 결함 일괄 수정
 
 ## 결과
 
-- 세로재 member-end 밸룬만 화살표 끝점을 밸룬 반대방향으로 기둥 축 너머 연장했다.
-  - side=right: `rawAnchor.X - ext`
-  - side=left: `rawAnchor.X + ext`
-- `PFS_NOTAB_VLEADER_EXT`는 `GetEnvDouble(..., 20.0, 0.0, 200.0)`으로 읽는다. `0`이면 종전처럼 축에서 끝난다.
-- 밸룬 중심, 후보 탐색 및 충돌 판정은 포트 축을 유지해 변경하지 않았다. `balloon-draw` 로그에 `leaderExt=`를 추가했다.
-- 화살촉 축소 규칙은 유지돼 연장된 실제 리더 길이에 비례한다.
+- F1: RS1~5 무탭 타입 설정을 추가했다. RS1/2는 세로 치수를 생략하고, RS3/4는 F2+세로 포트 앵커, RS5는 Ha 세로 치수를 사용한다.
+- F3: RS4만 A+A1 기반 가로 치수 계산 대상으로 추가했다. 기존 RC 목록과 RS1/2/3의 legacy bbox 동작은 유지했다.
+- F4: RS1의 F1 BOM 길이를 A만 사용하도록 수정했고, RS11 및 GD1 경로는 유지했다.
+- F5: RS5/RS6은 Ha/Hb 기반 3개 프레임 행을 별도 생성한다. A/A1/Ha/Hb/BI 중 누락·공백이 있으면 전체 행을 만들지 않고 원시값 포함 FileDiag를 남긴다. label_71 및 RS12A 경로는 변경하지 않았다.
+- F6: BOM 원천 계측 예외 로그에 표준명, supportId, 예외 타입 및 KeyNotFound 키 정보를 추가했다.
 
 ## 변경 파일
 
 - `PlantFlow_Support/Core/Commands.cs`
+- `PlantFlow_Support/Models/BOMs.cs`
 
 ## 검증
 
@@ -25,9 +25,9 @@
 
 ## 라이브 검증 필요
 
-- RC5 F2가 기둥 축을 지나 좌측 20까지 연장되는지 확인.
-- RC1~3 F2의 동일 규칙을 확인하고, 필요 시 `PFS_NOTAB_VLEADER_EXT=0`으로 즉시 원복 가능.
+- dev_test.bat의 RS1~5 태그 설정으로 핸드오프 표의 치수·BOM·밸룬 결과 및 RS4 분할 방향을 확인한다.
+- RC1~9, GD1~3, RS12A를 재추출해 회귀가 없는지 확인한다.
 
 ## 커밋
 
-- 코드: `7de446d` (`feat: extend vertical balloon leaders`)
+- 코드: `8bf878d` (`fix: correct notab RS1-RS5 dimensions and BOM`)
