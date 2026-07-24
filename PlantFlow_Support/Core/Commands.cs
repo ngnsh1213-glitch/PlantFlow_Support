@@ -2169,18 +2169,27 @@ namespace PlantFlow_Support
         {
           ObjectId layoutId = this.GetNotabDetailLayoutBlockTableRecordId(db, tr);
           BlockTableRecord layout = layoutId == ObjectId.Null ? null : tr.GetObject(layoutId, OpenMode.ForRead, false) as BlockTableRecord;
+          // 레이아웃엔 항상 오버올(paperspace) 뷰포트(Number=1)가 있고, 우리 상세 뷰포트는 그 외(Number!=1).
+          // 상세도가 활성 문서로 열려 regen되므로 Number가 신뢰 가능하다(cycle123).
+          int detailCount = 0;
+          var nums = new System.Collections.Generic.List<int>();
           if (layout != null)
             foreach (ObjectId id in layout)
-              if (tr.GetObject(id, OpenMode.ForRead, false) is Viewport)
-              {
-                if (viewportId != ObjectId.Null)
-                {
-                  tr.Commit();
-                  return false;
-                }
-                viewportId = id;
-              }
+            {
+              Viewport vp = tr.GetObject(id, OpenMode.ForRead, false) as Viewport;
+              if (vp == null) continue;
+              nums.Add(vp.Number);
+              if (vp.Number == 1) continue; // 오버올 paperspace 뷰포트 제외
+              viewportId = id;
+              detailCount++;
+            }
+          PlantOrthoView.FileDiag("PFSNOTABFLATTEN2 viewport scan numbers=[" + string.Join(",", nums.ConvertAll(n => n.ToString()).ToArray()) + "] detailCount=" + detailCount);
           tr.Commit();
+          if (detailCount != 1)
+          {
+            viewportId = ObjectId.Null;
+            return false;
+          }
           return viewportId != ObjectId.Null;
         }
       }
