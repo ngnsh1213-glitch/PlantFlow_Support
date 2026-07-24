@@ -2018,26 +2018,32 @@ namespace PlantFlow_Support
             int solidPolylines = 0;
             try
             {
-              string category = this.ClassifyNotabFlattenSolid(solid, out bool wasUnclassified);
-              if (faceProbeEnabled && category == "PIPE") faceProbePipeSolids++;
-              if (wasUnclassified)
-              {
-                unclassified++;
-                PlantOrthoView.FileDiag("PFSNOTABBLOCK unclassified solid=" + solidId + " -> SUPPORT");
-              }
-              if (!grouped.ContainsKey(category))
-                grouped[category] = new System.Collections.Generic.List<Polyline>();
-              if (category.StartsWith("UB:", System.StringComparison.OrdinalIgnoreCase))
-              {
-                string uboltTag = category.Substring(3);
-                if (!uboltTags.Contains(uboltTag)) uboltTags.Add(uboltTag);
-              }
               using (Brep brep = new Brep(solid))
               {
+                string category = this.ClassifyNotabFlattenSolid(solid, brep, out bool wasUnclassified);
+                if (faceProbeEnabled && category == "PIPE") faceProbePipeSolids++;
+                if (wasUnclassified)
+                {
+                  unclassified++;
+                  PlantOrthoView.FileDiag("PFSNOTABBLOCK unclassified solid=" + solidId + " -> SUPPORT");
+                }
+                if (!grouped.ContainsKey(category))
+                  grouped[category] = new System.Collections.Generic.List<Polyline>();
+                if (category.StartsWith("UB:", System.StringComparison.OrdinalIgnoreCase))
+                {
+                  string uboltTag = category.Substring(3);
+                  if (!uboltTags.Contains(uboltTag)) uboltTags.Add(uboltTag);
+                }
                 if (faceProbeEnabled)
                   this.ProbeNotabFlattenSolidFaces(solidId, solid, brep, category);
+                int capEdgeSkip = 0;
                 foreach (Edge edge in brep.Edges)
                 {
+                  if (category.StartsWith("UB:", System.StringComparison.OrdinalIgnoreCase) && this.IsNotabUboltCylinderCapEdge(edge))
+                  {
+                    capEdgeSkip++;
+                    continue;
+                  }
                   edges++;
                   using (Curve3d curve = edge.Curve)
                   {
@@ -2069,6 +2075,14 @@ namespace PlantFlow_Support
                     else polyline.Dispose();
                     }
                   }
+                }
+                if (category.StartsWith("UB:", System.StringComparison.OrdinalIgnoreCase))
+                {
+                  int silhouetteCount = this.AppendNotabUboltSilhouettes(vp, solid, brep, layerId, grouped[category], ref projectionFailures);
+                  polylines += silhouetteCount;
+                  solidPolylines += silhouetteCount;
+                  PlantOrthoView.FileDiag("PFSNOTABSIL solid=" + solidId + " tag=" + category.Substring(3)
+                    + " silhouettes=" + silhouetteCount + " capEdgeSkip=" + capEdgeSkip);
                 }
               }
               if (solidPolylines > 0)
@@ -2263,7 +2277,14 @@ namespace PlantFlow_Support
         || typeName.IndexOf("Plane", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    private string ClassifyNotabFlattenSolid(Solid3d solid, out bool unclassified)
+    private sealed class NotabFlattenSurfaceSignature
+    {
+      public bool HasPipeCylinder;
+      public bool HasUboltTorus;
+      public int RodCylinderCount;
+    }
+
+    private string ClassifyNotabFlattenSolid(Solid3d solid, Brep brep, out bool unclassified)
     {
       unclassified = false;
       if (solid == null) { unclassified = true; return "SUPPORT"; }
@@ -2271,8 +2292,9 @@ namespace PlantFlow_Support
       {
         Extents3d ext = solid.GeometricExtents;
         Point3d center = new Point3d((ext.MinPoint.X + ext.MaxPoint.X) / 2.0, (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0, (ext.MinPoint.Z + ext.MaxPoint.Z) / 2.0);
-        double diagonal = (ext.MaxPoint - ext.MinPoint).Length;
-        double uboltTol = System.Math.Max(10.0, diagonal * 0.25);
+        NotabFlattenSurfaceSignature signature = this.GetNotabFlattenSurfaceSignature(brep);
+        if (signature.HasPipeCylinder) return "PIPE";
+        if (!signature.HasUboltTorus && signature.RodCylinderCount < 2) return "SUPPORT";
         NotabUboltSnapshot nearest = null;
         double nearestDistance = double.MaxValue;
         for (int i = 0; i < s_isoUbolts.Count; i++)
@@ -2280,36 +2302,16 @@ namespace PlantFlow_Support
           NotabUboltSnapshot candidate = s_isoUbolts[i];
           if (candidate == null || string.IsNullOrWhiteSpace(candidate.Tag)) continue;
           Point3d p = candidate.WcsCenter;
-          bool inside = p.X >= ext.MinPoint.X - uboltTol && p.X <= ext.MaxPoint.X + uboltTol
-            && p.Y >= ext.MinPoint.Y - uboltTol && p.Y <= ext.MaxPoint.Y + uboltTol
-            && p.Z >= ext.MinPoint.Z - uboltTol && p.Z <= ext.MaxPoint.Z + uboltTol;
           double distance = (center - p).Length;
-          if ((inside || distance <= uboltTol) && distance < nearestDistance)
+          if (distance < nearestDistance)
           {
             nearest = candidate;
             nearestDistance = distance;
           }
         }
         if (nearest != null) return "UB:" + nearest.Tag.Trim();
-
-        if (s_isoPipeCenterValid && s_isoPipeAxisValid && s_isoPipeAxis.Length > 1e-6 && !double.IsNaN(s_isoPipeRadiusModel))
-        {
-          Vector3d axis = s_isoPipeAxis.GetNormal();
-          Vector3d centerOffset = center - s_isoPipeCenterWcs;
-          double centerAxial = centerOffset.DotProduct(axis);
-          Vector3d radial = centerOffset - axis.MultiplyBy(centerAxial);
-          double axialMin = double.MaxValue, axialMax = double.MinValue;
-          Point3d[] corners = this.GetExtentsCorners(ext);
-          for (int i = 0; i < corners.Length; i++)
-          {
-            double cornerAxial = (corners[i] - s_isoPipeCenterWcs).DotProduct(axis);
-            if (cornerAxial < axialMin) axialMin = cornerAxial;
-            if (cornerAxial > axialMax) axialMax = cornerAxial;
-          }
-          double pipeTol = System.Math.Max(10.0, diagonal * 0.05);
-          if (radial.Length <= s_isoPipeRadiusModel + pipeTol && axialMin <= pipeTol && axialMax >= -pipeTol)
-            return "PIPE";
-        }
+        unclassified = true;
+        PlantOrthoView.FileDiag("PFSNOTABBLOCK unclassified WARN signature=ubolt center=" + this.FormatNotabFaceProbePoint(center));
         return "SUPPORT";
       }
       catch (System.Exception ex)
@@ -2318,6 +2320,169 @@ namespace PlantFlow_Support
         PlantOrthoView.FileDiag("PFSNOTABBLOCK classify 예외: " + ex.GetType().Name + ": " + ex.Message);
         return "SUPPORT";
       }
+    }
+
+    private NotabFlattenSurfaceSignature GetNotabFlattenSurfaceSignature(Brep brep)
+    {
+      NotabFlattenSurfaceSignature result = new NotabFlattenSurfaceSignature();
+      if (brep == null) return result;
+      double pipeRadius = s_isoPipeRadiusModel;
+      Vector3d pipeAxis = s_isoPipeAxisValid && s_isoPipeAxis.Length > 1e-6 ? s_isoPipeAxis.GetNormal() : Vector3d.XAxis;
+      foreach (Autodesk.AutoCAD.BoundaryRepresentation.Face face in brep.Faces)
+      {
+        object surface = this.GetNotabFlattenBaseSurface(face);
+        string type = surface == null ? string.Empty : surface.GetType().FullName;
+        double radius;
+        if (this.TryNotabFlattenDouble(surface, "Radius", out radius))
+        {
+          Vector3d axis;
+          bool hasAxis = this.TryNotabFlattenVector(surface, "Axis", out axis);
+          if (!hasAxis) hasAxis = this.TryNotabFlattenVector(surface, "AxisOfRotation", out axis);
+          if (!double.IsNaN(pipeRadius) && System.Math.Abs(radius - pipeRadius) <= System.Math.Max(1.0, pipeRadius * 0.05)
+            && hasAxis && System.Math.Abs(axis.GetNormal().DotProduct(pipeAxis)) >= 0.999)
+            result.HasPipeCylinder = true;
+          if (type.IndexOf("Cylinder", System.StringComparison.OrdinalIgnoreCase) >= 0 && System.Math.Abs(radius - 6.0) <= 1.0)
+            result.RodCylinderCount++;
+        }
+        double minor, major;
+        if (type.IndexOf("Torus", System.StringComparison.OrdinalIgnoreCase) >= 0
+          && this.TryNotabFlattenDouble(surface, "MinorRadius", out minor)
+          && this.TryNotabFlattenDouble(surface, "MajorRadius", out major)
+          && System.Math.Abs(minor - 6.0) <= 1.0 && major >= 20.0)
+          result.HasUboltTorus = true;
+      }
+      return result;
+    }
+
+    private object GetNotabFlattenBaseSurface(object face)
+    {
+      object trimmed = this.GetNotabFaceProbeSurface(face);
+      object baseSurface = this.GetNotabFaceProbeProperty(trimmed, "BaseSurface");
+      return baseSurface ?? this.GetNotabFaceProbeProperty(trimmed, "Surface") ?? trimmed;
+    }
+
+    private bool TryNotabFlattenDouble(object surface, string property, out double value)
+    {
+      value = 0.0;
+      object raw = this.GetNotabFaceProbeProperty(surface, property);
+      if (raw is double) { value = (double)raw; return true; }
+      if (raw is float) { value = (float)raw; return true; }
+      return false;
+    }
+
+    private bool TryNotabFlattenVector(object surface, string property, out Vector3d value)
+    {
+      value = Vector3d.XAxis;
+      object raw = this.GetNotabFaceProbeProperty(surface, property);
+      if (!(raw is Vector3d) || ((Vector3d)raw).Length <= 1e-6) return false;
+      value = (Vector3d)raw;
+      return true;
+    }
+
+    private bool IsNotabUboltCylinderCapEdge(Edge edge)
+    {
+      if (edge == null) return false;
+      try
+      {
+        Curve3d curve = edge.Curve;
+        string type = curve == null ? string.Empty : curve.GetType().FullName;
+        object radiusRaw = this.GetNotabFaceProbeProperty(curve, "Radius");
+        double radius = radiusRaw is double ? (double)radiusRaw : double.NaN;
+        using (Interval interval = curve.GetInterval())
+          return type.IndexOf("CircularArc", System.StringComparison.OrdinalIgnoreCase) >= 0
+            && System.Math.Abs(radius - 6.0) <= 1.0 && System.Math.Abs(interval.UpperBound - interval.LowerBound) >= 6.0;
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABSIL cap-edge 검사 skip=" + ex.GetType().Name + ": " + ex.Message);
+        return false;
+      }
+    }
+
+    private int AppendNotabUboltSilhouettes(Viewport vp, Solid3d solid, Brep brep, ObjectId layerId, System.Collections.Generic.List<Polyline> output, ref int projectionFailures)
+    {
+      if (vp == null || brep == null || output == null) return 0;
+      int added = 0, cyl = 0, cylSkip = 0, torus = 0, torusFaceOn = 0, torusWarn = 0;
+      Vector3d view = vp.ViewDirection.Length > 1e-6 ? vp.ViewDirection.GetNormal() : s_isoPipeAxis.GetNormal();
+      foreach (Autodesk.AutoCAD.BoundaryRepresentation.Face face in brep.Faces)
+      {
+        object surface = this.GetNotabFlattenBaseSurface(face);
+        string type = surface == null ? string.Empty : surface.GetType().FullName;
+        double radius; Vector3d axis;
+        if (type.IndexOf("Cylinder", System.StringComparison.OrdinalIgnoreCase) >= 0 && this.TryNotabFlattenDouble(surface, "Radius", out radius) && this.TryNotabFlattenVector(surface, "Axis", out axis))
+        {
+          cyl++;
+          Vector3d cross = axis.GetNormal().CrossProduct(view);
+          object originRaw = this.GetNotabFaceProbeProperty(surface, "Origin");
+          if (cross.Length <= 1e-6 || !(originRaw is Point3d)) { cylSkip++; continue; }
+          Point3d origin = (Point3d)originRaw;
+          double min = double.MaxValue, max = double.MinValue;
+          foreach (Point3d p in this.GetNotabFlattenFaceBoundarySamples(face)) { double t = (p - origin).DotProduct(axis.GetNormal()); min = System.Math.Min(min, t); max = System.Math.Max(max, t); }
+          if (min == double.MaxValue) { cylSkip++; PlantOrthoView.FileDiag("PFSNOTABSIL cylinder skip=no-boundary"); continue; }
+          Vector3d off = cross.GetNormal().MultiplyBy(radius);
+          added += this.AppendNotabSilhouetteLine(vp, origin + axis.GetNormal().MultiplyBy(min) + off, origin + axis.GetNormal().MultiplyBy(max) + off, layerId, output, ref projectionFailures);
+          added += this.AppendNotabSilhouetteLine(vp, origin + axis.GetNormal().MultiplyBy(min) - off, origin + axis.GetNormal().MultiplyBy(max) - off, layerId, output, ref projectionFailures);
+        }
+        double major, minor; Vector3d normal;
+        if (type.IndexOf("Torus", System.StringComparison.OrdinalIgnoreCase) >= 0 && this.TryNotabFlattenDouble(surface, "MajorRadius", out major) && this.TryNotabFlattenDouble(surface, "MinorRadius", out minor))
+        {
+          torus++; if (!this.TryNotabFlattenVector(surface, "Axis", out normal)) this.TryNotabFlattenVector(surface, "AxisOfRotation", out normal);
+          object centerRaw = this.GetNotabFaceProbeProperty(surface, "Center");
+          if (!(centerRaw is Point3d) || normal.Length <= 1e-6 || System.Math.Abs(normal.GetNormal().DotProduct(view)) < 0.999) { torusWarn++; continue; }
+          torusFaceOn++; Point3d center = (Point3d)centerRaw;
+          Vector3d u = System.Math.Abs(normal.GetNormal().DotProduct(Vector3d.XAxis)) < .9 ? normal.GetNormal().CrossProduct(Vector3d.XAxis).GetNormal() : normal.GetNormal().CrossProduct(Vector3d.ZAxis).GetNormal();
+          Vector3d v = normal.GetNormal().CrossProduct(u).GetNormal();
+          double start, end;
+          if (!this.TryGetNotabTorusTrimAngles(this.GetNotabFlattenFaceBoundarySamples(face), center, u, v, out start, out end)) { torusWarn++; continue; }
+          added += this.AppendNotabSilhouetteArc(vp, center, u, v, major + minor, start, end, layerId, output, ref projectionFailures);
+          added += this.AppendNotabSilhouetteArc(vp, center, u, v, System.Math.Max(0.1, major - minor), start, end, layerId, output, ref projectionFailures);
+        }
+      }
+      PlantOrthoView.FileDiag("PFSNOTABSIL cyl=" + cyl + "(sil=" + added + ",skip=" + cylSkip + ") torus=" + torus + "(faceon=" + torusFaceOn + ",warn=" + torusWarn + ")");
+      return added;
+    }
+
+    private int AppendNotabSilhouetteLine(Viewport vp, Point3d a, Point3d b, ObjectId layerId, System.Collections.Generic.List<Polyline> output, ref int failures)
+    { Point3d pa, pb; if (!this.TryNotabProjectWcsToPaper(vp, a, out pa) || !this.TryNotabProjectWcsToPaper(vp, b, out pb)) { failures++; return 0; } Polyline p = new Polyline(); p.LayerId = layerId; p.AddVertexAt(0, new Point2d(pa.X, pa.Y), 0, 0, 0); p.AddVertexAt(1, new Point2d(pb.X, pb.Y), 0, 0, 0); output.Add(p); return 1; }
+    private int AppendNotabSilhouetteArc(Viewport vp, Point3d c, Vector3d u, Vector3d v, double r, double start, double end, ObjectId layerId, System.Collections.Generic.List<Polyline> output, ref int failures)
+    { Polyline p = new Polyline(); p.LayerId = layerId; for (int i=0;i<=64;i++) { double a=start+(end-start)*i/64; Point3d q; if (!this.TryNotabProjectWcsToPaper(vp,c+u.MultiplyBy(System.Math.Cos(a)*r)+v.MultiplyBy(System.Math.Sin(a)*r),out q)){failures++;continue;} p.AddVertexAt(p.NumberOfVertices,new Point2d(q.X,q.Y),0,0,0); } if(p.NumberOfVertices<2){p.Dispose();return 0;} output.Add(p);return 1; }
+
+    private System.Collections.Generic.List<Point3d> GetNotabFlattenFaceBoundarySamples(object face)
+    {
+      System.Collections.Generic.List<Point3d> points = new System.Collections.Generic.List<Point3d>();
+      try
+      {
+        System.Collections.IEnumerable loops = this.GetNotabFaceProbeProperty(face, "Loops") as System.Collections.IEnumerable;
+        if (loops == null) return points;
+        foreach (object loop in loops)
+        {
+          System.Collections.IEnumerable edges = this.GetNotabFaceProbeProperty(loop, "Edges") as System.Collections.IEnumerable;
+          if (edges == null) continue;
+          foreach (object rawEdge in edges)
+          {
+            Edge edge = rawEdge as Edge; if (edge == null) continue;
+            using (Curve3d curve = edge.Curve) using (Interval interval = curve.GetInterval())
+            {
+              PointOnCurve3d[] samples = curve.GetSamplePoints(interval.LowerBound, interval.UpperBound, 1.0);
+              if (samples == null) continue;
+              for (int i = 0; i < samples.Length; i++) points.Add(samples[i].Point);
+            }
+          }
+        }
+      }
+      catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSNOTABSIL boundary skip=" + ex.GetType().Name + ": " + ex.Message); }
+      return points;
+    }
+
+    private bool TryGetNotabTorusTrimAngles(System.Collections.Generic.List<Point3d> points, Point3d center, Vector3d u, Vector3d v, out double start, out double end)
+    {
+      start = 0.0; end = 0.0; if (points == null || points.Count < 2) return false;
+      System.Collections.Generic.List<double> angles = new System.Collections.Generic.List<double>();
+      for (int i = 0; i < points.Count; i++) { Vector3d d = points[i] - center; angles.Add(System.Math.Atan2(d.DotProduct(v), d.DotProduct(u))); }
+      angles.Sort(); double gap = -1.0; int gapAt = 0;
+      for (int i = 0; i < angles.Count; i++) { double next = i + 1 < angles.Count ? angles[i + 1] : angles[0] + System.Math.PI * 2.0; if (next - angles[i] > gap) { gap = next - angles[i]; gapAt = i; } }
+      start = angles[(gapAt + 1) % angles.Count]; end = angles[gapAt]; if (end <= start) end += System.Math.PI * 2.0;
+      return end - start >= 0.05 && end - start <= System.Math.PI * 2.0 - 0.01;
     }
 
     private int GetNotabFlattenGroupCount(System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<Polyline>> grouped, string category)
