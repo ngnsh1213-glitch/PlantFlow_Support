@@ -2001,6 +2001,8 @@ namespace PlantFlow_Support
           double chordHeight = 0.5 / System.Math.Max(1e-9, this.GetNotabViewportScale(vp));
           System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<Polyline>> grouped = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<Polyline>>(System.StringComparer.OrdinalIgnoreCase);
           System.Collections.Generic.List<string> uboltTags = new System.Collections.Generic.List<string>();
+          bool faceProbeEnabled = this.GetEnvDouble("PFS_NOTAB_FACE_PROBE", 0.0, 0.0, 1.0) >= 0.5;
+          int faceProbePipeSolids = 0;
           bool hasPaperExtents = false;
           Extents3d paperExtents = new Extents3d();
           System.Collections.Generic.List<ObjectId> solidIds = new System.Collections.Generic.List<ObjectId>();
@@ -2017,6 +2019,7 @@ namespace PlantFlow_Support
             try
             {
               string category = this.ClassifyNotabFlattenSolid(solid, out bool wasUnclassified);
+              if (faceProbeEnabled && category == "PIPE") faceProbePipeSolids++;
               if (wasUnclassified)
               {
                 unclassified++;
@@ -2031,6 +2034,8 @@ namespace PlantFlow_Support
               }
               using (Brep brep = new Brep(solid))
               {
+                if (faceProbeEnabled)
+                  this.ProbeNotabFlattenSolidFaces(solidId, solid, brep, category);
                 foreach (Edge edge in brep.Edges)
                 {
                   edges++;
@@ -2078,6 +2083,9 @@ namespace PlantFlow_Support
               PlantOrthoView.FileDiag("PFSNOTABFLATTEN4 solid skip id=" + solidId + " reason=" + ex.GetType().Name + ": " + ex.Message);
             }
           }
+          if (faceProbeEnabled)
+            PlantOrthoView.FileDiag("PFSNOTABFACE pipeSolidCount=" + faceProbePipeSolids
+              + " status=" + (faceProbePipeSolids == 0 ? "배관 솔리드 부재" : "배관 솔리드 존재"));
           if (hasPaperExtents)
           {
             Point3d blockBase = new Point3d(paperExtents.MinPoint.X, paperExtents.MinPoint.Y, 0.0);
@@ -2111,6 +2119,148 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSNOTABFLATTEN4 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
+    }
+
+    // cycle128 계측 전용: 관리형 Brep 표면 API가 실루엣 계산에 필요한 파라미터를 노출하는지 확인한다.
+    // API 버전별 표면 래퍼 차이는 reflection으로 기록하며, 실패한 한 면은 다음 면 계측을 막지 않는다.
+    private void ProbeNotabFlattenSolidFaces(ObjectId solidId, Solid3d solid, Brep brep, string category)
+    {
+      if (solid == null || brep == null) return;
+      try
+      {
+        Extents3d ext = solid.GeometricExtents;
+        PlantOrthoView.FileDiag("PFSNOTABFACE pipeState id=" + s_isoPipeId
+          + " centerValid=" + s_isoPipeCenterValid
+          + " center=" + this.FormatNotabFaceProbePoint(s_isoPipeCenterWcs)
+          + " radius=" + this.FormatNumber(s_isoPipeRadiusModel)
+          + " axisValid=" + s_isoPipeAxisValid
+          + " axis=" + this.FormatNotabFaceProbeVector(s_isoPipeAxis)
+          + " solid=" + solidId + " class=" + category
+          + " bbox=" + this.FormatNotabFaceProbeExtents(ext));
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABFACE solid=" + solidId + " class=" + category
+          + " bbox=unavailable reason=" + ex.GetType().Name + ": " + ex.Message);
+      }
+
+      int faceCount = 0;
+      foreach (Autodesk.AutoCAD.BoundaryRepresentation.Face ignoredFace in brep.Faces) faceCount++;
+      int faceIndex = 0;
+      foreach (Autodesk.AutoCAD.BoundaryRepresentation.Face face in brep.Faces)
+      {
+        faceIndex++;
+        object trimmed = null;
+        try
+        {
+          trimmed = this.GetNotabFaceProbeSurface(face);
+          object baseSurface = this.GetNotabFaceProbeProperty(trimmed, "BaseSurface");
+          object externalSurface = baseSurface ?? this.GetNotabFaceProbeProperty(trimmed, "Surface");
+          object geometry = externalSurface ?? trimmed;
+          string surfaceType = trimmed == null ? "null" : trimmed.GetType().FullName;
+          string baseType = baseSurface == null ? "none" : baseSurface.GetType().FullName;
+          string externalType = externalSurface == null ? "none" : externalSurface.GetType().FullName;
+          string parameters = this.GetNotabFaceProbeParameters(geometry);
+          bool recognizable = this.IsNotabFaceProbeRecognizable(surfaceType) || this.IsNotabFaceProbeRecognizable(baseType);
+          PlantOrthoView.FileDiag("PFSNOTABFACE solid=" + solidId + " class=" + category
+            + " face=" + faceIndex + "/" + faceCount + " surf=" + surfaceType + " base=" + baseType + " external=" + externalType
+            + " params={" + parameters + "} 판별=" + (recognizable ? "가능" : "불가"));
+        }
+        catch (System.Exception ex)
+        {
+          PlantOrthoView.FileDiag("PFSNOTABFACE solid=" + solidId + " class=" + category
+            + " face=" + faceIndex + "/" + faceCount + " skip=" + ex.GetType().Name + ": " + ex.Message + " 판별=불가");
+        }
+        finally
+        {
+          System.IDisposable disposable = trimmed as System.IDisposable;
+          if (disposable != null)
+          {
+            try { disposable.Dispose(); }
+            catch (System.Exception ex) { PlantOrthoView.FileDiag("PFSNOTABFACE dispose skip face=" + faceIndex + " reason=" + ex.GetType().Name + ": " + ex.Message); }
+          }
+        }
+      }
+    }
+
+    private object GetNotabFaceProbeProperty(object target, string name)
+    {
+      if (target == null || string.IsNullOrWhiteSpace(name)) return null;
+      try
+      {
+        System.Reflection.PropertyInfo property = target.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        return property == null || property.GetIndexParameters().Length != 0 ? null : property.GetValue(target, null);
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABFACE property skip name=" + name + " type=" + target.GetType().FullName + " reason=" + ex.GetType().Name + ": " + ex.Message);
+        return null;
+      }
+    }
+
+    private object GetNotabFaceProbeSurface(object face)
+    {
+      if (face == null) return null;
+      try
+      {
+        System.Reflection.MethodInfo method = face.GetType().GetMethod("GetSurfaceAsTrimmedSurface", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        if (method != null && method.GetParameters().Length == 0)
+          return method.Invoke(face, null);
+        return this.GetNotabFaceProbeProperty(face, "Surface");
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABFACE surface skip type=" + face.GetType().FullName + " reason=" + ex.GetType().Name + ": " + ex.Message);
+        return null;
+      }
+    }
+
+    private string GetNotabFaceProbeParameters(object surface)
+    {
+      if (surface == null) return "none";
+      string[] names = new string[] { "Axis", "AxisOfRotation", "Center", "Origin", "Radius", "MajorRadius", "MinorRadius", "BaseRadius", "TopRadius", "Normal", "ReferenceVector" };
+      System.Collections.Generic.List<string> values = new System.Collections.Generic.List<string>();
+      for (int i = 0; i < names.Length; i++)
+      {
+        object value = this.GetNotabFaceProbeProperty(surface, names[i]);
+        if (value == null) continue;
+        values.Add(names[i] + "=" + this.FormatNotabFaceProbeValue(value));
+      }
+      return values.Count == 0 ? "unavailable" : string.Join(",", values.ToArray());
+    }
+
+    private string FormatNotabFaceProbeValue(object value)
+    {
+      if (value is Point3d) return this.FormatNotabFaceProbePoint((Point3d)value);
+      if (value is Vector3d) return this.FormatNotabFaceProbeVector((Vector3d)value);
+      if (value is double) return this.FormatNumber((double)value);
+      if (value is float) return this.FormatNumber((float)value);
+      return value.ToString();
+    }
+
+    private string FormatNotabFaceProbePoint(Point3d point)
+    {
+      return "(" + this.FormatNumber(point.X) + "," + this.FormatNumber(point.Y) + "," + this.FormatNumber(point.Z) + ")";
+    }
+
+    private string FormatNotabFaceProbeVector(Vector3d vector)
+    {
+      return "(" + this.FormatNumber(vector.X) + "," + this.FormatNumber(vector.Y) + "," + this.FormatNumber(vector.Z) + ")";
+    }
+
+    private string FormatNotabFaceProbeExtents(Extents3d extents)
+    {
+      return this.FormatNotabFaceProbePoint(extents.MinPoint) + "~" + this.FormatNotabFaceProbePoint(extents.MaxPoint);
+    }
+
+    private bool IsNotabFaceProbeRecognizable(string typeName)
+    {
+      if (string.IsNullOrWhiteSpace(typeName)) return false;
+      return typeName.IndexOf("Cylinder", System.StringComparison.OrdinalIgnoreCase) >= 0
+        || typeName.IndexOf("Cone", System.StringComparison.OrdinalIgnoreCase) >= 0
+        || typeName.IndexOf("Torus", System.StringComparison.OrdinalIgnoreCase) >= 0
+        || typeName.IndexOf("Sphere", System.StringComparison.OrdinalIgnoreCase) >= 0
+        || typeName.IndexOf("Plane", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private string ClassifyNotabFlattenSolid(Solid3d solid, out bool unclassified)
