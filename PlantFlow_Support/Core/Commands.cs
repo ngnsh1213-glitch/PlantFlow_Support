@@ -1995,12 +1995,16 @@ namespace PlantFlow_Support
       object oldTileMode = null;
       ViewTableRecord oldView = null;
       bool activeTemp = false;
+      string stage = "start";
       try
       {
+        stage = "temp-create";
         if (!this.CreateNotabFlattenTempDrawing(detailDb, tempPath))
           return false;
 
+        stage = "doc-open";
         tempDoc = Application.DocumentManager.Open(tempPath, false);
+        stage = "doc-activate";
         Application.DocumentManager.MdiActiveDocument = tempDoc;
         activeTemp = object.ReferenceEquals(Application.DocumentManager.MdiActiveDocument, tempDoc);
         if (!activeTemp)
@@ -2009,17 +2013,22 @@ namespace PlantFlow_Support
           return false;
         }
 
+        stage = "tilemode";
         oldTileMode = Application.GetSystemVariable("TILEMODE");
         oldView = tempDoc.Editor.GetCurrentView();
         Application.SetSystemVariable("TILEMODE", 1);
 
+        stage = "viewport-snapshot";
         ViewportSnapshot snapshot;
         if (!this.TryGetNotabFlattenViewportSnapshot(detailDb, viewportId, out snapshot))
           return false;
+        stage = "set-view";
         this.SetNotabFlattenTempView(tempDoc.Editor, snapshot);
 
+        stage = "flatshot";
         System.Collections.Generic.HashSet<ObjectId> baseline = this.SnapshotNotabFlattenModelIds(tempDoc.Database);
         tempDoc.Editor.Command("_.-FLATSHOT", "_Insert", "_ByBlock", "_ByBlock", "_No", "_No", "0,0,0", 1.0, 1.0, 0.0);
+        stage = "post-flatshot";
 
         ObjectId flatBlockId;
         int lineCount;
@@ -2048,7 +2057,7 @@ namespace PlantFlow_Support
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN mech=B 예외: " + ex.GetType().Name + ": " + ex.Message);
+        PlantOrthoView.FileDiag("PFSNOTABFLATTEN mech=B 예외 stage=" + stage + ": " + ex.GetType().Name + ": " + ex.Message);
         return false;
       }
       finally
