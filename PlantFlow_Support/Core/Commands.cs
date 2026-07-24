@@ -204,18 +204,21 @@ namespace PlantFlow_Support
           return;
         }
 
+        // EXPORTLAYOUT이 "지금 열까요?"에서 temp를 문서로 열면 파일에 write 락이 걸린다.
+        // iso 패턴(PFSVBISOEXPORTED)처럼 FileShare.ReadWrite로 공유 읽기 후, File.Copy(락 취약) 대신
+        // SaveAs로 _flat.dwg를 직접 쓴다(temp가 열려 있어도 성공).
         using (Database sideDb = new Database(false, true))
         {
-          sideDb.ReadDwgFile(state.TempPath, System.IO.FileShare.Read, true, null);
+          sideDb.ReadDwgFile(state.TempPath, System.IO.FileShare.ReadWrite, true, null);
           this.CountNotabFlattenExport(sideDb, out line, out circle, out arc, out viewport, out members);
+
+          if (line + circle + arc <= 0 || viewport != 0)
+            return;
+
+          sideDb.SaveAs(state.OutputPath, DwgVersion.Current);
+          exported = true;
+          gate = "GO";
         }
-
-        if (line + circle + arc <= 0 || viewport != 0)
-          return;
-
-        System.IO.File.Copy(state.TempPath, state.OutputPath, true);
-        exported = true;
-        gate = "GO";
       }
       catch (System.Exception ex)
       {
