@@ -1980,6 +1980,7 @@ namespace PlantFlow_Support
     private void FlattenNotabSolidsToPaper(Database db, ObjectId viewportId)
     {
       int solids = 0, edges = 0, points = 0, polylines = 0, projectionFailures = 0, solidErased = 0;
+      int unclassified = 0, blocks = 0;
       try
       {
         using (Transaction tr = db.TransactionManager.StartTransaction())
@@ -1998,6 +1999,10 @@ namespace PlantFlow_Support
 
           ObjectId layerId = this.EnsureIsoDetailLayer(db, tr);
           double chordHeight = 0.5 / System.Math.Max(1e-9, this.GetNotabViewportScale(vp));
+          System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<Polyline>> grouped = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<Polyline>>(System.StringComparer.OrdinalIgnoreCase);
+          System.Collections.Generic.List<string> uboltTags = new System.Collections.Generic.List<string>();
+          bool hasPaperExtents = false;
+          Extents3d paperExtents = new Extents3d();
           System.Collections.Generic.List<ObjectId> solidIds = new System.Collections.Generic.List<ObjectId>();
           foreach (ObjectId id in model)
             if (tr.GetObject(id, OpenMode.ForRead, false) is Solid3d)
@@ -2011,6 +2016,19 @@ namespace PlantFlow_Support
             int solidPolylines = 0;
             try
             {
+              string category = this.ClassifyNotabFlattenSolid(solid, out bool wasUnclassified);
+              if (wasUnclassified)
+              {
+                unclassified++;
+                PlantOrthoView.FileDiag("PFSNOTABBLOCK unclassified solid=" + solidId + " -> SUPPORT");
+              }
+              if (!grouped.ContainsKey(category))
+                grouped[category] = new System.Collections.Generic.List<Polyline>();
+              if (category.StartsWith("UB:", System.StringComparison.OrdinalIgnoreCase))
+              {
+                string uboltTag = category.Substring(3);
+                if (!uboltTags.Contains(uboltTag)) uboltTags.Add(uboltTag);
+              }
               using (Brep brep = new Brep(solid))
               {
                 foreach (Edge edge in brep.Edges)
@@ -2037,8 +2055,10 @@ namespace PlantFlow_Support
                     if (polyline.NumberOfVertices >= 2)
                     {
                       polyline.LayerId = layerId;
-                      layout.AppendEntity(polyline);
-                      tr.AddNewlyCreatedDBObject(polyline, true);
+                      grouped[category].Add(polyline);
+                      Extents3d polyExtents = polyline.GeometricExtents;
+                      if (!hasPaperExtents) { paperExtents = polyExtents; hasPaperExtents = true; }
+                      else paperExtents.AddExtents(polyExtents);
                       polylines++; solidPolylines++;
                     }
                     else polyline.Dispose();
@@ -2058,6 +2078,26 @@ namespace PlantFlow_Support
               PlantOrthoView.FileDiag("PFSNOTABFLATTEN4 solid skip id=" + solidId + " reason=" + ex.GetType().Name + ": " + ex.Message);
             }
           }
+          if (hasPaperExtents)
+          {
+            Point3d blockBase = new Point3d(paperExtents.MinPoint.X, paperExtents.MinPoint.Y, 0.0);
+            foreach (System.Collections.Generic.KeyValuePair<string, System.Collections.Generic.List<Polyline>> group in grouped)
+            {
+              if (group.Value == null || group.Value.Count == 0) continue;
+              try
+              {
+                if (this.AppendNotabFlattenBlock(db, tr, layout, layerId, group.Key, group.Value, blockBase)) blocks++;
+              }
+              catch (System.Exception bx)
+              {
+                PlantOrthoView.FileDiag("PFSNOTABBLOCK group skip category=" + group.Key + " reason=" + bx.GetType().Name + ": " + bx.Message);
+              }
+            }
+            PlantOrthoView.FileDiag("PFSNOTABBLOCK support=" + this.GetNotabFlattenGroupCount(grouped, "SUPPORT")
+              + " pipe=" + this.GetNotabFlattenGroupCount(grouped, "PIPE")
+              + " ubolt=" + string.Join(",", uboltTags.ToArray()) + " unclassified=" + unclassified
+              + " blocks=" + blocks + " base=(" + this.FormatNumber(blockBase.X) + "," + this.FormatNumber(blockBase.Y) + ")");
+          }
           if (solidErased == solids && solids > 0)
           {
             Viewport writableVp = tr.GetObject(viewportId, OpenMode.ForWrite, false) as Viewport;
@@ -2071,6 +2111,97 @@ namespace PlantFlow_Support
       {
         PlantOrthoView.FileDiag("PFSNOTABFLATTEN4 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
+    }
+
+    private string ClassifyNotabFlattenSolid(Solid3d solid, out bool unclassified)
+    {
+      unclassified = false;
+      if (solid == null) { unclassified = true; return "SUPPORT"; }
+      try
+      {
+        Extents3d ext = solid.GeometricExtents;
+        Point3d center = new Point3d((ext.MinPoint.X + ext.MaxPoint.X) / 2.0, (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0, (ext.MinPoint.Z + ext.MaxPoint.Z) / 2.0);
+        double diagonal = (ext.MaxPoint - ext.MinPoint).Length;
+        double uboltTol = System.Math.Max(10.0, diagonal * 0.25);
+        NotabUboltSnapshot nearest = null;
+        double nearestDistance = double.MaxValue;
+        for (int i = 0; i < s_isoUbolts.Count; i++)
+        {
+          NotabUboltSnapshot candidate = s_isoUbolts[i];
+          if (candidate == null || string.IsNullOrWhiteSpace(candidate.Tag)) continue;
+          Point3d p = candidate.WcsCenter;
+          bool inside = p.X >= ext.MinPoint.X - uboltTol && p.X <= ext.MaxPoint.X + uboltTol
+            && p.Y >= ext.MinPoint.Y - uboltTol && p.Y <= ext.MaxPoint.Y + uboltTol
+            && p.Z >= ext.MinPoint.Z - uboltTol && p.Z <= ext.MaxPoint.Z + uboltTol;
+          double distance = (center - p).Length;
+          if ((inside || distance <= uboltTol) && distance < nearestDistance)
+          {
+            nearest = candidate;
+            nearestDistance = distance;
+          }
+        }
+        if (nearest != null) return "UB:" + nearest.Tag.Trim();
+
+        if (s_isoPipeCenterValid && s_isoPipeAxisValid && s_isoPipeAxis.Length > 1e-6 && !double.IsNaN(s_isoPipeRadiusModel))
+        {
+          Vector3d axis = s_isoPipeAxis.GetNormal();
+          Vector3d centerOffset = center - s_isoPipeCenterWcs;
+          double centerAxial = centerOffset.DotProduct(axis);
+          Vector3d radial = centerOffset - axis.MultiplyBy(centerAxial);
+          double axialMin = double.MaxValue, axialMax = double.MinValue;
+          Point3d[] corners = this.GetExtentsCorners(ext);
+          for (int i = 0; i < corners.Length; i++)
+          {
+            double cornerAxial = (corners[i] - s_isoPipeCenterWcs).DotProduct(axis);
+            if (cornerAxial < axialMin) axialMin = cornerAxial;
+            if (cornerAxial > axialMax) axialMax = cornerAxial;
+          }
+          double pipeTol = System.Math.Max(10.0, diagonal * 0.05);
+          if (radial.Length <= s_isoPipeRadiusModel + pipeTol && axialMin <= pipeTol && axialMax >= -pipeTol)
+            return "PIPE";
+        }
+        return "SUPPORT";
+      }
+      catch (System.Exception ex)
+      {
+        unclassified = true;
+        PlantOrthoView.FileDiag("PFSNOTABBLOCK classify 예외: " + ex.GetType().Name + ": " + ex.Message);
+        return "SUPPORT";
+      }
+    }
+
+    private int GetNotabFlattenGroupCount(System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<Polyline>> grouped, string category)
+    {
+      return grouped != null && grouped.ContainsKey(category) && grouped[category] != null ? grouped[category].Count : 0;
+    }
+
+    private bool AppendNotabFlattenBlock(Database db, Transaction tr, BlockTableRecord layout, ObjectId layerId, string category, System.Collections.Generic.List<Polyline> polylines, Point3d blockBase)
+    {
+      if (db == null || tr == null || layout == null || polylines == null || polylines.Count == 0) return false;
+      BlockTable table = tr.GetObject(db.BlockTableId, OpenMode.ForRead, false) as BlockTable;
+      if (table == null) return false;
+      string name = category == "SUPPORT" ? "PFS_FLAT_SUPPORT" : category == "PIPE" ? "PFS_FLAT_PIPE" : "PFS_FLAT_UB_" + category.Substring(3).Replace("-", "_");
+      string uniqueName = name;
+      int suffix = 1;
+      while (table.Has(uniqueName)) uniqueName = name + "_" + suffix++;
+      table.UpgradeOpen();
+      BlockTableRecord definition = new BlockTableRecord();
+      definition.Name = uniqueName;
+      ObjectId definitionId = table.Add(definition);
+      tr.AddNewlyCreatedDBObject(definition, true);
+      Matrix3d shift = Matrix3d.Displacement(Point3d.Origin - blockBase);
+      foreach (Polyline polyline in polylines)
+      {
+        polyline.TransformBy(shift);
+        polyline.LayerId = layerId;
+        definition.AppendEntity(polyline);
+        tr.AddNewlyCreatedDBObject(polyline, true);
+      }
+      BlockReference reference = new BlockReference(blockBase, definitionId);
+      reference.LayerId = layerId;
+      layout.AppendEntity(reference);
+      tr.AddNewlyCreatedDBObject(reference, true);
+      return true;
     }
 
     private string GetNotabPrimarySupportHandle(Database db, System.Collections.Generic.List<ObjectId> ids)
