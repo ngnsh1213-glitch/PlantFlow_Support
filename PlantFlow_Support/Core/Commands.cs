@@ -2122,18 +2122,33 @@ namespace PlantFlow_Support
             tr.Commit();
             return false;
           }
+          // 모델공간 구성을 타입별로 집계해 로그로 남긴다(dirty 사유 특정, cycle123 실측).
+          var census = new System.Collections.Generic.Dictionary<string, int>(System.StringComparer.Ordinal);
+          bool foreignFound = false;
+          string foreignSample = string.Empty;
           foreach (ObjectId id in ms)
           {
             Entity entity = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
-            if (!(entity is Solid3d))
+            string tn = entity == null ? "null" : entity.GetType().Name;
+            census[tn] = census.TryGetValue(tn, out int c) ? c + 1 : 1;
+            // FLATSHOT이 처리하는 3D 형상만 허용(Solid3d/Region/Body). 그 외는 dirty.
+            if (entity is Solid3d || entity is Region || entity is Body)
             {
-              tr.Commit();
-              return false;
+              modelExt.AddExtents(entity.GeometricExtents);
+              hasSolid = true;
             }
-            modelExt.AddExtents(entity.GeometricExtents);
-            hasSolid = true;
+            else if (entity != null)
+            {
+              foreignFound = true;
+              if (foreignSample.Length == 0) foreignSample = tn;
+            }
           }
+          var parts = new System.Collections.Generic.List<string>();
+          foreach (var kv in census) parts.Add(kv.Key + "=" + kv.Value);
+          PlantOrthoView.FileDiag("PFSNOTABFLATTEN2 modelspace census {" + string.Join(", ", parts.ToArray()) + "} has3d=" + hasSolid + " foreign=" + (foreignFound ? foreignSample : "none"));
           tr.Commit();
+          if (foreignFound)
+            return false;
         }
         this.GetNotabFlattenCounts(db, out counts);
         return hasSolid && counts.ModelBlocks == 0;
