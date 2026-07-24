@@ -5,6 +5,7 @@ using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.Runtime;
 using Autodesk.AutoCAD.Windows;
+using Autodesk.AutoCAD.BoundaryRepresentation;
 using Autodesk.ProcessPower.PnP3dObjects;
 
 #nullable disable
@@ -88,14 +89,6 @@ namespace PlantFlow_Support
     private static Document s_isoClosePendingOriginalDoc;
     private static Document s_isoRedrawPendingDoc;
     private static int s_isoRedrawAttempt;
-    private sealed class NotabFlattenExportState
-    {
-      public string SourcePath;
-      public string OutputPath;
-      public string TempPath;
-      public object OriginalFiledia;
-    }
-    private static NotabFlattenExportState s_notabFlattenExportState;
     public static ObjectId ViewportId;
     public static string LayerName;
     public static int ItemNo;
@@ -165,90 +158,6 @@ namespace PlantFlow_Support
       this.RunNotabDetailPipeline(doc, psr.Value.GetObjectIds());
     }
 
-    // 저장된 *_notab.dwg를 활성 문서로 연 뒤 수동 실행하는 지연 평면화 스파이크다.
-    // Session을 붙이면 활성 문서의 Editor.Command 문맥을 벗어나므로 일반 명령으로 유지한다.
-    [CommandMethod("PFSNOTABFLATTEN")]
-    public void NotabFlattenCommand()
-    {
-      Document doc = Application.DocumentManager.MdiActiveDocument;
-      if (doc == null)
-        return;
-
-      PlantOrthoView.FileDiag("========== PFSNOTABFLATTEN3 RUN START ==========");
-      this.RunNotabFlatten(doc);
-    }
-
-    [CommandMethod("PFSNOTABFLATTENFIN", CommandFlags.Session)]
-    public void NotabFlattenFinishedCommand()
-    {
-      NotabFlattenExportState state = s_notabFlattenExportState;
-      s_notabFlattenExportState = null;
-      if (state == null)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 FIN NOGO reason=pending-state-missing");
-        return;
-      }
-
-      bool exported = false;
-      int line = 0;
-      int circle = 0;
-      int arc = 0;
-      int viewport = 0;
-      int members = 0;
-      string gate = "NOGO";
-      try
-      {
-        if (!System.IO.File.Exists(state.TempPath))
-        {
-          PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 FIN temp missing path=" + state.TempPath);
-          return;
-        }
-
-        // EXPORTLAYOUT이 "지금 열까요?"에서 temp를 문서로 열면 파일에 write 락이 걸린다.
-        // iso 패턴(PFSVBISOEXPORTED)처럼 FileShare.ReadWrite로 공유 읽기 후, File.Copy(락 취약) 대신
-        // SaveAs로 _flat.dwg를 직접 쓴다(temp가 열려 있어도 성공).
-        using (Database sideDb = new Database(false, true))
-        {
-          sideDb.ReadDwgFile(state.TempPath, System.IO.FileShare.ReadWrite, true, null);
-          this.CountNotabFlattenExport(sideDb, out line, out circle, out arc, out viewport, out members);
-
-          if (line + circle + arc <= 0 || viewport != 0)
-            return;
-
-          sideDb.SaveAs(state.OutputPath, DwgVersion.Current);
-          exported = true;
-          gate = "GO";
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 FIN 예외: " + ex.GetType().Name + ": " + ex.Message + " temp=" + state.TempPath);
-      }
-      finally
-      {
-        try
-        {
-          if (state.OriginalFiledia != null)
-            Application.SetSystemVariable("FILEDIA", state.OriginalFiledia);
-        }
-        catch (System.Exception ex)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 FILEDIA restore 예외: " + ex.GetType().Name + ": " + ex.Message);
-        }
-
-        try
-        {
-          if (System.IO.File.Exists(state.TempPath))
-            System.IO.File.Delete(state.TempPath);
-        }
-        catch (System.Exception ex)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 temp cleanup 예외: " + ex.GetType().Name + ": " + ex.Message + " temp=" + state.TempPath);
-        }
-
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 FIN exported=" + exported + " lines=" + line + " circles=" + circle + " arcs=" + arc + " vp=" + viewport + " members=" + members + " gate=" + gate + " output=" + state.OutputPath);
-      }
-    }
 
     [CommandMethod("PFSNOTABBATCH", CommandFlags.Session)]
     public void NotabDetailBatchCommand()
@@ -2051,6 +1960,10 @@ namespace PlantFlow_Support
         if (!skipViewport && viewportId != ObjectId.Null)
           this.AppendNotabPaperDimensions(detailDb, viewportId, supportExt);
 
+        if (!skipViewport && viewportId != ObjectId.Null
+          && this.GetEnvDouble("PFS_NOTAB_FLATTEN", 0.0, 0.0, 1.0) >= 0.5)
+          this.FlattenNotabSolidsToPaper(detailDb, viewportId);
+
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saveAs 직전 path=" + savedPath);
         detailDb.SaveAs(savedPath, DwgVersion.Current);
         PlantOrthoView.FileDiag("PFSNOTABDETAIL saved path=" + savedPath + " tag=" + tag);
@@ -2064,227 +1977,99 @@ namespace PlantFlow_Support
       }
     }
 
-    // EXPORTLAYOUT은 지연 명령이므로 완료 검증은 PFSNOTABFLATTENFIN에서 수행한다.
-    private void RunNotabFlatten(Document doc)
+    private void FlattenNotabSolidsToPaper(Database db, ObjectId viewportId)
     {
-      if (doc == null)
-        return;
-
-      Database db = doc.Database;
-      NotabFlattenCounts before = new NotabFlattenCounts();
-      try
-      {
-        Extents3d modelExt;
-        if (!this.TryValidateNotabFlattenInput(db, out modelExt, out before))
-        {
-          PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 NOGO reason=modelspace-dirty");
-          return;
-        }
-
-        ObjectId viewportId;
-        if (!this.TryFindNotabFlattenViewport(db, out viewportId) || viewportId == ObjectId.Null)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 NOGO reason=viewport-missing");
-          return;
-        }
-
-        if (s_notabFlattenExportState != null)
-        {
-          PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 NOGO reason=already-pending");
-          return;
-        }
-
-        string sourcePath = db.Filename;
-        if (string.IsNullOrWhiteSpace(sourcePath))
-          throw new System.InvalidOperationException("활성 상세도 파일 경로 없음");
-        string directory = System.IO.Path.GetDirectoryName(sourcePath);
-        string baseName = System.IO.Path.GetFileNameWithoutExtension(sourcePath);
-        if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(baseName))
-          throw new System.InvalidOperationException("활성 상세도 출력 경로 계산 실패");
-
-        string tempPath = System.IO.Path.Combine(directory, baseName + "_flat_tmp_" + System.Guid.NewGuid().ToString("N") + ".dwg");
-        string outputPath = System.IO.Path.Combine(directory, baseName + "_flat.dwg");
-        object originalFiledia = Application.GetSystemVariable("FILEDIA");
-        s_notabFlattenExportState = new NotabFlattenExportState
-        {
-          SourcePath = sourcePath,
-          OutputPath = outputPath,
-          TempPath = tempPath,
-          OriginalFiledia = originalFiledia
-        };
-        string command = "_.FILEDIA\n0\n_.EXPORTLAYOUT\n" + tempPath + "\nPFSNOTABFLATTENFIN\n";
-        doc.SendStringToExecute(command, true, false, false);
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 stage=queue temp=" + tempPath + " output=" + outputPath + " vp=" + before.Viewports + " dims=" + before.Dimensions + " mleader=" + before.MLeaders + " table=" + before.Tables);
-      }
-      catch (System.Exception ex)
-      {
-        s_notabFlattenExportState = null;
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN3 queue 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-    }
-
-    private sealed class NotabFlattenCounts
-    {
-      public int Dimensions;
-      public int MLeaders;
-      public int Tables;
-      public int Viewports;
-      public int ModelBlocks;
-    }
-
-    private bool TryValidateNotabFlattenInput(Database db, out Extents3d modelExt, out NotabFlattenCounts counts)
-    {
-      modelExt = new Extents3d();
-      counts = new NotabFlattenCounts();
-      bool hasSolid = false;
+      int solids = 0, edges = 0, points = 0, polylines = 0, projectionFailures = 0, solidErased = 0;
       try
       {
         using (Transaction tr = db.TransactionManager.StartTransaction())
         {
-          ObjectId msId = this.GetModelSpaceId(db, tr);
-          BlockTableRecord ms = msId == ObjectId.Null ? null : tr.GetObject(msId, OpenMode.ForRead, false) as BlockTableRecord;
-          if (ms == null)
+          Viewport vp = tr.GetObject(viewportId, OpenMode.ForRead, false) as Viewport;
+          ObjectId modelId = this.GetModelSpaceId(db, tr);
+          ObjectId layoutId = this.GetNotabDetailLayoutBlockTableRecordId(db, tr);
+          BlockTableRecord model = modelId == ObjectId.Null ? null : tr.GetObject(modelId, OpenMode.ForRead, false) as BlockTableRecord;
+          BlockTableRecord layout = layoutId == ObjectId.Null ? null : tr.GetObject(layoutId, OpenMode.ForWrite, false) as BlockTableRecord;
+          if (vp == null || model == null || layout == null)
           {
+            PlantOrthoView.FileDiag("PFSNOTABFLATTEN4 NOGO viewport/model/layout missing");
             tr.Commit();
-            return false;
+            return;
           }
-          // 모델공간 구성을 타입별로 집계해 로그로 남긴다(dirty 사유 특정, cycle123 실측).
-          var census = new System.Collections.Generic.Dictionary<string, int>(System.StringComparer.Ordinal);
-          bool foreignFound = false;
-          string foreignSample = string.Empty;
-          foreach (ObjectId id in ms)
+
+          ObjectId layerId = this.EnsureIsoDetailLayer(db, tr);
+          double chordHeight = 0.5 / System.Math.Max(1e-9, this.GetNotabViewportScale(vp));
+          System.Collections.Generic.List<ObjectId> solidIds = new System.Collections.Generic.List<ObjectId>();
+          foreach (ObjectId id in model)
+            if (tr.GetObject(id, OpenMode.ForRead, false) is Solid3d)
+              solidIds.Add(id);
+
+          foreach (ObjectId solidId in solidIds)
           {
-            Entity entity = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
-            string tn = entity == null ? "null" : entity.GetType().Name;
-            census[tn] = census.TryGetValue(tn, out int c) ? c + 1 : 1;
-            // FLATSHOT이 처리하는 3D 형상만 허용(Solid3d/Region/Body). 그 외는 dirty.
-            if (entity is Solid3d || entity is Region || entity is Body)
+            Solid3d solid = tr.GetObject(solidId, OpenMode.ForRead, false) as Solid3d;
+            if (solid == null) continue;
+            solids++;
+            int solidPolylines = 0;
+            try
             {
-              modelExt.AddExtents(entity.GeometricExtents);
-              hasSolid = true;
+              using (Brep brep = new Brep(solid))
+              {
+                foreach (Edge edge in brep.Edges)
+                {
+                  edges++;
+                  using (Curve3d curve = edge.Curve)
+                  {
+                    using (Interval interval = curve.GetInterval())
+                    {
+                    PointOnCurve3d[] samples = curve.GetSamplePoints(interval.LowerBound, interval.UpperBound, chordHeight);
+                    if (samples == null || samples.Length == 0) continue;
+                    points += samples.Length;
+                    Polyline polyline = new Polyline();
+                    int usedSamples = System.Math.Min(256, samples.Length);
+                    for (int i = 0; i < usedSamples; i++)
+                    {
+                      int sampleIndex = usedSamples == 1 ? 0 : (int)System.Math.Round((double)i * (samples.Length - 1) / (usedSamples - 1));
+                      Point3d paper;
+                      if (!this.TryNotabProjectWcsToPaper(vp, samples[sampleIndex].Point, out paper)) { projectionFailures++; continue; }
+                      int vertex = polyline.NumberOfVertices;
+                      if (vertex > 0 && polyline.GetPoint2dAt(vertex - 1).GetDistanceTo(new Point2d(paper.X, paper.Y)) < 1e-6) continue;
+                      polyline.AddVertexAt(vertex, new Point2d(paper.X, paper.Y), 0.0, 0.0, 0.0);
+                    }
+                    if (polyline.NumberOfVertices >= 2)
+                    {
+                      polyline.LayerId = layerId;
+                      layout.AppendEntity(polyline);
+                      tr.AddNewlyCreatedDBObject(polyline, true);
+                      polylines++; solidPolylines++;
+                    }
+                    else polyline.Dispose();
+                    }
+                  }
+                }
+              }
+              if (solidPolylines > 0)
+              {
+                solid.UpgradeOpen();
+                solid.Erase();
+                solidErased++;
+              }
             }
-            else if (entity != null)
+            catch (System.Exception ex)
             {
-              foreignFound = true;
-              if (foreignSample.Length == 0) foreignSample = tn;
+              PlantOrthoView.FileDiag("PFSNOTABFLATTEN4 solid skip id=" + solidId + " reason=" + ex.GetType().Name + ": " + ex.Message);
             }
           }
-          var parts = new System.Collections.Generic.List<string>();
-          foreach (var kv in census) parts.Add(kv.Key + "=" + kv.Value);
-          PlantOrthoView.FileDiag("PFSNOTABFLATTEN2 modelspace census {" + string.Join(", ", parts.ToArray()) + "} has3d=" + hasSolid + " foreign=" + (foreignFound ? foreignSample : "none"));
-          tr.Commit();
-          if (foreignFound)
-            return false;
-        }
-        this.GetNotabFlattenCounts(db, out counts);
-        return hasSolid && counts.ModelBlocks == 0;
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN2 input 검사 예외: " + ex.GetType().Name + ": " + ex.Message);
-        return false;
-      }
-    }
-
-    private bool TryFindNotabFlattenViewport(Database db, out ObjectId viewportId)
-    {
-      viewportId = ObjectId.Null;
-      try
-      {
-        using (Transaction tr = db.TransactionManager.StartTransaction())
-        {
-          ObjectId layoutId = this.GetNotabDetailLayoutBlockTableRecordId(db, tr);
-          BlockTableRecord layout = layoutId == ObjectId.Null ? null : tr.GetObject(layoutId, OpenMode.ForRead, false) as BlockTableRecord;
-          // 레이아웃엔 항상 오버올(paperspace) 뷰포트(Number=1)가 있고, 우리 상세 뷰포트는 그 외(Number!=1).
-          // 상세도가 활성 문서로 열려 regen되므로 Number가 신뢰 가능하다(cycle123).
-          int detailCount = 0;
-          var nums = new System.Collections.Generic.List<int>();
-          if (layout != null)
-            foreach (ObjectId id in layout)
-            {
-              Viewport vp = tr.GetObject(id, OpenMode.ForRead, false) as Viewport;
-              if (vp == null) continue;
-              nums.Add(vp.Number);
-              if (vp.Number == 1) continue; // 오버올 paperspace 뷰포트 제외
-              viewportId = id;
-              detailCount++;
-            }
-          PlantOrthoView.FileDiag("PFSNOTABFLATTEN2 viewport scan numbers=[" + string.Join(",", nums.ConvertAll(n => n.ToString()).ToArray()) + "] detailCount=" + detailCount);
-          tr.Commit();
-          if (detailCount != 1)
+          if (solidErased == solids && solids > 0)
           {
-            viewportId = ObjectId.Null;
-            return false;
+            Viewport writableVp = tr.GetObject(viewportId, OpenMode.ForWrite, false) as Viewport;
+            if (writableVp != null) writableVp.Erase();
           }
-          return viewportId != ObjectId.Null;
-        }
-      }
-      catch (System.Exception ex)
-      {
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN2 viewport scan 예외: " + ex.GetType().Name + ": " + ex.Message);
-        return false;
-      }
-    }
-
-    private void GetNotabFlattenCounts(Database db, out NotabFlattenCounts counts)
-    {
-      counts = new NotabFlattenCounts();
-      try
-      {
-        using (Transaction tr = db.TransactionManager.StartTransaction())
-        {
-          ObjectId msId = this.GetModelSpaceId(db, tr);
-          BlockTableRecord ms = msId == ObjectId.Null ? null : tr.GetObject(msId, OpenMode.ForRead, false) as BlockTableRecord;
-          if (ms != null)
-            foreach (ObjectId id in ms)
-              if (tr.GetObject(id, OpenMode.ForRead, false) is BlockReference)
-                counts.ModelBlocks++;
-
-          ObjectId layoutId = this.GetNotabDetailLayoutBlockTableRecordId(db, tr);
-          BlockTableRecord layout = layoutId == ObjectId.Null ? null : tr.GetObject(layoutId, OpenMode.ForRead, false) as BlockTableRecord;
-          if (layout != null)
-            foreach (ObjectId id in layout)
-            {
-              DBObject obj = tr.GetObject(id, OpenMode.ForRead, false);
-              if (obj is Dimension) counts.Dimensions++;
-              else if (obj is MLeader) counts.MLeaders++;
-              else if (obj is Table) counts.Tables++;
-              else if (obj is Viewport) counts.Viewports++;
-            }
           tr.Commit();
+          PlantOrthoView.FileDiag("PFSNOTABFLATTEN4 solids=" + solids + " edges=" + edges + " pts=" + points + " polylines=" + polylines + " projFail=" + projectionFailures + " solidErased=" + solidErased + " vpErased=" + (solidErased == solids && solids > 0));
         }
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN2 count 예외: " + ex.GetType().Name + ": " + ex.Message);
-      }
-    }
-
-    private void CountNotabFlattenExport(Database db, out int line, out int circle, out int arc, out int viewport, out int members)
-    {
-      line = 0;
-      circle = 0;
-      arc = 0;
-      viewport = 0;
-      members = 0;
-      using (Transaction tr = db.TransactionManager.StartTransaction())
-      {
-        ObjectId modelSpaceId = this.GetModelSpaceId(db, tr);
-        BlockTableRecord modelSpace = modelSpaceId == ObjectId.Null ? null : tr.GetObject(modelSpaceId, OpenMode.ForRead, false) as BlockTableRecord;
-        if (modelSpace == null)
-          throw new System.InvalidOperationException("EXPORTLAYOUT 결과 ModelSpace 없음");
-        foreach (ObjectId id in modelSpace)
-        {
-          Entity entity = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
-          if (entity == null)
-            continue;
-          members++;
-          if (entity is Line) line++;
-          else if (entity is Circle) circle++;
-          else if (entity is Arc) arc++;
-          else if (entity is Viewport) viewport++;
-        }
-        tr.Commit();
+        PlantOrthoView.FileDiag("PFSNOTABFLATTEN4 예외: " + ex.GetType().Name + ": " + ex.Message);
       }
     }
 
