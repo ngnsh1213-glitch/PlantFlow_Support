@@ -5482,6 +5482,11 @@ namespace PlantFlow_Support
       public bool HasPipeCalloutPosition;
       public double MemberBalloonDx;
       public double MemberBalloonDy;
+      // 기존 member-end 후보 보정과 분리한 작도 직전 최종 이동. F2는 전체, P1은 밸룬만 이동한다.
+      public double F2WholeShiftDx;
+      public double F2WholeShiftDy;
+      public double P1BalloonDx;
+      public double P1BalloonDy;
       // 세로재 리더 축관통 연장. RC5(두꺼운 기둥)=20이 확정값이나 얇은 부재는 화살촉이 허공에 뜬다(cycle118 RS3/4).
       public bool HasVLeaderExt;
       public double VLeaderExt;
@@ -5530,7 +5535,7 @@ namespace PlantFlow_Support
       if (string.Equals(standardName, "GD1", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "fheight", PipeCalloutSide = "top", HorizontalSide = "bottom" };
       if (string.Equals(standardName, "RC1", System.StringComparison.OrdinalIgnoreCase))
-        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "bottom", MemberAnchorSide = "vertical", HasVLeaderExt = true, VLeaderExt = 0.0 };
+        return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "bottom", MemberAnchorSide = "vertical", HasVLeaderExt = true, VLeaderExt = 0.0, F2WholeShiftDx = 14.0, F2WholeShiftDy = 0.0, P1BalloonDx = -14.0, P1BalloonDy = 0.0 };
       if (string.Equals(standardName, "RC2", System.StringComparison.OrdinalIgnoreCase))
         return new NotabTypeConfig { VerticalMode = "param", VerticalParamKey = "F2", PipeCalloutSide = "top", HorizontalSide = "auto", MemberAnchorSide = "vertical", HasVLeaderExt = true, VLeaderExt = 0.0 };
       if (string.Equals(standardName, "RC3", System.StringComparison.OrdinalIgnoreCase))
@@ -5683,6 +5688,59 @@ namespace PlantFlow_Support
         PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-offset parse 예외 std=" + standardName + ": " + ex.GetType().Name + ": " + ex.Message);
       }
       return false;
+    }
+
+    private bool TryGetNotabBalloonNudge(string standardName, string envPrefix, double configDx, double configDy, out double dx, out double dy, out string source)
+    {
+      dx = 0.0;
+      dy = 0.0;
+      source = "none";
+      try
+      {
+        string key = envPrefix + "_" + (standardName ?? string.Empty).Trim().ToUpperInvariant();
+        string raw = System.Environment.GetEnvironmentVariable(key);
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+          string[] parts = raw.Split(',');
+          double parsedDx;
+          double parsedDy = 0.0;
+          if ((parts.Length == 1 || parts.Length == 2)
+            && double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedDx)
+            && (parts.Length == 1 || double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedDy)))
+          {
+            dx = parsedDx;
+            dy = parsedDy;
+            source = "env";
+            return System.Math.Abs(dx) > 1e-9 || System.Math.Abs(dy) > 1e-9;
+          }
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-nudge env invalid key=" + key + " raw=" + raw);
+        }
+
+        dx = configDx;
+        dy = configDy;
+        if (System.Math.Abs(dx) > 1e-9 || System.Math.Abs(dy) > 1e-9)
+        {
+          source = "config";
+          return true;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-nudge parse 예외 key=" + envPrefix + " std=" + standardName + ": " + ex.GetType().Name + ": " + ex.Message);
+      }
+      return false;
+    }
+
+    private bool TryGetNotabF2WholeShift(string standardName, out double dx, out double dy, out string source)
+    {
+      NotabTypeConfig config = this.GetNotabTypeConfig(standardName);
+      return this.TryGetNotabBalloonNudge(standardName, "PFS_NOTAB_F2_SHIFT", config.F2WholeShiftDx, config.F2WholeShiftDy, out dx, out dy, out source);
+    }
+
+    private bool TryGetNotabP1BalloonShift(string standardName, out double dx, out double dy, out string source)
+    {
+      NotabTypeConfig config = this.GetNotabTypeConfig(standardName);
+      return this.TryGetNotabBalloonNudge(standardName, "PFS_NOTAB_P1_BALLOON_POS", config.P1BalloonDx, config.P1BalloonDy, out dx, out dy, out source);
     }
 
     private string GetNotabPipeCalloutSide(string supportType)
@@ -7609,6 +7667,50 @@ namespace PlantFlow_Support
         Vector3d toCenter = ballCenter - anchor;
         if (toCenter.Length < 1e-9) toCenter = Vector3d.XAxis;
         Point3d touch = ballCenter - toCenter.GetNormal() * radius;
+
+        // 기존 후보 탐색/오프셋과 독립된 작도 직전 미세조정이다. 사용자 확정값은 재검증 실패에도 되돌리지 않는다.
+        double nudgeDx = 0.0;
+        double nudgeDy = 0.0;
+        string nudgeSource = "none";
+        string nudgeKind = string.Empty;
+        if (string.Equals(item, "P1", System.StringComparison.OrdinalIgnoreCase)
+          && this.TryGetNotabP1BalloonShift(standardName, out nudgeDx, out nudgeDy, out nudgeSource))
+        {
+          Vector3d shift = new Vector3d(nudgeDx, nudgeDy, 0.0);
+          ballCenter += shift;
+          ballBox = new Extents3d(ballBox.MinPoint + shift, ballBox.MaxPoint + shift);
+          Vector3d shiftedToCenter = ballCenter - anchor;
+          touch = shiftedToCenter.Length < 1e-9
+            ? ballCenter - Vector3d.XAxis * radius
+            : ballCenter - shiftedToCenter.GetNormal() * radius;
+          nudgeKind = "P1balloon";
+        }
+        else if (string.Equals(item, "F2", System.StringComparison.OrdinalIgnoreCase)
+          && this.TryGetNotabF2WholeShift(standardName, out nudgeDx, out nudgeDy, out nudgeSource))
+        {
+          Vector3d shift = new Vector3d(nudgeDx, nudgeDy, 0.0);
+          anchor += shift;
+          ballCenter += shift;
+          ballBox = new Extents3d(ballBox.MinPoint + shift, ballBox.MaxPoint + shift);
+          touch += shift;
+          nudgeKind = "F2whole";
+        }
+
+        if (!string.IsNullOrEmpty(nudgeKind))
+        {
+          string revalidate = "ok";
+          if (!placer.WithinBounds(ballBox))
+            revalidate = "warn:outside-bounds";
+          else
+          {
+            string nudgeReject;
+            if (!placer.IsBalloonFree(ballBox, anchor, touch, out nudgeReject, false, false, isVerticalMember))
+              revalidate = "warn:" + nudgeReject;
+          }
+          PlantOrthoView.FileDiag("PFSNOTABDETAIL balloon-nudge key=" + item + " kind=" + nudgeKind
+            + " shift=(" + this.FormatSignedNumber(nudgeDx) + "," + this.FormatSignedNumber(nudgeDy) + ") src=" + nudgeSource
+            + " anchor=" + this.FormatPoint(anchor) + " box=" + this.FormatExtents(ballBox) + " revalidate=" + revalidate);
+        }
 
         try
         {
