@@ -8,20 +8,34 @@
 ### 메커니즘 탐색 궤적 (실측으로 하나씩 소거)
 - **FLATSHOT (cycle122~123)**: 인라인/지연명령 모두 `eInvalidInput`. 근인=**FLATSHOT은 설정 대화상자 명령**(`-FLATSHOT`도 대화상자), `editor.Command`로 자동화 불가. **포럼 공식 확인**(.NET 직접호출 불가). ★사망.
 - **EXPORTLAYOUT (cycle124~125)**: 지연 명령 체인(PFSNOTABFLATTEN→FIN, FILEDIA0)으로 `_flat.dwg` 생성 성공·뷰포트 제거·주석 보존. **단 서포트가 3D 솔리드 그대로**(EXPORTLAYOUT은 뷰포트 ShadePlot 따름, wireframe=3D 통합). "open now?" 대화상자·파일잠금(FileShare.ReadWrite로 해결)도 겪음. ShadePlot=Wireframe 시도는 자문상 저확률. ★2D 아님으로 소거.
-- **★explode+투영 (cycle126, 현재)**: 포럼 통찰 — 사용자 요구=**2D Wireframe(전 에지, 은선제거 불요)**이라 HLR API·FLATSHOT 다 불요. **Solid3d 에지를 Brep으로 뽑아 NotabProjectWcsToPaper로 투영→페이퍼 2D Polyline, 솔리드·뷰포트 Erase.** 순수 API=명령·대화상자·파일잠금 0, 헤드리스 side-DB 인라인. 정답 유력.
+- **★explode+투영 (cycle126)**: 포럼 통찰 — 사용자 요구=**2D Wireframe(전 에지, 은선제거 불요)**이라 HLR API·FLATSHOT 다 불요. **Solid3d 에지를 Brep으로 뽑아 NotabProjectWcsToPaper로 투영→페이퍼 2D Polyline, 솔리드·뷰포트 Erase.** 순수 API=명령·대화상자·파일잠금 0, 헤드리스 side-DB 인라인.
 
-### 대기 중 액션
-- **cycle126 HANDOFF 발행됨**(`.plans/HANDOFF.md`, status ready). Codex 집도 대기(사용자가 `1` 입력).
-- 집도 후 검증: PFS_NOTAB_FLATTEN=1로 RC1 추출 → 3DORBIT로 서포트가 2D Polyline(3DSOLID·뷰포트 부재)인지, 주석 보존인지.
+### ★★ cycle126 flatten **라이브 PASS 확정** (2026-07-24, 실측)
+- Codex 집도(`6338313`), Claude 빌드 재확인 오류 0/경고 14. `FlattenNotabSolidsToPaper`([Commands.cs:1980](PlantFlow_Support/Core/Commands.cs#L1980)).
+- **라이브 로그 실측**: `PFSNOTABFLATTEN4 solids=4 edges=194 pts=570 polylines=168 projFail=0 solidErased=4 vpErased=True`. 4솔리드 전부 2D 투영, 투영실패 0, 뷰포트 삭제.
+- **속성 실측**(승환님 스크린샷): 객체=Polyline, Layer=PFS_ISO_DETAIL, **Elevation 0** → 순수 2D 확정. 주석·치수·밸룬·콜아웃 전량 보존.
+- **결론**: 프리즘형 각재(F1 베이스플레이트·F2 세로재)는 위상 에지=외곽선이라 **깨끗하게 평면화**. 긴 트랙(FLATSHOT→EXPORTLAYOUT→explode) 목표 도달.
+- **안전장치**: 폴리라인 생성 성공 솔리드만 Erase, 전 솔리드 성공 시에만 뷰포트 Erase(형상 유실 방지). 회귀 경로(env 미설정=기존 뷰포트) 유지.
+
+### 잔여 결함 — 유볼트 조각남 (새 서브트랙)
+- **증상**: 유볼트(UB-002/003) 투영이 조각나 보임. solids=4 중 2개가 유볼트, 이 둘이 깨짐.
+- **근인 실측 확정**: `Brep.Edges`는 **위상 에지만** 제공 → 원통형 봉의 **실루엣(외곽선)은 위상 에지가 아님** → 끝단 원·이음새만 남아 조각. HLR 버린 대가로 예견된 한계. (프리즘형은 무영향 = 각재 깨끗한 이유.)
+- **블럭 처리 기각**: 블럭=폴리라인 묶는 그릇일 뿐, 렌더되는 선 불변 → 겉모습 해결 못 함(승환님 가설 반증).
+- **해법 3안 / 권고=1안**: ①표준 2D 유볼트 심볼(유볼트는 flatten 제외, 주석 엔진이 이미 UB 위치·크기 보유 → 규격집 심볼 작도. HANTEC 정답지 부합) ②실루엣 에지 계산(사실상 HLR 재구현, 고난도) ③폴리라인 Join(실루엣 누락 못 채움).
+
+### 사용자 추가 요구 — 객체 블럭화 (조각남과 별개, 편의 기능)
+- 승환님 확정(2026-07-24): 서브트랙 진행 시 평면화 객체를 **개별 블럭으로 묶기** — **서포트 / 배관 / 유볼트** 각각 별도 블럭.
+- 목적=선택·관리 편의(조각남 시각 해결 아님, 그건 유볼트 심볼화가 담당). 유볼트 블럭은 심볼화 후 심볼을 블럭으로.
+- 구현 방향(예정): 투영 폴리라인을 솔리드 출처 분류(서포트/배관/유볼트)해 BlockTableRecord 3개로 그룹핑 후 BlockReference 삽입.
 
 ### 다음 결정 분기
-- **PASS(2D Polyline)**: 평면화 메인뷰 확정 → 멀티뷰(Top/ISO) 확장 → UI 토글 → 레이아웃 캘리브레이션.
-- **FAIL**: Brep 부실이면 explode(Region→Curve) 폴백 → 그래도면 FLATTEN 익스프레스 툴.
+- **유볼트 서브트랙**: 1안(표준 심볼) + 블럭화(서포트/배관/유볼트) 묶어서 `3`으로 계획→자문→핸드오프 정식화 대기. [pfs-hantec-support-standard-catalog] 참조.
+- **평면화 본선**: 메인뷰 확정됨 → 멀티뷰(Top/ISO) 확장 → UI 토글 → 레이아웃 캘리브레이션(유볼트와 병렬 가능).
 
 ### 관련 파일
 - 계획서: `.plans/plan_notab_flatten_explode_20260724.md`(현행 cycle126) / `_exportlayout_`(124) / `_shadeplot_`(125) / `_deferred_`(123) / `_spike_`(122).
 - 핸드오프: `.plans/HANDOFF.md`(cycle126). 백업: git tag `notab-viewport-v1`.
-- 코드: RunNotabDetailPipeline(Commands.cs ~1985), NotabProjectWcsToPaper(3635)/Try(3602). cycle122~125 flatten 코드는 cycle126에서 제거 예정.
+- 코드: `FlattenNotabSolidsToPaper`(Commands.cs 1980), TryNotabProjectWcsToPaper. cycle122~125 flatten 코드(PFSNOTABFLATTEN/FIN·EXPORTLAYOUT 체인)는 cycle126에서 **제거 완료**. 커밋 `6338313`(feat)·`22d4551`(report).
 - 포럼 근거: FLATSHOT .NET 불가(forums.autodesk.com/t5/net/how-to-call-flatshot-entirely-from-net-code), Managed HLR API(GraphicsInterface, 2019+).
 - TODO.md "멀티뷰+평면화 트랙" 섹션.
 
