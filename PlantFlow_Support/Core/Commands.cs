@@ -1998,6 +1998,7 @@ namespace PlantFlow_Support
       object oldTileMode = null;
       ViewTableRecord oldView = null;
       NotabFlattenCounts before = new NotabFlattenCounts();
+      string stage = "start";
       try
       {
         Extents3d modelExt;
@@ -2020,13 +2021,18 @@ namespace PlantFlow_Support
           return;
         }
 
+        stage = "tilemode";
         oldTileMode = Application.GetSystemVariable("TILEMODE");
         oldView = editor.GetCurrentView();
         Application.SetSystemVariable("TILEMODE", 1);
+        stage = "set-view";
         this.SetNotabFlattenTempView(editor, snapshot);
 
+        stage = "baseline";
         System.Collections.Generic.HashSet<ObjectId> baseline = this.SnapshotNotabFlattenModelIds(db);
+        stage = "flatshot";
         editor.Command("_.-FLATSHOT", "_Insert", "_ByBlock", "_ByBlock", "_No", "_No", "0,0,0", 1.0, 1.0, 0.0);
+        stage = "post-flatshot";
 
         int lineCount;
         int newBlockCount;
@@ -2038,6 +2044,7 @@ namespace PlantFlow_Support
         }
         flatCreated = true;
 
+        stage = "project";
         Extents3d flatPaperExt = this.NotabFlattenDcsToPaperExtents(flatDcsExt, snapshot);
         Extents3d projectedExt;
         if (!this.TryProjectNotabFlattenExtents(db, viewportId, modelExt, out projectedExt))
@@ -2053,9 +2060,11 @@ namespace PlantFlow_Support
         if (!gateGo)
           return;
 
+        stage = "clone-paper";
         if (!this.TryCloneNotabFlattenBlockToPaper(db, flatBlockId, viewportId, snapshot))
           return;
         flatCreated = false;
+        stage = "qsave";
         NotabFlattenCounts after;
         this.GetNotabFlattenCounts(db, out after);
         PlantOrthoView.FileDiag("PFSNOTABFLATTEN2 dims=" + before.Dimensions + "/" + after.Dimensions + " mleader=" + before.MLeaders + "/" + after.MLeaders + " table=" + before.Tables + "/" + after.Tables + " vp=" + before.Viewports + "/" + after.Viewports + " flatObj=1/" + after.ModelBlocks);
@@ -2063,7 +2072,7 @@ namespace PlantFlow_Support
       }
       catch (System.Exception ex)
       {
-        PlantOrthoView.FileDiag("PFSNOTABFLATTEN2 예외: " + ex.GetType().Name + ": " + ex.Message);
+        PlantOrthoView.FileDiag("PFSNOTABFLATTEN2 예외 stage=" + stage + ": " + ex.GetType().Name + ": " + ex.Message);
       }
       finally
       {
