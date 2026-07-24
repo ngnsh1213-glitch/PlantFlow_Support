@@ -1,5 +1,33 @@
 ﻿# SESSION — 현재 작업 상태
 
+## ★★★ 진행 중 — 무탭 2D 평면화 트랙 (cycle 122~126, 2026-07-24)
+
+**목표**: 무탭 상세도가 현재 뷰포트(3D 솔리드 표시)째 저장됨 → 뷰포트 삭제하고 **2D 그림 객체**만 남기기. 이후 멀티뷰(메인+탑+등각)로 확장.
+**사용자 확정 4건**: ①Main·멀티 모두 평면화 ②멀티=메인+탑+등각 ③치수·주석은 메인에만 ④레이아웃은 나중 캘리브레이션. **백업 태그 `notab-viewport-v1`**(현행 뷰포트 버전 고정).
+
+### 메커니즘 탐색 궤적 (실측으로 하나씩 소거)
+- **FLATSHOT (cycle122~123)**: 인라인/지연명령 모두 `eInvalidInput`. 근인=**FLATSHOT은 설정 대화상자 명령**(`-FLATSHOT`도 대화상자), `editor.Command`로 자동화 불가. **포럼 공식 확인**(.NET 직접호출 불가). ★사망.
+- **EXPORTLAYOUT (cycle124~125)**: 지연 명령 체인(PFSNOTABFLATTEN→FIN, FILEDIA0)으로 `_flat.dwg` 생성 성공·뷰포트 제거·주석 보존. **단 서포트가 3D 솔리드 그대로**(EXPORTLAYOUT은 뷰포트 ShadePlot 따름, wireframe=3D 통합). "open now?" 대화상자·파일잠금(FileShare.ReadWrite로 해결)도 겪음. ShadePlot=Wireframe 시도는 자문상 저확률. ★2D 아님으로 소거.
+- **★explode+투영 (cycle126, 현재)**: 포럼 통찰 — 사용자 요구=**2D Wireframe(전 에지, 은선제거 불요)**이라 HLR API·FLATSHOT 다 불요. **Solid3d 에지를 Brep으로 뽑아 NotabProjectWcsToPaper로 투영→페이퍼 2D Polyline, 솔리드·뷰포트 Erase.** 순수 API=명령·대화상자·파일잠금 0, 헤드리스 side-DB 인라인. 정답 유력.
+
+### 대기 중 액션
+- **cycle126 HANDOFF 발행됨**(`.plans/HANDOFF.md`, status ready). Codex 집도 대기(사용자가 `1` 입력).
+- 집도 후 검증: PFS_NOTAB_FLATTEN=1로 RC1 추출 → 3DORBIT로 서포트가 2D Polyline(3DSOLID·뷰포트 부재)인지, 주석 보존인지.
+
+### 다음 결정 분기
+- **PASS(2D Polyline)**: 평면화 메인뷰 확정 → 멀티뷰(Top/ISO) 확장 → UI 토글 → 레이아웃 캘리브레이션.
+- **FAIL**: Brep 부실이면 explode(Region→Curve) 폴백 → 그래도면 FLATTEN 익스프레스 툴.
+
+### 관련 파일
+- 계획서: `.plans/plan_notab_flatten_explode_20260724.md`(현행 cycle126) / `_exportlayout_`(124) / `_shadeplot_`(125) / `_deferred_`(123) / `_spike_`(122).
+- 핸드오프: `.plans/HANDOFF.md`(cycle126). 백업: git tag `notab-viewport-v1`.
+- 코드: RunNotabDetailPipeline(Commands.cs ~1985), NotabProjectWcsToPaper(3635)/Try(3602). cycle122~125 flatten 코드는 cycle126에서 제거 예정.
+- 포럼 근거: FLATSHOT .NET 불가(forums.autodesk.com/t5/net/how-to-call-flatshot-entirely-from-net-code), Managed HLR API(GraphicsInterface, 2019+).
+- TODO.md "멀티뷰+평면화 트랙" 섹션.
+
+---
+
+
 ## ★ 격리 결함 + 부속 가드 — **종결** (cycle 121, 2026-07-23)
 
 - **격리**(`57e0d20`): AutoIncludeRelatedParts가 접촉박스 안 Support를 무구분 포함하던 결함 —
