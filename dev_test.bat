@@ -8,6 +8,7 @@ set "PROJ=%~dp0PlantFlow_Support.csproj"
 set "SRC=%~dp0bin\Release\PlantFlow_Support.dll"
 set "DEPLOY=C:\Lisp\PlantFlow_Support"
 set "LAUNCH=C:\Lisp\pfs_launch.ps1"
+set "PFS_NOTAB_FLATTEN=1"
 
 rem --- notab dimension/callout text height (arrow kept separate via PFS_NOTAB_DIM_ARR) ---
 set "PFS_NOTAB_DIM_TXT=8"
@@ -16,7 +17,7 @@ rem --- BOM spike (measurement only; logs BOMs rows, no output change). Set 0 to
 set "PFS_NOTAB_BOM_SPIKE=1"
 
 rem --- auto-extract tags (comma-separated). PFSNOTABTEST loops each. Edit to change types. ---
-set "PFS_NOTAB_TEST_TAG=RS12A-001,RS12B-001,RS12D-001"
+set "PFS_NOTAB_TEST_TAG=RC1-001"
 
 rem --- PFSNOTABBATCH dry-run (1 = classify + log only, no drawings) ---
 rem     PFSNOTABBATCH needs an interactive selection, so it is NOT auto-run by this script.
