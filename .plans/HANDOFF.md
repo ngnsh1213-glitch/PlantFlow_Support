@@ -3,33 +3,29 @@
 > Claude가 발행하고 Codex가 읽어 집도한다. **매 사이클 이 파일을 덮어쓴다.**
 > Codex는 작업 완료 시 `REPORT.md`에 결과를 기록하고 코드를 커밋한다.
 
-- **cycle**: 124
+- **cycle**: 125
 - **status**: ready
 - **issued_at**: 2026-07-24
-- **title**: 무탭 2D 평면화 EXPORTLAYOUT 재설계 (FLATSHOT 폐기 → 지연 명령 체인)
-- **작업 경로**: `PlantFlow_Support/Core/Commands.cs` (cycle123 PFSNOTABFLATTEN 1985~ FLATSHOT 본체 대체 + PFSNOTABFLATTENFIN 신설), 참조 `Commands.Export.cs`(237 PFSEXPORTLAYOUT/265 READEXPORT), `Commands.cs`(1536 PFSVBISODONE→1625 PFSVBISOEXPORTED 체인 미러)
-- **계획서**: `.plans/plan_notab_flatten_exportlayout_20260724.md`
-- **기준 커밋**: `19fb7b9`
-- **자문**: Codex(§9). 채택 = ①FLATSHOT은 설정 대화상자라 자동화 불가 확정(폐기) ②EXPORTLAYOUT은 SendStringToExecute+FILEDIA0(실증 경로) ③FIN=CommandFlags.Session+static 작업상태 경로(MdiActiveDocument 금지) ④완료판정=File.Exists+ReadDwgFile+모델공간검증 ⑤GUID 고유 temp ⑥FILEDIA 원값 저장·복구 ⑦_flat.dwg 별도(원본 비파괴) ⑧DRM은 ReadDwgFile+재오픈 게이트.
+- **title**: 무탭 평면화 뷰포트 ShadePlot=2D Wireframe 시도 (EXPORTLAYOUT 2D 유도, 저확률 스파이크)
+- **작업 경로**: `PlantFlow_Support/Core/Commands.cs` (RunNotabFlatten 2084~ 큐잉 직전 / TrySetViewportShadePlotHidden 5766 패턴 일반화)
+- **계획서**: `.plans/plan_notab_flatten_shadeplot_20260724.md`
+- **기준 커밋**: `f53e9c0`
+- **자문**: Codex(§9). 채택 = ①2D Wireframe=`ShadePlotType.Wireframe`(정확 매칭, VisualStyle 아님) ②큐잉 직전 활성 뷰포트 ForWrite+Commit로 충분(EXPORTLAYOUT이 메모리 DB 읽음) ③★저확률 경고(cycle124 기본이 이미 2D 와이어프레임인데 3D 나옴) ④성공판정=3DSOLID 부재 ⑤enum목록·기존 VisualStyleId 로그.
 
-## 배경 (cycle122/123 실측)
-`editor.Command("-FLATSHOT")` → eInvalidInput. FLATSHOT은 억제 불가 설정 대화상자(사용자 육안 확인). FLATSHOT 트랙 종결. cycle123 사전검사·뷰포트 카운트는 재사용, FLATSHOT 본체(SetNotabFlattenTempView/FLATSHOT command/DCS 아핀/DeepClone)는 폐기.
-
-## ⚠ 검증 필수
-`dotnet build` 오류 0(빌드·커밋 분리) 없이 커밋 금지. 미실행 시 `status: blocked`. **push 금지**.
-스파이크는 `<원본>_flat.dwg` 별도 산출 = 원본 상세도 비파괴가 최우선 안전조건.
+## ⚠ 검증 필수 + 기대치
+`dotnet build` 오류 0(빌드·커밋 분리) 없이 커밋 금지. **push 금지**.
+★이 시도는 **자문상 저확률**(cycle124 기본 뷰포트가 이미 2D 와이어프레임인데 3D 솔리드로 나옴). 사용자 지정이라 1회 시도. 실패 시 요구를 Hidden으로 바꾸지 말고 FLATTEN 폴백(별도 사이클).
 
 ## 집도 항목
-1. **PFSNOTABFLATTEN 재작성**: cycle123 사전검사(TryValidateNotabFlattenInput census)+뷰포트 존재 확인 유지. FLATSHOT 본체 제거.
-   → GUID 고유 temp 경로 산출, FILEDIA 원값 저장 → static 작업상태(sourcePath=활성 doc 경로, outputPath=`<원본>_flat.dwg`, tempPath, origFiledia) 보관 →
-   `doc.SendStringToExecute("_.FILEDIA\n0\n_.EXPORTLAYOUT\n" + tempPath + "\nPFSNOTABFLATTENFIN\n", true, false, false)`.
-2. **PFSNOTABFLATTENFIN 신설** `[CommandMethod("PFSNOTABFLATTENFIN", CommandFlags.Session)]`: static 작업상태 참조(활성문서 금지). PFSVBISOEXPORTED(1625~) 미러 —
-   `File.Exists(tempPath)` → side `Database.ReadDwgFile`(FileShare.Read) → 모델공간 Line/Circle/Arc>0·뷰포트 0 검증 → GO면 tempPath를 outputPath(`_flat.dwg`)로 저장/복사 → FILEDIA 원값 복구 → temp cleanup.
-3. **로그**: `PFSNOTABFLATTEN3 stage=queue temp=… ` / `PFSNOTABFLATTEN3 FIN exported=<T/F> lines=… circles=… arcs=… vp=… members=… gate=GO|NOGO output=<path>`.
-4. FLATSHOT 헬퍼(SetNotabFlattenTempView/TryFindNotabFlattenBlock/NotabFlattenDcsToPaperExtents/GetNotabFlattenAlignError/TryCloneNotabFlattenBlockToPaper) 제거. NotabFlattenCounts/census/뷰포트 카운트는 유지.
+1. **RunNotabFlatten**: 뷰포트 탐색(TryFindNotabFlattenViewport) 직후 ~ EXPORTLAYOUT SendStringToExecute 큐잉 **직전**에,
+   활성 doc 트랜잭션으로 상세 뷰포트 ForWrite → `ShadePlot = ShadePlotType.Wireframe` 설정 → Commit.
+2. **설정 헬퍼**: 기존 `TrySetViewportShadePlotHidden`(5766) 리플렉션 패턴 일반화 or 신규 — enum 이름 **"Wireframe" 정확 매칭**(부분문자열 금지).
+   로그: 설정 성공/실패 + ShadePlot enum 전체 목록 + 뷰포트 현재 VisualStyleId(과거 PFS_NOTAB_USE_HIDDEN 잔재 판별).
+   `PFSNOTABFLATTEN3 shadeplot set=<T/F> value=Wireframe enums=[…] vsId=…`.
+3. 나머지 EXPORTLAYOUT 체인(cycle124)은 불변. FIN 카운트 로그 그대로.
 
 ## 검증 레시피
-- RC1-001_notab.dwg를 ACAD에서 **수동으로 연다**(활성) → `PFSNOTABFLATTEN` 입력 → 체인 자동 실행 → `RC1-001_notab_flat.dwg` 생성 확인.
-- 로그: `PFSNOTABFLATTEN3 …` stage/게이트 + lines/circles/arcs/vp 수치. `_flat.dwg`를 **열어서** 눈확인(뷰포트 소멸·2D 그림·주석[dims/BOM/balloon] 보존·형상 원본과 일치).
-- 첫 관문 = EXPORTLAYOUT이 대화상자 없이 실행되고 `_flat.dwg`가 생성되는가(FLATSHOT 벽 우회 실증).
-- 원본 RC1-001_notab.dwg는 **불변**(비파괴 확인).
+- RC1-001_notab.dwg 수동 오픈 → `PFSNOTABFLATTEN` → 체인 → `RC1-001_notab_flat.dwg`.
+- ★`_flat.dwg`를 열어 **3DORBIT/각도 틀어** 확인: 서포트가 2D 선요소(3DSOLID 부재)인가. 선택 시 Properties가 Line/Polyline 등.
+- 로그 `shadeplot set=T value=Wireframe` + FIN gate=GO.
+- **판정**: 3DSOLID 없으면 성공(트랙 진전) / 여전히 3D면 실패 → REPORT에 명시, FLATTEN 폴백 사이클로.
