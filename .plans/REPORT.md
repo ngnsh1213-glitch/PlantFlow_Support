@@ -1,29 +1,31 @@
 # REPORT — Codex → Claude
 
-- **cycle**: 124
+- **cycle**: 126
 - **status**: completed
 - **completed_at**: 2026-07-24
-- **title**: 무탭 2D 평면화 EXPORTLAYOUT 재설계
+- **title**: 무탭 2D 평면화 BRep 에지 투영 인라인
 
 ## 적용 결과
 
-- `PFSNOTABFLATTEN`을 FLATSHOT 경로에서 GUID 임시 DWG 기반 `EXPORTLAYOUT` 지연 명령 체인으로 교체했다.
-- `PFSNOTABFLATTENFIN`(Session)이 활성 문서에 의존하지 않고 static 작업상태를 사용한다. 임시 파일 존재·`ReadDwgFile` 성공·모델공간 Line/Circle/Arc 1개 이상·Viewport 0개를 모두 통과할 때만 `<원본>_flat.dwg`로 복사한다.
-- 원본 도면은 변경하지 않으며, FILEDIA 원값은 완료·실패 모두에서 복구하고 임시 DWG도 정리한다.
-- cycle123의 FLATSHOT 실행, DCS 아핀 정렬, DeepClone 기반 페이퍼 이식 헬퍼를 제거했다. 사전 census와 뷰포트 수 검사는 유지했다.
+- `PFS_NOTAB_FLATTEN=1`일 때 주석 작도 직후, 저장 직전에 `FlattenNotabSolidsToPaper`를 실행한다.
+- 모델공간 `Solid3d`의 BRep 에지를 페이퍼 허용오차 0.5를 viewport scale로 환산한 chord height로 샘플링해 `PFS_ISO_DETAIL` 2D `Polyline`으로 투영한다. 곡선당 최대 256점이며, 초과 샘플은 전 구간 균등 축소한다.
+- 모든 솔리드 전환에 성공한 경우에만 원본 솔리드와 상세 뷰포트를 삭제한다. 실패한 솔리드가 있으면 뷰포트를 보존해 형상 유실을 방지한다.
+- 기존 `PFSNOTABFLATTEN`/`PFSNOTABFLATTENFIN`, EXPORTLAYOUT 지연 체인 및 관련 상태·검증 헬퍼를 제거했다.
+- `AcDbMgdBrep` 참조를 추가했다.
 
 ## 변경 파일
 
 - `PlantFlow_Support/Core/Commands.cs`
+- `PlantFlow_Support.csproj`
 - `.plans/REPORT.md`
 
 ## 검증
 
 - `git diff --check` 통과.
-- `dotnet build .\\PlantFlow_Support.sln --no-restore` — 오류 0, 기존 경고 14개.
-- 라이브 검증 대기: RC1 상세도에서 `PFSNOTABFLATTEN` 실행 후 `PFSNOTABFLATTEN3 stage=queue` 및 `FIN gate=GO` 로그, `_flat.dwg` 생성·뷰포트 소멸·2D 형상 및 주석 보존·원본 불변을 확인한다.
+- `dotnet build .\PlantFlow_Support.sln --no-restore` — 오류 0, 기존 경고 14개.
+- 라이브 검증 대기: `PFS_NOTAB_FLATTEN=1` + RC1-001 추출 후 `PFSNOTABFLATTEN4` 로그, 3DSOLID·상세 뷰포트 부재, 2D Polyline 전 에지 및 주석 보존을 확인한다. 미설정 상태의 기존 뷰포트 경로도 회귀 확인한다.
 
 ## 커밋
 
-- `55b37dc feat: redesign notab flatten with exportlayout`
+- `6338313 feat: flatten notab solids to paper polylines`
 - push하지 않았다.
