@@ -26,4 +26,5 @@
 
 ## 커밋
 
-- 다음 커밋에 기록.
+- `240b52e feat: nudge RC1 F2 and P1 balloons`
+- push하지 않았다.
