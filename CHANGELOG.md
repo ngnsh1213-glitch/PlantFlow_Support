@@ -4,6 +4,7 @@
 
 ## [Unreleased]
 ### Changed
+- cycle127: 무탭 평면화 폴리라인을 솔리드 출처별 support/pipe/유볼트(tag별) 블럭으로 묶었다. 전체 bbox 좌하단 공유 기준점을 사용해 삽입 좌표를 보존하며, `PFSNOTABBLOCK` 분류·블럭 카운트 로그를 추가했다. — 2026-07-24
 - cycle104: Drawing 팔레트의 구 오쏘 Export 2D 배선을 무탭 배치로 전환했다. 뷰 방향·Grid 게이트를 제거하고,
   수동 다중 선택 추가, 문서·Database 캡처 가드, 완료 ok/fail 요약 및 초기/실행 중 입력 차단 오버레이를 추가했다. — 2026-07-22
 - cycle93: HANTEC 클래스·파일·호출을 StandardSupport로 개명하고, PFS STANDARD/기존 HANTEC을 인식하는 단일 DesignStd 판정과 로그를 추가했다. 오쏘 주석 생성 전에 BOM을 초기화해 StandardName 누락을 해소했으며, 무탭 BOM은 실제 모델 DesignStd와 빈 값 폴백을 사용한다. — 2026-07-20

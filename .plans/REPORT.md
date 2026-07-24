@@ -1,31 +1,29 @@
 # REPORT — Codex → Claude
 
-- **cycle**: 126
+- **cycle**: 127
 - **status**: completed
 - **completed_at**: 2026-07-24
-- **title**: 무탭 2D 평면화 BRep 에지 투영 인라인
+- **title**: 무탭 평면화 솔리드 분류 + 카테고리 블럭화 (Phase 1)
 
 ## 적용 결과
 
-- `PFS_NOTAB_FLATTEN=1`일 때 주석 작도 직후, 저장 직전에 `FlattenNotabSolidsToPaper`를 실행한다.
-- 모델공간 `Solid3d`의 BRep 에지를 페이퍼 허용오차 0.5를 viewport scale로 환산한 chord height로 샘플링해 `PFS_ISO_DETAIL` 2D `Polyline`으로 투영한다. 곡선당 최대 256점이며, 초과 샘플은 전 구간 균등 축소한다.
-- 모든 솔리드 전환에 성공한 경우에만 원본 솔리드와 상세 뷰포트를 삭제한다. 실패한 솔리드가 있으면 뷰포트를 보존해 형상 유실을 방지한다.
-- 기존 `PFSNOTABFLATTEN`/`PFSNOTABFLATTENFIN`, EXPORTLAYOUT 지연 체인 및 관련 상태·검증 헬퍼를 제거했다.
-- `AcDbMgdBrep` 참조를 추가했다.
+- 투영 폴리라인을 솔리드 단위로 support/pipe/유볼트(tag별) 분류해 누적한다.
+- 유볼트는 확장 extents 포함을 우선하고, 복수 후보는 중심 최소거리로 태그를 결정한다. 배관은 축 수직거리와 축 방향 extents 겹침을 함께 확인한다.
+- 전체 투영 bbox 좌하단을 공유 기준점으로 사용해 `PFS_FLAT_SUPPORT`/`PFS_FLAT_PIPE`/`PFS_FLAT_UB_<tag>` 블럭 정의와 `BlockReference`를 생성한다. 엔티티와 참조는 모두 `PFS_ISO_DETAIL` ByLayer다.
+- 분류 예외는 support로 보존하고 `PFSNOTABBLOCK unclassified` 로그를 남긴다. 기존 솔리드·뷰포트 삭제 안전장치는 유지한다.
 
 ## 변경 파일
 
 - `PlantFlow_Support/Core/Commands.cs`
-- `PlantFlow_Support.csproj`
 - `.plans/REPORT.md`
 
 ## 검증
 
 - `git diff --check` 통과.
-- `dotnet build .\PlantFlow_Support.sln --no-restore` — 오류 0, 기존 경고 14개.
-- 라이브 검증 대기: `PFS_NOTAB_FLATTEN=1` + RC1-001 추출 후 `PFSNOTABFLATTEN4` 로그, 3DSOLID·상세 뷰포트 부재, 2D Polyline 전 에지 및 주석 보존을 확인한다. 미설정 상태의 기존 뷰포트 경로도 회귀 확인한다.
+- `dotnet build PlantFlow_Support.sln --no-restore` — 오류 0, 기존 경고 14개.
+- 라이브 검증 대기: `PFS_NOTAB_FLATTEN=1` + RC1-001에서 `PFSNOTABBLOCK support=… pipe=0 ubolt=UB-002,UB-003` 로그와 3개 BlockReference, 좌표 무이동, EXPLODE 무손실을 확인한다. 미설정 경로도 회귀 확인한다.
 
 ## 커밋
 
-- `6338313 feat: flatten notab solids to paper polylines`
+- `5c9cb25 feat: group flattened solids into category blocks`
 - push하지 않았다.
